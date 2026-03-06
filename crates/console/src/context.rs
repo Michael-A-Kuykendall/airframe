@@ -1,15 +1,14 @@
 use anyhow::Result;
 
-pub struct RenderContext {
-    pub session_id: String,
-    pub max_tokens: usize,
-}
+pub struct Context {}
 
-impl Default for RenderContext {
-    fn default() -> Self {
-        Self {
-            session_id: "default".to_string(),
-            max_tokens: 2048,
-        }
+pub struct ContextBuilder {}
+
+impl ContextBuilder {
+    pub fn new() -> Self {
+        Self {}
+    }
+    pub fn build(&self) -> Context {
+        Context {}
     }
 }

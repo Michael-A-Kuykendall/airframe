@@ -1,0 +1,237 @@
+    Checking shimmy-console v0.1.0 (C:\Users\micha\repos\airframe\crates\console)
+warning: unused import: `async_trait::async_trait`
+ --> crates\console\src\adapters\ws_adapter.rs:3:5
+  |
+3 | use async_trait::async_trait;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\context.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\plugins.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\session_store.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\websocket\mod.rs:4:5
+  |
+4 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+  --> crates\console\src\tools\image.rs:69:30
+   |
+69 |         let base64 = base64::encode(&bytes);
+   |                              ^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+error[E0599]: no function or associated item named `load` found for struct `config::Config` in the current scope
+  --> crates\console\src\commands\model.rs:25:30
+   |
+25 |     let mut config = Config::load()?;
+   |                              ^^^^ function or associated item not found in `config::Config`
+   |
+  ::: crates\console\src\config.rs:8:1
+   |
+8  | pub struct Config {
+   | ----------------- function or associated item `load` not found for this struct
+   |
+note: if you're trying to build a new `config::Config` consider using one of the following associated functions:
+      config::Config::from_env
+      config::Config::from_file
+  --> crates\console\src\config.rs:45:5
+   |
+45 |     pub fn from_env() -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+74 |     pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following trait defines an item `load`, perhaps you need to implement it:
+           candidate #1: `icu_provider::data_provider::DataProvider`
+
+error[E0599]: no function or associated item named `load` found for struct `config::Config` in the current scope
+  --> crates\console\src\commands\model.rs:48:26
+   |
+48 |     let config = Config::load()?;
+   |                          ^^^^ function or associated item not found in `config::Config`
+   |
+  ::: crates\console\src\config.rs:8:1
+   |
+8  | pub struct Config {
+   | ----------------- function or associated item `load` not found for this struct
+   |
+note: if you're trying to build a new `config::Config` consider using one of the following associated functions:
+      config::Config::from_env
+      config::Config::from_file
+  --> crates\console\src\config.rs:45:5
+   |
+45 |     pub fn from_env() -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+74 |     pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following trait defines an item `load`, perhaps you need to implement it:
+           candidate #1: `icu_provider::data_provider::DataProvider`
+
+error[E0308]: mismatched types
+  --> crates\console\src\tools\image.rs:30:24
+   |
+30 |             .unwrap_or("base64");
+   |              --------- ^^^^^^^^ expected `Option<&str>`, found `&str`
+   |              |
+   |              arguments to this method are incorrect
+   |
+   = note:   expected enum `std::option::Option<&str>`
+           found reference `&'static str`
+help: the return type of this call is `&'static str` due to the type of the argument passed
+  --> crates\console\src\tools\image.rs:28:20
+   |
+28 |           let mode = args.args.get("mode")
+   |  ____________________^
+29 | |             .map(|s| s.as_str())
+30 | |             .unwrap_or("base64");
+   | |________________________--------^
+   |                          |
+   |                          this argument influences the return type of `unwrap_or`
+note: method defined here
+  --> /rustc/29483883eed69d5fb4db01964cdf2af4d86e9cb2\library\core\src\option.rs:1025:12
+help: try wrapping the expression in `Some`
+   |
+30 |             .unwrap_or(Some("base64"));
+   |                        +++++        +
+
+error[E0308]: mismatched types
+  --> crates\console\src\tools\image.rs:33:48
+   |
+33 |         if !["base64", "meta", "ocr"].contains(&mode) {
+   |                                       -------- ^^^^^ expected `&&str`, found `&Option<&str>`
+   |                                       |
+   |                                       arguments to this method are incorrect
+   |
+   = note: expected reference `&&str`
+              found reference `&std::option::Option<&str>`
+note: method defined here
+  --> /rustc/29483883eed69d5fb4db01964cdf2af4d86e9cb2\library\core\src\slice\mod.rs:2622:12
+
+error[E0599]: no variant or associated item named `InvalidParameters` found for enum `ToolError` in the current scope
+   --> crates\console\src\tools\image.rs:34:35
+    |
+34  |             return Err(ToolError::InvalidParameters(
+    |                                   ^^^^^^^^^^^^^^^^^ variant or associated item not found in `ToolError`
+    |
+   ::: crates\console\src\tools\mod.rs:115:1
+    |
+115 | pub enum ToolError {
+    | ------------------ variant or associated item `InvalidParameters` not found for this enum
+
+error[E0277]: `std::option::Option<&str>` doesn't implement `std::fmt::Display`
+  --> crates\console\src\tools\image.rs:35:82
+   |
+35 |                 format!("Invalid mode '{}'. Must be 'base64', 'meta', or 'ocr'", mode)
+   |                                        -- required by this formatting parameter  ^^^^ `std::option::Option<&str>` cannot be formatted with the default formatter
+   |
+   = help: the trait `std::fmt::Display` is not implemented for `std::option::Option<&str>`
+   = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead
+   = note: this error originates in the macro `$crate::__export::format_args` which comes from the expansion of the macro `format` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `serde_json::Value: AsRef<std::ffi::OsStr>` is not satisfied
+  --> crates\console\src\tools\image.rs:40:33
+   |
+40 |         let path = if Path::new(path_str).is_absolute() {
+   |                       --------- ^^^^^^^^ the trait `AsRef<std::ffi::OsStr>` is not implemented for `serde_json::Value`
+   |                       |
+   |                       required by a bound introduced by this call
+   |
+note: required by a bound in `Path::new`
+  --> /rustc/29483883eed69d5fb4db01964cdf2af4d86e9cb2\library\std\src\path.rs:2235:5
+
+error[E0277]: the trait bound `serde_json::Value: AsRef<std::ffi::OsStr>` is not satisfied
+  --> crates\console\src\tools\image.rs:41:23
+   |
+41 |             Path::new(path_str).to_path_buf()
+   |             --------- ^^^^^^^^ the trait `AsRef<std::ffi::OsStr>` is not implemented for `serde_json::Value`
+   |             |
+   |             required by a bound introduced by this call
+   |
+note: required by a bound in `Path::new`
+  --> /rustc/29483883eed69d5fb4db01964cdf2af4d86e9cb2\library\std\src\path.rs:2235:5
+
+error[E0277]: the trait bound `serde_json::Value: AsRef<Path>` is not satisfied
+  --> crates\console\src\tools\image.rs:43:83
+   |
+43 |             std::env::current_dir().unwrap_or(std::path::PathBuf::from(".")).join(path_str)
+   |                                                                              ---- ^^^^^^^^ the trait `AsRef<Path>` is not implemented for `serde_json::Value`
+   |                                                                              |
+   |                                                                              required by a bound introduced by this call
+   |
+   = note: required for `&serde_json::Value` to implement `AsRef<Path>`
+note: required by a bound in `Path::join`
+  --> /rustc/29483883eed69d5fb4db01964cdf2af4d86e9cb2\library\std\src\path.rs:2741:5
+
+error[E0308]: mismatched types
+  --> crates\console\src\tools\image.rs:73:13
+   |
+72 |         match mode {
+   |               ---- this expression has type `std::option::Option<&str>`
+73 |             "base64" => {
+   |             ^^^^^^^^ expected `Option<&str>`, found `&str`
+   |
+   = note:   expected enum `std::option::Option<&str>`
+           found reference `&'static str`
+help: try wrapping the pattern in `Some`
+   |
+73 |             Some("base64") => {
+   |             +++++        +
+
+error[E0308]: mismatched types
+  --> crates\console\src\tools\image.rs:87:13
+   |
+72 |         match mode {
+   |               ---- this expression has type `std::option::Option<&str>`
+...
+87 |             "meta" => {
+   |             ^^^^^^ expected `Option<&str>`, found `&str`
+   |
+   = note:   expected enum `std::option::Option<&str>`
+           found reference `&'static str`
+help: try wrapping the pattern in `Some`
+   |
+87 |             Some("meta") => {
+   |             +++++      +
+
+error[E0308]: mismatched types
+   --> crates\console\src\tools\image.rs:100:13
+    |
+72  |         match mode {
+    |               ---- this expression has type `std::option::Option<&str>`
+...
+100 |             "ocr" => {
+    |             ^^^^^ expected `Option<&str>`, found `&str`
+    |
+    = note:   expected enum `std::option::Option<&str>`
+            found reference `&'static str`
+help: try wrapping the pattern in `Some`
+    |
+100 |             Some("ocr") => {
+    |             +++++     +
+
+Some errors have detailed explanations: E0277, E0308, E0599.
+For more information about an error, try `rustc --explain E0277`.
+warning: `shimmy-console` (lib) generated 6 warnings
+error: could not compile `shimmy-console` (lib) due to 12 previous errors; 6 warnings emitted

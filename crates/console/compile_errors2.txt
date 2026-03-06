@@ -1,0 +1,181 @@
+    Checking shimmy-console v0.1.0 (C:\Users\micha\repos\airframe\crates\console)
+error[E0432]: unresolved import `context::ContextBuilder`
+  --> crates\console\src\lib.rs:20:9
+   |
+20 | pub use context::ContextBuilder;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^ no `ContextBuilder` in `context`
+   |
+help: consider importing this struct instead
+   |
+20 - pub use context::ContextBuilder;
+20 + pub use std::task::ContextBuilder;
+   |
+
+error[E0432]: unresolved import `client::UniversalLicenseClient`
+ --> crates\console\src\license\mod.rs:5:9
+  |
+5 | pub use client::UniversalLicenseClient;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `UniversalLicenseClient` in `license::client`
+  |
+help: consider importing this struct instead
+  |
+5 - pub use client::UniversalLicenseClient;
+5 + pub use crate::license::validator::UniversalLicenseClient;
+  |
+
+warning: unused import: `async_trait::async_trait`
+ --> crates\console\src\adapters\ws_adapter.rs:3:5
+  |
+3 | use async_trait::async_trait;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `crate::config::Config`
+ --> crates\console\src\commands\model.rs:2:5
+  |
+2 | use crate::config::Config;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\context.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\plugins.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\session_store.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\websocket\mod.rs:4:5
+  |
+4 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+  --> crates\console\src\tools\image.rs:69:30
+   |
+69 |         let base64 = base64::encode(&bytes);
+   |                              ^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+error[E0433]: failed to resolve: use of undeclared type `ConsoleConfig`
+  --> crates\console\src\commands\model.rs:25:22
+   |
+25 |     let mut config = ConsoleConfig::load()?;
+   |                      ^^^^^^^^^^^^^ use of undeclared type `ConsoleConfig`
+
+error[E0433]: failed to resolve: use of undeclared type `ConsoleConfig`
+  --> crates\console\src\commands\model.rs:48:18
+   |
+48 |     let config = ConsoleConfig::load()?;
+   |                  ^^^^^^^^^^^^^ use of undeclared type `ConsoleConfig`
+
+error[E0609]: no field `parameters` on type `ToolArgs`
+  --> crates\console\src\tools\image.rs:25:29
+   |
+25 |         let path_str = args.parameters.get("path")
+   |                             ^^^^^^^^^^ unknown field
+   |
+   = note: available field is: `args`
+
+error[E0599]: no variant or associated item named `InvalidParameters` found for enum `ToolError` in the current scope
+   --> crates\console\src\tools\image.rs:26:39
+    |
+26  |             .ok_or_else(|| ToolError::InvalidParameters("'path' parameter is required".to_string()))?;
+    |                                       ^^^^^^^^^^^^^^^^^ variant or associated item not found in `ToolError`
+    |
+   ::: crates\console\src\tools\mod.rs:115:1
+    |
+115 | pub enum ToolError {
+    | ------------------ variant or associated item `InvalidParameters` not found for this enum
+
+error[E0609]: no field `parameters` on type `ToolArgs`
+  --> crates\console\src\tools\image.rs:28:25
+   |
+28 |         let mode = args.parameters.get("mode")
+   |                         ^^^^^^^^^^ unknown field
+   |
+   = note: available field is: `args`
+
+error[E0599]: no variant or associated item named `InvalidParameters` found for enum `ToolError` in the current scope
+   --> crates\console\src\tools\image.rs:34:35
+    |
+34  |             return Err(ToolError::InvalidParameters(
+    |                                   ^^^^^^^^^^^^^^^^^ variant or associated item not found in `ToolError`
+    |
+   ::: crates\console\src\tools\mod.rs:115:1
+    |
+115 | pub enum ToolError {
+    | ------------------ variant or associated item `InvalidParameters` not found for this enum
+
+error[E0609]: no field `context` on type `ToolArgs`
+  --> crates\console\src\tools\image.rs:43:29
+   |
+43 |             Path::new(&args.context.working_directory).join(path_str)
+   |                             ^^^^^^^ unknown field
+   |
+   = note: available field is: `args`
+
+error[E0560]: struct `ToolResult` has no field named `structured_data`
+  --> crates\console\src\tools\image.rs:78:21
+   |
+78 |                     structured_data: Some(serde_json::json!({
+   |                     ^^^^^^^^^^^^^^^ `ToolResult` does not have this field
+   |
+   = note: available fields are: `data`
+
+error[E0560]: struct `ToolResult` has no field named `error_message`
+  --> crates\console\src\tools\image.rs:85:21
+   |
+85 |                     error_message: None,
+   |                     ^^^^^^^^^^^^^ `ToolResult` does not have this field
+   |
+   = note: available fields are: `data`
+
+error[E0560]: struct `ToolResult` has no field named `structured_data`
+  --> crates\console\src\tools\image.rs:93:21
+   |
+93 |                     structured_data: Some(serde_json::json!({
+   |                     ^^^^^^^^^^^^^^^ `ToolResult` does not have this field
+   |
+   = note: available fields are: `data`
+
+error[E0560]: struct `ToolResult` has no field named `error_message`
+  --> crates\console\src\tools\image.rs:99:21
+   |
+99 |                     error_message: None,
+   |                     ^^^^^^^^^^^^^ `ToolResult` does not have this field
+   |
+   = note: available fields are: `data`
+
+error[E0560]: struct `ToolResult` has no field named `structured_data`
+   --> crates\console\src\tools\image.rs:109:21
+    |
+109 |                     structured_data: Some(serde_json::json!({
+    |                     ^^^^^^^^^^^^^^^ `ToolResult` does not have this field
+    |
+    = note: available fields are: `data`
+
+error[E0560]: struct `ToolResult` has no field named `error_message`
+   --> crates\console\src\tools\image.rs:117:21
+    |
+117 |                     error_message: None,
+    |                     ^^^^^^^^^^^^^ `ToolResult` does not have this field
+    |
+    = note: available fields are: `data`
+
+Some errors have detailed explanations: E0432, E0433, E0560, E0599, E0609.
+For more information about an error, try `rustc --explain E0432`.
+warning: `shimmy-console` (lib) generated 7 warnings
+error: could not compile `shimmy-console` (lib) due to 15 previous errors; 7 warnings emitted
