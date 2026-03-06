@@ -22,8 +22,8 @@ pub async fn select_model(model_name: &str) -> Result<()> {
     // FIXME: ensure_model_exists() uses hardcoded port 11435, but shimmy uses ephemeral ports
     // Skip validation for now since WebSocket handler already has model list
     // ensure_model_exists(model_name).await?;
-    let mut config = ConsoleConfig::load()?;
-    config.set_active_model(model_name.to_string())?;
+    let mut config = Config::from_env();
+    config.default_model = Some(model_name.to_string());
     Ok(())
 }
 
@@ -45,8 +45,8 @@ pub async fn show_current_model() -> Result<()> {
 /// NOTE: Validation via ensure_model_exists() is skipped because it uses hardcoded port 11435
 /// but shimmy uses ephemeral ports. The WebSocket handler validates models via InferenceBackend.
 pub async fn get_selected_model() -> Result<Option<String>> {
-    let config = ConsoleConfig::load()?;
-    Ok(config.get_active_model().cloned())
+    let config = Config::from_env();
+    Ok(config.default_model.clone())
 }
 
 pub async fn ensure_model_exists(model_name: &str) -> Result<()> {

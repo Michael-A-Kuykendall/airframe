@@ -1,0 +1,66 @@
+    Checking shimmy-console v0.1.0 (C:\Users\micha\repos\airframe\crates\console)
+warning: unused import: `async_trait::async_trait`
+ --> crates\console\src\adapters\ws_adapter.rs:3:5
+  |
+3 | use async_trait::async_trait;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\context.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\plugins.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\session_store.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates\console\src\websocket\mod.rs:4:5
+  |
+4 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+  --> crates\console\src\tools\image.rs:59:30
+   |
+59 |         let base64 = base64::encode(&bytes);
+   |                              ^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+error[E0599]: no method named `set_active_model` found for struct `config::Config` in the current scope
+  --> crates\console\src\commands\model.rs:26:12
+   |
+26 |     config.set_active_model(model_name.to_string())?;
+   |            ^^^^^^^^^^^^^^^^ method not found in `config::Config`
+   |
+  ::: crates\console\src\config.rs:8:1
+   |
+8  | pub struct Config {
+   | ----------------- method `set_active_model` not found for this struct
+
+error[E0599]: no method named `get_active_model` found for struct `config::Config` in the current scope
+  --> crates\console\src\commands\model.rs:49:15
+   |
+49 |     Ok(config.get_active_model().cloned())
+   |               ^^^^^^^^^^^^^^^^ method not found in `config::Config`
+   |
+  ::: crates\console\src\config.rs:8:1
+   |
+8  | pub struct Config {
+   | ----------------- method `get_active_model` not found for this struct
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `shimmy-console` (lib) generated 6 warnings
+error: could not compile `shimmy-console` (lib) due to 2 previous errors; 6 warnings emitted
