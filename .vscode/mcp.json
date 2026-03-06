@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "airframe-brain": {
+      "type": "stdio",
+      "command": "C:/Users/micha/AppData/Local/Programs/Python/Python313/python.exe",
+      "args": [
+        "C:/Users/micha/repos/airframe/.mcp/airframe-brain-mcp.py"
+      ]
+    }
+  }
+}

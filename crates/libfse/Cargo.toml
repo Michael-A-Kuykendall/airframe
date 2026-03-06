@@ -1,0 +1,30 @@
+[package]
+name = "libfse"
+version = "0.1.0"
+edition = "2021"
+description = "Fused Semantic Execution: A Fail-Closed Policy Engine"
+publish = false # PROPRIETARY - DO NOT PUBLISH
+
+[dependencies]
+# We use the standard crate for the graph compilation algorithms
+# In Phase 2: We may vendor this to modify the graph layout directly
+aho-corasick = { version = "1.1", features = ["std"] }
+# log = "0.4"       # Removed: Audited as unused
+# thiserror = "1.0" # Removed: Audited as unused
+# bitvec = "1.0"    # Removed: Internalized via Vec<u64>
+
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "compare_scanners"
+harness = false
+
+[[bench]]
+name = "damage_assessment"
+harness = false
+
+[lib]
+name = "libfse"
+path = "src/lib.rs"
