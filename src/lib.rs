@@ -17,3 +17,4 @@ pub mod adapter;
 // Re-export diagnostic control
 pub use family::llama::init_verbose_diagnostics;
 pub mod backend;
+pub mod schoolmarm_control;
