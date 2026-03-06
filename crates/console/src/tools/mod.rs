@@ -6,6 +6,8 @@
 pub mod analysis;
 pub mod command;
 pub mod file_ops;
+pub mod git;
+pub mod docs;
 pub mod image;
 pub mod loader;
 pub mod system;
@@ -231,6 +233,15 @@ impl ToolRegistry {
         // Register analysis tools
         registry.register(Arc::new(analysis::ProjectAnalysisTool));
         registry.register(Arc::new(analysis::SyntaxCheckTool));
+        // Register git tools
+        registry.register(Arc::new(git::GitStatusTool));
+        registry.register(Arc::new(git::GitDiffTool));
+        registry.register(Arc::new(git::GitCommitTool));
+        registry.register(Arc::new(git::GitLogTool));
+
+        // Register docs tools
+        registry.register(Arc::new(docs::ExplainCommandTool));
+        registry.register(Arc::new(docs::GetHelpTool));
 
         registry
     }

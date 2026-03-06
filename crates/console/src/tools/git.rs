@@ -10,11 +10,11 @@ pub struct GitLogTool;
 
 #[async_trait]
 impl Tool for GitStatusTool {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "git_status"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "Get git repository status"
     }
 
@@ -22,10 +22,9 @@ impl Tool for GitStatusTool {
         false
     }
 
-    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {
+    async fn execute(&self, _args: ToolArgs) -> Result<ToolResult, ToolError> { 
         let output = Command::new("git")
             .args(&["status", "--porcelain"])
-            .current_dir(&args.context.working_directory)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -36,15 +35,13 @@ impl Tool for GitStatusTool {
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         if output.status.success() {
-            Ok(ToolResult {
-                success: true,
-                output: stdout.to_string(),
-                structured_data: Some(serde_json::json!({
+            Ok(ToolResult::success_with_data(
+                stdout.to_string(),
+                serde_json::json!({
                     "status": "success",
                     "files": Self::parse_git_status(&stdout)
-                })),
-                error_message: None,
-            })
+                })
+            ))
         } else {
             Err(ToolError::ExecutionFailed(stderr.to_string()))
         }
@@ -69,11 +66,11 @@ impl GitStatusTool {
 
 #[async_trait]
 impl Tool for GitDiffTool {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "git_diff"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "Show git diff for specified file or all changes"
     }
 
@@ -81,18 +78,17 @@ impl Tool for GitDiffTool {
         true
     }
 
-    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {
-        let file_path = args.parameters.get("file");
-        
+    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {  
+        let file_path = args.get_str("file");
+
         let mut cmd = Command::new("git");
         cmd.arg("diff");
-        
+
         if let Some(file) = file_path {
             cmd.arg(file);
         }
 
         let output = cmd
-            .current_dir(&args.context.working_directory)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -103,15 +99,13 @@ impl Tool for GitDiffTool {
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         if output.status.success() {
-            Ok(ToolResult {
-                success: true,
-                output: stdout.to_string(),
-                structured_data: Some(serde_json::json!({
+            Ok(ToolResult::success_with_data(
+                stdout.to_string(),
+                serde_json::json!({
                     "diff": stdout,
                     "file": file_path
-                })),
-                error_message: None,
-            })
+                })
+            ))
         } else {
             Err(ToolError::ExecutionFailed(stderr.to_string()))
         }
@@ -120,11 +114,11 @@ impl Tool for GitDiffTool {
 
 #[async_trait]
 impl Tool for GitCommitTool {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "git_commit"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "Create a git commit with specified message"
     }
 
@@ -132,14 +126,12 @@ impl Tool for GitCommitTool {
         true
     }
 
-    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {
-        let message = args.parameters.get("message")
-            .ok_or_else(|| ToolError::InvalidParameters("message parameter required".to_string()))?;
+    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {  
+        let message = args.require_str("message")?;
 
         // First add all changes
         let add_output = Command::new("git")
             .args(&["add", "."])
-            .current_dir(&args.context.working_directory)
             .output()
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Git add failed: {}", e)))?;
@@ -151,7 +143,6 @@ impl Tool for GitCommitTool {
         // Then commit
         let commit_output = Command::new("git")
             .args(&["commit", "-m", message])
-            .current_dir(&args.context.working_directory)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -162,15 +153,13 @@ impl Tool for GitCommitTool {
         let stderr = String::from_utf8_lossy(&commit_output.stderr);
 
         if commit_output.status.success() {
-            Ok(ToolResult {
-                success: true,
-                output: format!("Commit created: {}", stdout),
-                structured_data: Some(serde_json::json!({
+            Ok(ToolResult::success_with_data(
+                format!("Commit created: {}", stdout),
+                serde_json::json!({
                     "message": message,
                     "output": stdout
-                })),
-                error_message: None,
-            })
+                })
+            ))
         } else {
             Err(ToolError::ExecutionFailed(stderr.to_string()))
         }
@@ -179,11 +168,11 @@ impl Tool for GitCommitTool {
 
 #[async_trait]
 impl Tool for GitLogTool {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "git_log"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "Show git commit history"
     }
 
@@ -191,14 +180,11 @@ impl Tool for GitLogTool {
         false
     }
 
-    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {
-        let limit = args.parameters.get("limit")
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(10);
+    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {  
+        let limit = args.get_i64("limit").unwrap_or(10) as u32;
 
         let output = Command::new("git")
             .args(&["log", "--oneline", &format!("-{}", limit)])
-            .current_dir(&args.context.working_directory)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -209,15 +195,13 @@ impl Tool for GitLogTool {
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         if output.status.success() {
-            Ok(ToolResult {
-                success: true,
-                output: stdout.to_string(),
-                structured_data: Some(serde_json::json!({
+            Ok(ToolResult::success_with_data(
+                stdout.to_string(),
+                serde_json::json!({
                     "commits": Self::parse_git_log(&stdout),
                     "limit": limit
-                })),
-                error_message: None,
-            })
+                })
+            ))
         } else {
             Err(ToolError::ExecutionFailed(stderr.to_string()))
         }

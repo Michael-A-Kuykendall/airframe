@@ -18,21 +18,17 @@ impl Tool for ExplainCommandTool {
         false
     }
 
-    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {
-        let command = args.parameters.get("command")
-            .ok_or_else(|| ToolError::InvalidParameters("command parameter required".to_string()))?;
+    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {  
+        let command = args.require_str("command")?;
+        let explanation = format!("Explanation for command: {}", command);      
 
-        let explanation = format!("Explanation for command: {}", command);
-
-        Ok(ToolResult {
-            success: true,
-            output: explanation,
-            structured_data: Some(serde_json::json!({
+        Ok(ToolResult::success_with_data(
+            explanation,
+            serde_json::json!({
                 "command": command,
-                "explanation": format!("Command '{}' explanation", command)
-            })),
-            error_message: None,
-        })
+                "explanation": format!("Command '{}' explanation", command)     
+            })
+        ))
     }
 }
 
@@ -50,21 +46,17 @@ impl Tool for GetHelpTool {
         false
     }
 
-    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {
-        let topic = args.parameters.get("topic")
-            .unwrap_or(&"general".to_string())
-            .clone();
+    async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {  
+        let topic = args.get_str("topic").unwrap_or("general");
 
-        let help_content = format!("Help information for topic: {}", topic);
+        let help_content = format!("Help information for topic: {}", topic);    
 
-        Ok(ToolResult {
-            success: true,
-            output: help_content,
-            structured_data: Some(serde_json::json!({
+        Ok(ToolResult::success_with_data(
+            help_content,
+            serde_json::json!({
                 "topic": topic,
                 "help_available": true
-            })),
-            error_message: None,
-        })
+            })
+        ))
     }
 }
