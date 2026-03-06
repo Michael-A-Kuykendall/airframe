@@ -1,6 +1,6 @@
 use clap::Args;
 use std::io::{self, Write};
-use crate::adapters::LocalInferenceAdapter;
+use crate::adapters::ShimmyServerAdapter;
 use crate::websocket::InferenceBackend;
 use crate::ToolRegistry;
 use serde_json::Value;
@@ -19,10 +19,10 @@ pub struct ChatCommand {
 impl ChatCommand {
     pub async fn run(&self) -> anyhow::Result<()> {
         let default_model = "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string();
-        let model_path = self.model.clone().unwrap_or(default_model);
+        let _model_path = self.model.clone().unwrap_or(default_model);
 
-        println!("Loading agentic interface with TinyLlama...");
-        let adapter = LocalInferenceAdapter::new(model_path);
+        println!("Connecting to Shimmy GPU Server at http://127.0.0.1:8080...");
+        let adapter = ShimmyServerAdapter::new("http://127.0.0.1:8080".to_string());
         let registry = ToolRegistry::with_defaults();
         
         let tool_descriptions = registry
