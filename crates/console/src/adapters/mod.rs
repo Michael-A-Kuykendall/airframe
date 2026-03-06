@@ -1,3 +1,5 @@
+pub mod local_adapter;
+pub use local_adapter::LocalInferenceAdapter;
 pub mod http_adapter;
 pub mod mock_adapter;
 pub mod ws_adapter;
