@@ -40,6 +40,7 @@ pub struct HistoryMessage {
     pub timestamp: String,     // ISO 8601
     pub tool_calls: Option<Vec<String>>,
     pub tool_results: Option<Vec<String>>,
+    pub kv_snapshot: Option<airframe::runtime::kvcache::KvSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
