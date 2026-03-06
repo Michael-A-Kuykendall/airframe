@@ -1,0 +1,42 @@
+[workspace]
+members = ["crates/console", "crates/libfse"]
+
+[package]
+name = "airframe"
+version = "0.0.1"
+edition = "2021"
+description = "FP32-first inference core for Llama-family models. Pure Rust physics engine."
+license = "MIT"
+repository = "https://github.com/Michael-A-Kuykendall/libshimmy"
+authors = ["Michael A. Kuykendall"]
+keywords = ["llm", "inference", "llama", "gguf", "rust"]
+categories = ["science", "simulation"]
+publish = false
+
+[dependencies]
+# Dependencies moved from libshimmy core
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+byteorder = "1.4"
+memmap2 = "0.9"
+half = "2.4"
+shimmytok = "0.7.0"
+chrono = { version = "0.4.43", features = ["serde"] }
+wgpu = "27.0.1"
+pollster = "0.4.0"
+bytemuck = { version = "1.24.0", features = ["derive"] }
+clap = { version = "4.5.56", features = ["derive"] }
+tokio = { version = "1.49.0", features = ["full"] }
+libfse = { path = "crates/libfse" }
+schoolmarm = "0.1.1"
+sha2 = "0.10"
+
+[dev-dependencies]
+sha2 = "0.10"
+tempfile = "3.24.0"
+tokio = { version = "1.49.0", features = ["full"] }
+
+[[bin]]
+name = "layer_dump_gpu"
+path = "src/bin/layer_dump_gpu.rs"
