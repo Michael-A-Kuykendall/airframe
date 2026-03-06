@@ -5,10 +5,10 @@ use anyhow::Result;
 
 #[async_trait]
 pub trait InferenceBackend: Send + Sync {
-    async fn generate_response(&mut self, prompt: &str) -> std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<String>> + Send>>;
-    async fn get_session_model(&self) -> Result<String>;
-    async fn list_models(&self) -> Result<Vec<String>>;
-    async fn set_session_model(&mut self, model: &str) -> Result<()>;
-    async fn get_metrics(&self) -> Result<String>;
-    async fn generate_stream(&mut self, prompt: &str) -> Result<()>;
+    async fn generate_response(&self, model_name: &str, prompt: &str) -> anyhow::Result<String>;
+    async fn get_session_model(&self, session_id: &str) -> Option<String>;
+    async fn list_models(&self) -> anyhow::Result<Vec<(String, serde_json::Value)>>;
+    async fn set_session_model(&self, session_id: &str, model_name: &str) -> anyhow::Result<()>;
+    async fn get_metrics(&self) -> anyhow::Result<serde_json::Value>;
+    async fn generate_stream(&self, model_name: &str, prompt: &str, tx: tokio::sync::mpsc::Sender<String>) -> anyhow::Result<()>;
 }

@@ -21,26 +21,16 @@ impl Tool for ReadImageTool {
     }
 
     async fn execute(&self, args: ToolArgs) -> Result<ToolResult, ToolError> {
-        // Extract parameters
-        let path_str = args.parameters.get("path")
-            .ok_or_else(|| ToolError::InvalidParameters("'path' parameter is required".to_string()))?;
-        
-        let mode = args.parameters.get("mode")
-            .map(|s| s.as_str())
-            .unwrap_or("base64");
-        
-        // Validate mode
+        let path_str = args.args.get("path").and_then(|v| v.as_str()).ok_or_else(|| ToolError::MissingArgument("path".to_string()))?;
+        let mode = args.args.get("mode").and_then(|s| s.as_str()).unwrap_or("base64");
         if !["base64", "meta", "ocr"].contains(&mode) {
-            return Err(ToolError::InvalidParameters(
-                format!("Invalid mode '{}'. Must be 'base64', 'meta', or 'ocr'", mode)
-            ));
+            return Err(ToolError::InvalidArgument("mode".to_string(), format!("Invalid mode {}", mode)));
         }
-        
         // Resolve path (absolute or relative to working directory)
         let path = if Path::new(path_str).is_absolute() {
             Path::new(path_str).to_path_buf()
         } else {
-            Path::new(&args.context.working_directory).join(path_str)
+            std::env::current_dir().unwrap_or(std::path::PathBuf::from(".")).join(path_str)
         };
         
         // Read file bytes
@@ -75,14 +65,13 @@ impl Tool for ReadImageTool {
                 Ok(ToolResult {
                     success: true,
                     output: format!("Image read successfully: {} ({}x{})", mime, width, height),
-                    structured_data: Some(serde_json::json!({
+                    data: Some(serde_json::json!({
                         "mime": mime,
                         "width": width,
                         "height": height,
                         "base64": base64,
                         "size_bytes": bytes.len(),
                     })),
-                    error_message: None,
                 })
             }
             "meta" => {
@@ -90,13 +79,12 @@ impl Tool for ReadImageTool {
                 Ok(ToolResult {
                     success: true,
                     output: format!("Image metadata: {} ({}x{}), {} bytes", mime, width, height, bytes.len()),
-                    structured_data: Some(serde_json::json!({
+                    data: Some(serde_json::json!({
                         "mime": mime,
                         "width": width,
                         "height": height,
                         "size_bytes": bytes.len(),
                     })),
-                    error_message: None,
                 })
             }
             "ocr" => {
@@ -106,7 +94,7 @@ impl Tool for ReadImageTool {
                 Ok(ToolResult {
                     success: true,
                     output: format!("Image read with OCR (OCR not yet implemented): {} ({}x{})", mime, width, height),
-                    structured_data: Some(serde_json::json!({
+                    data: Some(serde_json::json!({
                         "mime": mime,
                         "width": width,
                         "height": height,
@@ -114,7 +102,6 @@ impl Tool for ReadImageTool {
                         "text": "[OCR feature not yet implemented]",
                         "size_bytes": bytes.len(),
                     })),
-                    error_message: None,
                 })
             }
             _ => unreachable!(), // Already validated above
@@ -144,7 +131,7 @@ mod tests {
         let result = tool.execute(args).await;
         assert!(result.is_err());
         match result {
-            Err(ToolError::InvalidParameters(msg)) => {
+            Err(ToolError::MissingArgument(msg)) => {
                 assert!(msg.contains("path"));
             }
             _ => panic!("Expected InvalidParameters error"),
@@ -170,7 +157,7 @@ mod tests {
         let result = tool.execute(args).await;
         assert!(result.is_err());
         match result {
-            Err(ToolError::InvalidParameters(msg)) => {
+            Err(ToolError::MissingArgument(msg)) => {
                 assert!(msg.contains("Invalid mode"));
             }
             _ => panic!("Expected InvalidParameters error"),
@@ -245,9 +232,9 @@ mod tests {
         
         let tool_result = result.unwrap();
         assert!(tool_result.success);
-        assert!(tool_result.structured_data.is_some());
+        assert!(tool_result.data.is_some());
         
-        let data = tool_result.structured_data.unwrap();
+        let data = tool_result.data.unwrap();
         assert!(data.get("mime").is_some());
         assert_eq!(data.get("width").and_then(|v| v.as_u64()), Some(1));
         assert_eq!(data.get("height").and_then(|v| v.as_u64()), Some(1));
