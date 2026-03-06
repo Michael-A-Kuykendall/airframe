@@ -22,7 +22,7 @@ pub use history::{HistoryMessage, HistoryStorage};
 pub use session_store::SessionStore;
 
 // Adapter re-exports
-pub use adapters::{HttpInferenceAdapter, MockInferenceAdapter, WsInferenceAdapter};
+pub use adapters::{HttpInferenceAdapter, MockInferenceAdapter, WsInferenceAdapter, LocalInferenceAdapter};
 
 // Tool re-exports
 pub use tools::{Tool, ToolArgs, ToolCall, ToolError, ToolRegistry, ToolResult};
