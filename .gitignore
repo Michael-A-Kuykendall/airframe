@@ -2,3 +2,8 @@
 /*.py
 /*.sh
 /*.txt
+.beads/daemon-error
+.beads/export-state/
+*.stackdump
+crates/console/compile_errors*.txt
+crates/console/errors_hist*.txt
