@@ -4,7 +4,7 @@
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{
-    BindlessPipeline, LayerParams, MatMulParams, RMSNormParams,
+    BindlessPipeline, LayerParams, RMSNormParams,
 };
 use airframe::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use airframe::core::dequant::dequantize_q6_k;
@@ -17,8 +17,8 @@ use memmap2::Mmap;
 use schoolmarm::{Grammar, GrammarState};
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::Write;
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -187,16 +187,18 @@ fn rust_compile_check(source: &str) -> Result<(), String> {
 }
 
 #[derive(Deserialize)]
-struct InferenceRequest {
+pub struct InferenceRequest {
     pub task: Option<String>,
     pub prompt: Option<String>,
+    pub session_id: Option<String>,
     /// Prompt templating mode:
     /// - "raw": send prompt verbatim (no system/user/assistant wrapping)
     /// - "developer": wrap in ChatML with developer-focused system prompt
     /// - "creative" (default): wrap in ChatML with creative-writer system prompt
     prompt_mode: Option<String>,
     max_tokens: Option<usize>,
-    min_tokens: Option<usize>,
+    #[allow(dead_code)]
+    pub min_tokens: Option<usize>,
     ignore_eos: Option<bool>,
     temperature: Option<f32>,
     top_p: Option<f32>,
@@ -206,8 +208,13 @@ struct InferenceRequest {
     expose_candidate: Option<bool>,
 }
 
+#[derive(Clone, Default)]
+pub struct SessionState {
+    pub token_window: Vec<u32>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
-struct InferenceResponse {
+pub struct InferenceResponse {
     pub text: String,
     pub stop_reason: String,
     pub tokens_generated: usize,
@@ -242,6 +249,8 @@ pub struct JobState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<InferenceResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -251,12 +260,16 @@ pub struct JobRequest {
 }
 
 #[derive(Serialize)]
+#[allow(dead_code)]
+#[allow(dead_code)]
 struct StreamTokenEvent {
     token: String,
     step: usize,
 }
 
 #[derive(Serialize)]
+#[allow(dead_code)]
+#[allow(dead_code)]
 struct StreamDoneEvent {
     done: bool,
     stop_reason: String,
@@ -355,6 +368,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let job_states = Arc::new(Mutex::new(
         std::collections::HashMap::<String, JobState>::new(),
     ));
+    let session_states = Arc::new(Mutex::new(
+        std::collections::HashMap::<String, SessionState>::new(),
+    ));
     let (tx_queue, mut rx_queue) = tokio::sync::mpsc::channel::<JobRequest>(15);
 
     let states_for_http = Arc::clone(&job_states);
@@ -400,12 +416,13 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let cache_clone = Arc::clone(&kv_cache);
+        let session_states_clone = Arc::clone(&session_states);
         let job_id_clone = job.job_id.clone();
 
         let task_type = job.req.task.clone().unwrap_or_else(|| "story".to_string());
         let result = if task_type == "wikitext2" || task_type == "lambada" {
             eprintln!("[GPU Worker] Running eval task: {}", task_type);
-            let target_bin = if task_type == "wikitext2" {
+            let _target_bin = if task_type == "wikitext2" {
                 "shimmy_eval"
             } else {
                 "shimmy_eval"
@@ -450,6 +467,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 inference_req.prompt = Some("Once upon a time".to_string());
             }
             process_inference_job(
+                job_id_clone.clone(),
+                job_states.clone(),
+                session_states_clone,
                 inference_req,
                 &device,
                 &queue,
@@ -604,6 +624,7 @@ async fn handle_http_connection(
                 .as_millis(),
             completed_at: None,
             result: None,
+            partial_text: None,
             error: None,
         };
 
@@ -715,6 +736,9 @@ fn load_output_head_f32(
 }
 
 async fn process_inference_job(
+    job_id: String,
+    states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JobState>>>,
+    session_states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, SessionState>>>,
     req: InferenceRequest,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -726,6 +750,8 @@ async fn process_inference_job(
     kv_cache: Arc<Mutex<KVCache>>,
     output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
 ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
+    const SESSION_WINDOW_TOKENS: usize = 2048;
+
     let max_new_tokens = req.max_tokens.unwrap_or(64);
     let temperature = req.temperature.unwrap_or(0.8);
     let top_p = req.top_p.unwrap_or(0.95);
@@ -765,7 +791,28 @@ async fn process_inference_job(
             .into());
         }
     };
-    let prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
+    let mut prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
+    let session_id = req.session_id.clone();
+    if let Some(session_id) = session_id.as_ref() {
+        let prior_tokens = {
+            let st = session_states.lock().unwrap();
+            st.get(session_id)
+                .map(|state| state.token_window.clone())
+                .unwrap_or_default()
+        };
+
+        if !prior_tokens.is_empty() {
+            prompt_tokens = prior_tokens
+                .into_iter()
+                .chain(prompt_tokens.into_iter())
+                .rev()
+                .take(SESSION_WINDOW_TOKENS)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+        }
+    }
     let eos = tokenizer.eos_token();
     let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
         if v.len() == 1 {
@@ -848,7 +895,7 @@ async fn process_inference_job(
 
     // Batch dequant all prompt tokens on CPU (via GPU calls, but aggregated)
     let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
-    for (seq_pos, &token_id) in prompt_tokens.iter().enumerate() {
+    for (_seq_pos, &token_id) in prompt_tokens.iter().enumerate() {
         let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
         let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
         batched_embd.extend_from_slice(&embd);
@@ -908,7 +955,7 @@ async fn process_inference_job(
     // === DECODE PHASE: Generate new tokens ===
     // Note: We already have logits from prefill ready for first sample
 
-    for step in 0..max_new_tokens {
+    for _step in 0..max_new_tokens {
         // === STEP 1: Token Selection from Current Logits ===
 
         if let (Some(gs), Some(vocab)) = (grammar_state.as_ref(), vocab_texts.as_ref()) {
@@ -994,6 +1041,12 @@ async fn process_inference_job(
         );
         generated_text.push_str(&piece);
         generated_count += 1;
+
+        if let Ok(mut st) = states.lock() {
+            if let Some(state) = st.get_mut(&job_id) {
+                state.partial_text = Some(generated_text.clone());
+            }
+        }
 
         if let Some(gs) = grammar_state.as_mut() {
             if let Err(err) = gs.accept_token(&piece) {
@@ -1154,6 +1207,36 @@ async fn process_inference_job(
         (None, None)
     };
 
+    let response_suffix = if prompt_mode == "raw" {
+        "</s>\n"
+    } else {
+        ""
+    };
+
+    if let Some(session_id) = session_id {
+        let mut appended_tokens = tokenizer.encode(&templated_prompt, true)?;
+        if !final_text.is_empty() {
+            let assistant_tail = format!("{}{}", final_text, response_suffix);
+            appended_tokens.extend(tokenizer.encode(&assistant_tail, false)?);
+        }
+
+        let new_window = {
+            let mut st = session_states.lock().unwrap();
+            let session = st.entry(session_id).or_default();
+            session.token_window.extend(appended_tokens);
+            if session.token_window.len() > SESSION_WINDOW_TOKENS {
+                let drop_count = session.token_window.len() - SESSION_WINDOW_TOKENS;
+                session.token_window.drain(0..drop_count);
+            }
+            session.token_window.clone()
+        };
+
+        eprintln!(
+            "[SESSION] Stored {} tokens in rolling window",
+            new_window.len()
+        );
+    }
+
     let resp = InferenceResponse {
         text: final_text,
         stop_reason: stop_reason.to_string(),
@@ -1172,6 +1255,8 @@ async fn process_inference_job(
     Ok(resp)
 }
 
+#[allow(dead_code)]
+#[allow(dead_code)]
 fn send_error(mut stream: TcpStream, msg: &str) {
     let body = format!("{{\"error\": \"{}\"}}", msg);
     let resp = format!(
@@ -1181,6 +1266,8 @@ fn send_error(mut stream: TcpStream, msg: &str) {
     let _ = stream.write_all(resp.as_bytes());
 }
 
+#[allow(dead_code)]
+#[allow(dead_code)]
 fn sanitize_developer_output(text: &str) -> String {
     sanitize_developer_output_with_reason(text).0
 }
