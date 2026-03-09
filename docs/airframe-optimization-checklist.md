@@ -14,12 +14,14 @@ This document tracks the current optimization pass as a sequence of small, testa
 
 ## Track 1: Session Sliding Window
 
-- [ ] Add explicit server-side chat sessions instead of resetting KV for every request.
-- [ ] Store a rolling context window per session with a target ceiling of 2048 active tokens.
+- [x] Add explicit server-side chat sessions instead of resetting KV for every request.
+- [x] Store a rolling context window per session with a target ceiling of 2048 active tokens.
 - [ ] Keep the existing helical shift / compaction behavior once the live session reaches the ceiling.
 - [ ] Send only delta user input from the console after the session is established.
 - [ ] Preserve assistant responses back into session state so follow-up turns remain coherent.
 - [ ] Add validation for multi-turn consistency across at least 5 consecutive prompts.
+
+Current note: this first pass keeps a bounded token window per session and replays that window on each turn. Persistent per-session KV reuse is still a later optimization.
 
 ## Track 2: Real Token Streaming
 
@@ -56,7 +58,7 @@ This document tracks the current optimization pass as a sequence of small, testa
 ## Commit Sequence
 
 - [ ] Commit 0: repo hygiene and checklist only.
-- [ ] Commit 1: server-side session sliding window.
+- [x] Commit 1: server-side session sliding window.
 - [ ] Commit 2: real token streaming transport.
 - [ ] Commit 3: low-risk decode loop cleanup.
 - [ ] Commit 4: prefill / ingest optimizations.

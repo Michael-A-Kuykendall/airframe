@@ -4,6 +4,7 @@ use crate::adapters::ShimmyServerAdapter;
 use crate::websocket::InferenceBackend;
 use crate::ToolRegistry;
 use serde_json::Value;
+use uuid::Uuid;
 
 #[derive(Debug, Args)]
 pub struct ChatCommand {
@@ -20,9 +21,14 @@ impl ChatCommand {
     pub async fn run(&self) -> anyhow::Result<()> {
         let default_model = "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string();
         let _model_path = self.model.clone().unwrap_or(default_model);
+        let session_id = self
+            .session
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
 
         println!("Connecting to Shimmy GPU Server at http://127.0.0.1:8080...");
-        let adapter = ShimmyServerAdapter::new("http://127.0.0.1:8080".to_string());
+        println!("Session: {}", session_id);
+        let adapter = ShimmyServerAdapter::new("http://127.0.0.1:8080".to_string(), session_id);
         let registry = ToolRegistry::with_defaults();
         
         let tool_descriptions = registry
@@ -37,6 +43,7 @@ impl ChatCommand {
         );
 
         let mut history = system_prompt.clone();
+        let mut first_turn = true;
         
         println!("System ready. Type your message below.");
         println!("Available tools: \n{}", tool_descriptions);
@@ -50,16 +57,40 @@ impl ChatCommand {
             }
             if input.trim().is_empty() { continue; }
 
+            let request_prompt = if first_turn {
+                format!(
+                    "{}<|user|>\n{}</s>\n<|assistant|>\n",
+                    system_prompt,
+                    input.trim()
+                )
+            } else {
+                format!("<|user|>\n{}</s>\n<|assistant|>\n", input.trim())
+            };
+
             history.push_str(&format!("<|user|>\n{}</s>\n<|assistant|>\n", input.trim()));
 
             print!("Shimmy: ");
             io::stdout().flush()?;
 
-            let response = adapter.generate_response("local", &history).await?;
-            println!("{}", response);
+            let mut response = String::new();
+            let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+            
+            let adapter_clone = adapter.clone();
+            let prompt_clone = request_prompt.clone();
+            let handle = tokio::spawn(async move {
+                let _ = adapter_clone.generate_stream("local", &prompt_clone, tx).await;
+            });
 
+            while let Some(token) = rx.recv().await {
+                print!("{}", token);
+                io::stdout().flush()?;
+                response.push_str(&token);
+            }
+            let _ = handle.await;
+            println!();
             history.push_str(&response);
             history.push_str("</s>\n");
+            first_turn = false;
 
             // Look for tool calls in response
             if let Some(start) = response.find("<tool_call>") {
@@ -80,8 +111,28 @@ impl ChatCommand {
                                         let out = format!("\n<|user|>\nTool result:\n{}</s>\n<|assistant|>\n", res.output);
                                         println!("{}", out);
                                         history.push_str(&out);
-                                        let next = adapter.generate_response("local", &history).await?;
-                                        println!("{}", next);
+                                        let tool_prompt = out.clone();
+                                        
+                                        print!("Shimmy: ");
+                                        io::stdout().flush()?;
+                            
+                                        let mut next = String::new();
+                                        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+                                        
+                                        let adapter_clone = adapter.clone();
+                                        let prompt_clone = tool_prompt.clone();
+                                        let handle = tokio::spawn(async move {
+                                            let _ = adapter_clone.generate_stream("local", &prompt_clone, tx).await;
+                                        });
+                            
+                                        while let Some(token) = rx.recv().await {
+                                            print!("{}", token);
+                                            io::stdout().flush()?;
+                                            next.push_str(&token);
+                                        }
+                                        let _ = handle.await;
+                                        println!();
+
                                         history.push_str(&next);
                                         history.push_str("</s>\n");
                                     }
