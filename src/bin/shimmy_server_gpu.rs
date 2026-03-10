@@ -371,9 +371,13 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let session_states = Arc::new(Mutex::new(
         std::collections::HashMap::<String, SessionState>::new(),
     ));
+    let stream_channels = Arc::new(Mutex::new(
+        std::collections::HashMap::<String, tokio::sync::broadcast::Sender<String>>::new(),
+    ));
     let (tx_queue, mut rx_queue) = tokio::sync::mpsc::channel::<JobRequest>(15);
 
     let states_for_http = Arc::clone(&job_states);
+    let streams_for_http = Arc::clone(&stream_channels);
     let http_bind_addr = shimmy_bind_addr.clone();
     tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(&http_bind_addr)
@@ -384,8 +388,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             if let Ok((stream, _)) = listener.accept().await {
                 let tx = tx_queue.clone();
                 let states = Arc::clone(&states_for_http);
+                let streams = Arc::clone(&streams_for_http);
                 tokio::spawn(async move {
-                    if let Err(e) = handle_http_connection(stream, tx, states).await {
+                    if let Err(e) = handle_http_connection(stream, tx, states, streams).await {
                         eprintln!("[HTTP] Connection error: {}", e);
                     }
                 });
@@ -418,6 +423,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         let cache_clone = Arc::clone(&kv_cache);
         let session_states_clone = Arc::clone(&session_states);
         let job_id_clone = job.job_id.clone();
+        let stream_tx = {
+            let st = stream_channels.lock().unwrap();
+            st.get(&job_id_clone).cloned()
+        };
 
         let task_type = job.req.task.clone().unwrap_or_else(|| "story".to_string());
         let result = if task_type == "wikitext2" || task_type == "lambada" {
@@ -470,6 +479,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 job_id_clone.clone(),
                 job_states.clone(),
                 session_states_clone,
+                stream_tx,
                 inference_req,
                 &device,
                 &queue,
@@ -510,6 +520,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+
+        let mut streams = stream_channels.lock().unwrap();
+        streams.remove(&job_id_clone);
     }
 
     Ok(())
@@ -519,6 +532,7 @@ async fn handle_http_connection(
     mut stream: tokio::net::TcpStream,
     tx: tokio::sync::mpsc::Sender<JobRequest>,
     states: Arc<Mutex<std::collections::HashMap<String, JobState>>>,
+    stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut buffer = [0; 10240];
@@ -547,6 +561,75 @@ async fn handle_http_connection(
             state_json.len(), state_json
         );
         stream.write_all(response.as_bytes()).await?;
+        stream.flush().await?;
+        return Ok(());
+    } else if method == "GET" && path.starts_with("/api/repro/job-stream") {
+        let job_id = path
+            .split("job_id=")
+            .nth(1)
+            .unwrap_or("")
+            .split('&')
+            .next()
+            .unwrap_or("");
+
+        let existing_result = {
+            let st = states.lock().unwrap();
+            st.get(job_id).and_then(|state| state.result.as_ref().map(|resp| resp.text.clone()))
+        };
+
+        let maybe_sender = {
+            let st = stream_channels.lock().unwrap();
+            st.get(job_id).cloned()
+        };
+
+        if let Some(text) = existing_result {
+            let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nTransfer-Encoding: chunked\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+            stream.write_all(headers.as_bytes()).await?;
+            if !text.is_empty() {
+                let chunk = format!("{:X}\r\n{}\r\n", text.len(), text);
+                stream.write_all(chunk.as_bytes()).await?;
+            }
+            stream.write_all(b"0\r\n\r\n").await?;
+            stream.flush().await?;
+            return Ok(());
+        }
+
+        let Some(sender) = maybe_sender else {
+            let body = format!("{{\"error\":\"Unknown stream job {}\"}}", job_id);
+            let response = format!(
+                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).await?;
+            stream.flush().await?;
+            return Ok(());
+        };
+
+        let mut rx = sender.subscribe();
+        let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nTransfer-Encoding: chunked\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+        stream.write_all(headers.as_bytes()).await?;
+        stream.flush().await?;
+
+        loop {
+            match rx.recv().await {
+                Ok(chunk_text) => {
+                    if chunk_text.is_empty() {
+                        continue;
+                    }
+                    let chunk = format!("{:X}\r\n{}\r\n", chunk_text.len(), chunk_text);
+                    stream.write_all(chunk.as_bytes()).await?;
+                    stream.flush().await?;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    continue;
+                }
+            }
+        }
+
+        stream.write_all(b"0\r\n\r\n").await?;
         stream.flush().await?;
         return Ok(());
     } else if method == "GET" && path.starts_with("/api/repro/job-status") {
@@ -631,6 +714,12 @@ async fn handle_http_connection(
         {
             let mut st = states.lock().unwrap();
             st.insert(job_id.clone(), state);
+        }
+
+        let (stream_sender, _) = tokio::sync::broadcast::channel::<String>(256);
+        {
+            let mut st = stream_channels.lock().unwrap();
+            st.insert(job_id.clone(), stream_sender);
         }
 
         if tx
@@ -739,6 +828,7 @@ async fn process_inference_job(
     job_id: String,
     states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JobState>>>,
     session_states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, SessionState>>>,
+    stream_tx: Option<tokio::sync::broadcast::Sender<String>>,
     req: InferenceRequest,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -1041,6 +1131,10 @@ async fn process_inference_job(
         );
         generated_text.push_str(&piece);
         generated_count += 1;
+
+        if let Some(tx) = stream_tx.as_ref() {
+            let _ = tx.send(piece.clone());
+        }
 
         if let Ok(mut st) = states.lock() {
             if let Some(state) = st.get_mut(&job_id) {
