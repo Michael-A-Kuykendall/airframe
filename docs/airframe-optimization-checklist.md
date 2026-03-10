@@ -25,14 +25,16 @@ Current note: this first pass keeps a bounded token window per session and repla
 
 ## Track 2: Real Token Streaming
 
-- [ ] Replace snapshot polling with true server push streaming.
+- [x] Replace snapshot polling with true server push streaming.
 - [ ] Evaluate transport in this order:
   - HTTP chunked response
   - Server-Sent Events
   - WebSocket fallback only if the simpler options are awkward in this codebase
-- [ ] Emit token or chunk deltas directly from the decode loop.
+- [x] Emit token or chunk deltas directly from the decode loop.
 - [ ] Keep snapshot status endpoints only for queue inspection, reconnect, and debugging.
 - [ ] Measure first-token latency before and after the transport change.
+
+Current note: first pass uses chunked HTTP with a per-job broadcast channel. The legacy job-status endpoint remains for queue inspection and fallback behavior.
 
 ## Track 3: Low-Risk Decode Loop Optimizations
 
@@ -59,6 +61,6 @@ Current note: this first pass keeps a bounded token window per session and repla
 
 - [ ] Commit 0: repo hygiene and checklist only.
 - [x] Commit 1: server-side session sliding window.
-- [ ] Commit 2: real token streaming transport.
+- [x] Commit 2: real token streaming transport.
 - [ ] Commit 3: low-risk decode loop cleanup.
 - [ ] Commit 4: prefill / ingest optimizations.
