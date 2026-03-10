@@ -606,6 +606,7 @@ async fn handle_http_connection(
         };
 
         let mut rx = sender.subscribe();
+        drop(sender);
         let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nTransfer-Encoding: chunked\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
         stream.write_all(headers.as_bytes()).await?;
         stream.flush().await?;

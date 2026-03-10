@@ -7,3 +7,4 @@
 *.stackdump
 crates/console/compile_errors*.txt
 crates/console/errors_hist*.txt
+vendor/shimmy/
