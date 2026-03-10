@@ -1,0 +1,45 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Airframe GPU Server",
+			"type": "process",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--release",
+				"--bin",
+				"shimmy_server_gpu"
+			],
+			"isBackground": true,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
+			"label": "Run Shimmy Chat",
+			"type": "process",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--release",
+				"-p",
+				"shimmy-console",
+				"--bin",
+				"shimmy-console",
+				"--",
+				"chat"
+			],
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		}
+	]
+}
