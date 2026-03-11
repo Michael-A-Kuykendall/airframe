@@ -20,6 +20,52 @@
 			"group": "build"
 		},
 		{
+			"label": "Run Shimmy OpenClaw Provider",
+			"type": "process",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--release",
+				"--manifest-path",
+				"shimmy_integration/Cargo.toml",
+				"--",
+				"--gpu-backend",
+				"auto",
+				"serve",
+				"--bind",
+				"${input:shimmyProviderBindAddress}",
+				"--model-path",
+				"${input:shimmyProviderModelPath}"
+			],
+			"isBackground": true,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
+			"label": "Smoke Test Shimmy OpenClaw Provider",
+			"type": "process",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\openclaw_provider_smoke_test.ps1",
+				"-BaseUrl",
+				"${input:shimmyProviderBaseUrl}"
+			],
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
 			"label": "Run Shimmy Chat",
 			"type": "process",
 			"command": "cargo",
@@ -40,6 +86,26 @@
 				"clear": false
 			},
 			"group": "build"
+		}
+	],
+	"inputs": [
+		{
+			"id": "shimmyProviderModelPath",
+			"type": "promptString",
+			"description": "Absolute GGUF path for the Shimmy/OpenClaw provider",
+			"default": "C:\\models\\TinyLlama.gguf"
+		},
+		{
+			"id": "shimmyProviderBindAddress",
+			"type": "promptString",
+			"description": "Bind address. Use 127.0.0.1:11435 locally or 0.0.0.0:11435 for LAN access",
+			"default": "127.0.0.1:11435"
+		},
+		{
+			"id": "shimmyProviderBaseUrl",
+			"type": "promptString",
+			"description": "Base URL used by the smoke test",
+			"default": "http://127.0.0.1:11435"
 		}
 	]
 }
