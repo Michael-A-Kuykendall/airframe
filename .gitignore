@@ -2,9 +2,11 @@
 /*.py
 /*.sh
 /*.txt
+*.stackdump
+*.bak
 .beads/daemon-error
 .beads/export-state/
-*.stackdump
 crates/console/compile_errors*.txt
 crates/console/errors_hist*.txt
+crates/console/fix_image.patch
 vendor/shimmy/
