@@ -1,4 +1,19 @@
-# AI Agent Primer: The Beads Memory System
+# AI Agent Primer
+
+## ⛔ Repository Push Policy — MANDATORY
+
+**shimmy_integration** has TWO remotes. Pushing to the wrong one leaks proprietary code publicly.
+
+- `origin` → `shimmy` (PUBLIC) — **NEVER push here.**
+- `private` → `shimmy-private` (PRIVATE) — **All pushes go here.**
+- `airframe` parent repo is private — `origin` push is fine.
+
+When pushing shimmy_integration: **`git push private <branch>`** — never `git push origin`.
+Only the repo owner decides when code goes public.
+
+---
+
+# The Beads Memory System
 
 ## Rationale
 We use the **Beads (`bd`) Memory System** instead of standalone Markdown planning files. Standalone Markdown files suffer from context amnesia during long sessions (agents start expanding phases recursively, losing sight of the main goal, or dropping side-tasks because of token exhaustion). Beads acts as a centralized `.beads/beads.db` issue tracker that completely nullifies work disavowal, memory resets, and lost work scenarios. It structures work like an actual operational DAG instead of chaotic unstructured text.
