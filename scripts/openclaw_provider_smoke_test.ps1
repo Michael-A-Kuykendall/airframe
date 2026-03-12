@@ -36,11 +36,7 @@ $body = @{
     stream = $false
 } | ConvertTo-Json -Depth 8
 
-$response = Invoke-RestMethod \
-    -Method Post \
-    -Uri "$BaseUrl/v1/chat/completions" \
-    -ContentType "application/json" \
-    -Body $body
+$response = Invoke-RestMethod -Method Post -Uri "$BaseUrl/v1/chat/completions" -ContentType "application/json" -Body $body
 
 $content = $response.choices[0].message.content
 

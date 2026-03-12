@@ -28,6 +28,8 @@
 				"--release",
 				"--manifest-path",
 				"shimmy_integration/Cargo.toml",
+				"--bin",
+				"shimmy",
 				"--",
 				"--gpu-backend",
 				"auto",
@@ -37,6 +39,12 @@
 				"--model-path",
 				"${input:shimmyProviderModelPath}"
 			],
+			"options": {
+				"env": {
+					"SHIMMY_ENGINE_BACKEND": "airframe",
+					"SHIMMY_AIRFRAME_BASE_URL": "http://127.0.0.1:8080"
+				}
+			},
 			"isBackground": true,
 			"presentation": {
 				"panel": "dedicated",
