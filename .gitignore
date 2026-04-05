@@ -18,6 +18,7 @@ crates/console/compile_errors*.txt
 crates/console/errors_hist*.txt
 crates/console/fix_image.patch
 vendor/shimmy/
+vendor/human-eval/
 
 # Local generated scratch and archival outputs
 /fused_semantic_execution_full_markdown_reconstruction.md
