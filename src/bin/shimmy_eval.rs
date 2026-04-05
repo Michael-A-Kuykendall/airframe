@@ -106,7 +106,7 @@ struct Args {
     #[arg(long, default_value_t = 42)]
     det_seed: u64,
 
-    #[arg(long, default_value_t = 8192)]
+    #[arg(long, default_value_t = 2048)]
     det_context_window: usize,
 
     #[arg(long, default_value_t = 4)]
@@ -380,34 +380,42 @@ impl EvalEngine for GpuEvalEngine {
         // Helical shift: if the KV cache is about to overflow, compact it
         let max_ctx = self.spec.n_ctx;
         if self.current_pos + tokens.len() >= max_ctx - 4 {
-            let keep_sink: u32 = 4;
             let shift_amt = (max_ctx / 4) as u32;
-            let old_len = self.current_pos as u32;
-            eprintln!(
-                "[HELICAL-EVAL] Shift triggered at pos {} (max {}), shifting by {}",
-                self.current_pos, max_ctx, shift_amt
-            );
-            for layer_idx in 0..self.spec.n_layer {
-                self.shift_pipeline.execute(
-                    &self.device,
-                    &self.queue,
-                    &self.kv_cache_k_layers[layer_idx],
-                    &self.kv_cache_v_layers[layer_idx],
-                    keep_sink,
-                    shift_amt,
-                    old_len,
-                    self.spec.n_head_kv as u32,
-                    self.spec.head_dim as u32,
-                    self.spec.rope_dim as u32,
-                    self.spec.rope_base,
-                    max_ctx as u32,
+            
+            // Only perform a shift if we have enough context to drop, to prevent underflow
+            if self.current_pos >= shift_amt as usize {
+                let keep_sink: u32 = 4;
+                let old_len = self.current_pos as u32;
+                eprintln!(
+                    "[HELICAL-EVAL] Shift triggered at pos {} (max {}), shifting by {}",
+                    self.current_pos, max_ctx, shift_amt
                 );
+                for layer_idx in 0..self.spec.n_layer {
+                    self.shift_pipeline.execute(
+                        &self.device,
+                        &self.queue,
+                        &self.kv_cache_k_layers[layer_idx],
+                        &self.kv_cache_v_layers[layer_idx],
+                        keep_sink,
+                        shift_amt,
+                        old_len,
+                        self.spec.n_head_kv as u32,
+                        self.spec.head_dim as u32,
+                        self.spec.rope_dim as u32,
+                        self.spec.rope_base,
+                        max_ctx as u32,
+                    );
+                }
+                self.current_pos -= shift_amt as usize;
+                eprintln!(
+                    "[HELICAL-EVAL] Compaction complete. New pos: {}",
+                    self.current_pos
+                );
+            } else if self.current_pos + tokens.len() > max_ctx {
+                // In the rare edge case where a single batch exceeds max context 
+                // and we cannot safely shift, reset position
+                self.current_pos = 0;
             }
-            self.current_pos -= shift_amt as usize;
-            eprintln!(
-                "[HELICAL-EVAL] Compaction complete. New pos: {}",
-                self.current_pos
-            );
         }
 
         // Batch Prefill: Collect embeddings for entire prompt

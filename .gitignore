@@ -2,11 +2,22 @@
 /*.py
 /*.sh
 /*.txt
+*.log
+*.pyc
+__pycache__/
+**/__pycache__/
 *.stackdump
 *.bak
+fixtures/hellaswag_val.jsonl
+fixtures/arc_challenge_test.jsonl
+fixtures/arc_easy_test.jsonl
+fixtures/lambada_test.jsonl
 .beads/daemon-error
 .beads/export-state/
 crates/console/compile_errors*.txt
 crates/console/errors_hist*.txt
 crates/console/fix_image.patch
 vendor/shimmy/
+
+# Local generated scratch and archival outputs
+/fused_semantic_execution_full_markdown_reconstruction.md

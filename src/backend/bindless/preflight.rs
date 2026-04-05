@@ -43,34 +43,39 @@ impl PreflightResources {
         //   table[d * n_pairs * 2 + p * 2 + 1] = sin(d * theta_p)
         // This eliminates per-thread trig in the attention inner loop (FSE: selector-first).
         let dim = spec.rope_dim; // e.g. 64
-        let base = spec.rope_base; // e.g. 10000.0 or 500000.0
+        let base = spec.rope_base; // e.g. 10000.0
+        let scale = spec.rope_scale; // 1.0 = no extension; 0.5 = 2x (2048→4096); 0.25 = 4x (2048→8192)
         let n_pairs = dim / 2; // 32 frequency pairs
-        const MAX_DIST: usize = 2048; // Matches the distance clamp in the shader
+        let max_dist = spec.n_ctx; // Matches the runtime context window and shader clamp
 
         // Compute base frequencies (theta_p)
         let thetas: Vec<f32> = (0..n_pairs)
             .map(|i| 1.0 / base.powf((2.0 * i as f32) / dim as f32))
             .collect();
 
-        // Build the full table: 2048 distances × 32 pairs × 2 (cos, sin) = 131,072 f32 = 512 KB
-        let table_len = MAX_DIST * n_pairs * 2;
+        // Build the full table: max_dist × n_pairs × 2 (cos, sin)
+        // Linear RoPE scaling: angle = d * scale * theta_p
+        // At scale=0.5, d=4095 maps to the same angle as d=2047 at scale=1.0,
+        // keeping the effective frequencies inside the trained distribution.
+        let table_len = max_dist * n_pairs * 2;
         let mut table = Vec::with_capacity(table_len);
-        for d in 0..MAX_DIST {
+        for d in 0..max_dist {
             for p in 0..n_pairs {
-                let angle = (d as f32) * thetas[p];
+                let angle = (d as f32) * scale * thetas[p];
                 table.push(angle.cos());
                 table.push(angle.sin());
             }
         }
 
         println!(
-            "[Preflight] RoPE Lookup Table: {}×{} = {} entries ({:.1} KB, Base={}, Dim={})",
-            MAX_DIST,
+            "[Preflight] RoPE Lookup Table: {}×{} = {} entries ({:.1} KB, Base={}, Dim={}, Scale={})",
+            max_dist,
             n_pairs,
             table_len,
             (table_len * 4) as f64 / 1024.0,
             base,
-            dim
+            dim,
+            scale
         );
 
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

@@ -1245,6 +1245,85 @@ impl BindlessPipeline {
         .2
     }
 
+    pub fn run_full_model_prefill_chunked_with_cache_state(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        model: &BindlessModel,
+        input_embd: &[f32],
+        head_weights_override: Option<&wgpu::Buffer>,
+        current_pos: u32,
+        kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
+        spec: &ModelSpec,
+        chunk_tokens: u32,
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let dim = spec.n_embd;
+        assert!(dim > 0, "spec.n_embd must be > 0");
+        assert!(input_embd.len() % dim == 0, "input_embd must align to token rows");
+        assert!(chunk_tokens > 0, "chunk_tokens must be > 0");
+
+        let trace_chunks = std::env::var("AIRFRAME_TRACE_PREFILL_CHUNKS")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        let total_tokens = input_embd.len() / dim;
+        if total_tokens == 0 {
+            return self.run_full_model_with_cache_state(
+                device,
+                queue,
+                model,
+                input_embd,
+                head_weights_override,
+                current_pos,
+                current_pos,
+                kv_state,
+                spec,
+            );
+        }
+
+        let chunk_rows = chunk_tokens as usize;
+        let mut processed_tokens = 0u32;
+        let mut chunk_idx = 0usize;
+        let mut last_result = None;
+
+        for chunk in input_embd.chunks(chunk_rows * dim) {
+            let chunk_token_count = (chunk.len() / dim) as u32;
+            let chunk_current_pos = current_pos + processed_tokens;
+            let chunk_seq_len = chunk_current_pos + chunk_token_count;
+
+            if trace_chunks {
+                eprintln!(
+                    "[PREFILL] chunk={} tokens={} current_pos={} seq_len={}",
+                    chunk_idx,
+                    chunk_token_count,
+                    chunk_current_pos,
+                    chunk_seq_len
+                );
+            }
+
+            last_result = Some(self.run_full_model_with_cache_state(
+                device,
+                queue,
+                model,
+                chunk,
+                head_weights_override,
+                chunk_current_pos,
+                chunk_seq_len,
+                kv_state,
+                spec,
+            ));
+
+            if trace_chunks {
+                eprintln!("[PREFILL] chunk={} complete", chunk_idx);
+            }
+
+            processed_tokens += chunk_token_count;
+            chunk_idx += 1;
+        }
+
+        last_result.expect("chunked prefill should produce at least one chunk result")
+    }
+
     pub fn run_full_model_with_cache_state(
         &self,
         device: &wgpu::Device,
@@ -1601,22 +1680,34 @@ impl BindlessPipeline {
         let kv_len = params_base.head_count_kv * params_base.head_dim;
         let total_qkv = q_len + kv_len * 2;
         let wg_qkv = (total_qkv + 255) / 256;
+        let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
 
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Loop"),
-                timestamp_writes: None,
-            });
+// Loop Layers
+        for (i, bg) in layer_bind_groups.iter().enumerate() {
+            if trace_prefill_layers {
+                eprintln!(
+                    "[PREFILL-LAYER] start layer={} batch_size={} current_pos={} seq_len={}",
+                    i,
+                    batch_size,
+                    current_pos,
+                    seq_len
+                );
+            }
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {}", i)),
+                    timestamp_writes: None,
+                });
 
-            // Loop Layers
-            for (_i, bg) in layer_bind_groups.iter().enumerate() {
                 cpass.set_bind_group(0, bg, &[]);
 
-                // QKV (Calculates Q/K/V and applies Softmax + Attention)
+                // QKV (Calculates Q/K/V and applies Softmax + Attention)       
                 cpass.set_pipeline(&self.layer_pipeline_qkv);
                 cpass.dispatch_workgroups(wg_qkv, batch_size, 1);
 
-                // Attn Out (Project weighted V back to Residual)
+                // Attn Out (Flash Attention — single pass, no scores buffer needed)
                 cpass.set_pipeline(&self.layer_pipeline_attn_out);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
 
@@ -1631,6 +1722,19 @@ impl BindlessPipeline {
                 // FFN Down
                 cpass.set_pipeline(&self.layer_pipeline_ffn_down);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+            }
+            
+            // TDR Mitigation: Flush the command list every layer to prevent Windows TDR kills
+            // A long batch can take 2-4 minutes! WDDM resets standard command bounds at ~2s.
+            queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::PollType::Poll).unwrap();
+
+            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Execute Batch Cont"),
+            });
+
+            if trace_prefill_layers {
+                eprintln!("[PREFILL-LAYER] complete layer={}", i);
             }
         }
 
@@ -1690,16 +1794,33 @@ impl BindlessPipeline {
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
+        let mut pre_done = false;
+        let mut l21_done = false;
+        let mut main_done = false;
+
         loop {
             device.poll(wgpu::PollType::Poll).unwrap();
-            if let Ok(res) = rx_pre.try_recv() {
-                res.expect("Pre-norm buffer map failed");
+            
+            if !pre_done {
+                if let Ok(res) = rx_pre.try_recv() {
+                    res.expect("Pre-norm buffer map failed. Device lost or TDR timeout.");
+                    pre_done = true;
+                }
             }
-            if let Ok(res) = rx_l21.try_recv() {
-                res.expect("L21 buffer map failed");
+            if !l21_done {
+                if let Ok(res) = rx_l21.try_recv() {
+                    res.expect("L21 buffer map failed. Device lost or TDR timeout.");
+                    l21_done = true;
+                }
             }
-            if let Ok(res) = rx.try_recv() {
-                res.expect("Buffer map failed");
+            if !main_done {
+                if let Ok(res) = rx.try_recv() {
+                    res.expect("Buffer map failed. Device lost or TDR timeout.");
+                    main_done = true;
+                }
+            }
+            
+            if pre_done && l21_done && main_done {
                 break;
             }
         }
@@ -2235,7 +2356,7 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        // 5. Create bind group with all 10 bindings
+        // 5. Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("Layer {} BindGroup", layer_idx)),
             layout: &self.layer_layout,

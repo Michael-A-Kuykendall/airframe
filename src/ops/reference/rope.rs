@@ -16,10 +16,30 @@ pub fn apply_rope_f32(
     rope_base: f32,
     rope_dim: usize,
 ) -> Result<Tensor> {
+    apply_rope_scaled_f32(tensor, position_ids, rope_base, rope_dim, 1.0)
+}
+
+/// Apply RoPE with linear position scaling.
+///
+/// `rope_scale=1.0` is standard RoPE. Values below 1.0 stretch the usable
+/// context by compressing the effective angles.
+pub fn apply_rope_scaled_f32(
+    tensor: &Tensor,
+    position_ids: &[usize],
+    rope_base: f32,
+    rope_dim: usize,
+    rope_scale: f32,
+) -> Result<Tensor> {
     if rope_base <= 0.0 {
         return Err(LibshimmyError::Unsupported(
             "RoPE base must be positive".to_string(),
         ));
+    }
+
+    if rope_scale <= 0.0 {
+        return Err(LibshimmyError::Unsupported(format!(
+            "RoPE scale must be positive (got {rope_scale})"
+        )));
     }
 
     crate::ensure!(rope_dim > 0, "rope_dim must be > 0");
@@ -55,6 +75,7 @@ pub fn apply_rope_f32(
                 position_ids,
                 rope_base,
                 rope_dim,
+                rope_scale,
             )?;
         }
         4 => {
@@ -87,6 +108,7 @@ pub fn apply_rope_f32(
                     position_ids,
                     rope_base,
                     rope_dim,
+                    rope_scale,
                 )?;
             }
         }
@@ -111,6 +133,7 @@ fn apply_rope_3d(
     position_ids: &[usize],
     rope_base: f32,
     rope_dim: usize,
+    rope_scale: f32,
 ) -> Result<()> {
     crate::ensure!(
         rope_dim <= head_dim,
@@ -136,7 +159,7 @@ fn apply_rope_3d(
                 let idx2 = head_offset + 2 * i + 1;
 
                 if idx2 < data.len() {
-                    let angle = pos as f32 * freq;
+                    let angle = pos as f32 * rope_scale * freq;
                     let cos_val = angle.cos();
                     let sin_val = angle.sin();
 

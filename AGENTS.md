@@ -1,76 +1,37 @@
 # Agent Instructions
 
-## ⛔ Repository Push Policy — READ FIRST
+## Repository Push Policy
 
-This workspace contains two Shimmy-related remotes. **Getting this wrong leaks proprietary code.**
+This workspace contains a private `airframe` repo and a `shimmy_integration` submodule whose `origin` remote is public.
 
-| Repo | Visibility | Remote name (in shimmy_integration submodule) | Push? |
-|---|---|---|---|
-| `Michael-A-Kuykendall/shimmy` | **PUBLIC** | `origin` | **NEVER push here. NEVER.** |
-| `Michael-A-Kuykendall/shimmy-private` | **PRIVATE** | `private` | ✅ All shimmy pushes go here |
-| `Michael-A-Kuykendall/airframe` | **PRIVATE** | `origin` (parent repo) | ✅ OK to push |
+- Never push `shimmy_integration` to `origin`.
+- If a push to `shimmy_integration` is explicitly requested, use `git push private <branch>`.
+- Do not push any repo unless the user explicitly asks for it.
 
-**Rules:**
-- When pushing `shimmy_integration` changes: `git push private <branch>` — NEVER `git push origin`.
-- The `origin` remote in shimmy_integration points to the **public** shimmy repo. Do NOT push to it.
-- Only the repo owner decides when code goes public. Agents do NOT make that call.
-- If you are uncertain which remote to use, run `git remote -v` and **stop to confirm** before pushing.
-- Violations of this policy expose proprietary Airframe integration code to the public internet.
+## Work Tracking
 
----
+- Use `bd` for multi-session task tracking.
+- Do not create `-plan.md` files.
+- Log discovered side work in `bd` instead of expanding scope inline.
 
-This project uses **bd** (beads) for issue tracking. We use it strictly over conventional `-plan.md` Markdown files to preserve working memory across long horizons.
+## Scope Control
 
-## Initialization / Awakening
-1. Run `bd ready` (or `bd ready --json`) to list your immediate unwrapped stack context.
-2. Claim an item with `bd update <id> --status in_progress`.
-3. Read its details via `bd show <id>`.
+- Keep the active task narrow.
+- Treat user workflow constraints as operating rules.
+- Do not preserve stale session detail in instruction files once it stops helping the current mission.
 
-## Discovery Protocol
-If you identify "broken windows", technical debt, or necessary architecture pivots during a session:
-**DO NOT** fix them inline if it clutters the current task context.
-**DO NOT** write a `TODO: fix earlier` in the current PR.
-**DO** run `bd create --title "<issue>" --dep discovered-from=<current_id>` to log the work permanently.
+## Terminal Isolation
 
-## Quick Reference
+- Use named terminals.
+- Keep long-running processes isolated from quick inspection commands.
+- Use separate terminals for benchmarks, builds, git work, and filesystem inspection.
+- If a terminal is running a live workload, do not send unrelated commands into it.
+- Never use `captureOutput: true` with `terminal-tools_sendCommand`; in this workspace it can kill the invocation and stall the session.
 
-```bash
-bd ready              # Find available work with 0 blockers
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd dep add <child> blocks <parent>    # Modify dependency graph
-bd close <id>         # Complete work
-bd sync               # Sync with git
-```
+## Release Workflow Lockdown
 
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY (respect push policy above!):
-   ```bash
-   # Parent airframe repo — origin is private, safe to push
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-
-   # shimmy_integration submodule — MUST use 'private' remote
-   cd shimmy_integration
-   git push private <branch>   # NEVER 'git push origin'
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+- For Airframe release validation and Shimmy provider bring-up, use the `.vscode/tasks.json` `U:` tasks and existing validation tasks first.
+- Do not create duplicate server or provider terminals on the same port when a task-owned process should be used.
+- Use at most one read-only inspection terminal during these flows unless the user explicitly asks for manual terminal orchestration.
+- Prefer checked-in scripts over ad hoc polling commands for readiness and result capture.
 
