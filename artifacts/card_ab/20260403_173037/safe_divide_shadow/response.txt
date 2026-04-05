@@ -1,0 +1,10 @@
+struct safe_divide {
+    fn safe_divide(a: f64, b: f64) -> Result<f64, &'static str> {
+        if b == 0.0 {
+            return Err("division by zero");
+        }
+        Ok(a / b)
+    }
+}
+
+// END_RUST_FILE

@@ -1,0 +1,309 @@
+--- ../libshimmy/crates/airframe/src/backend/bindless/pipeline_shift.rs	2026-03-01 22:46:49.712294400 -0600
++++ src/backend/bindless/pipeline_shift.rs	2026-03-10 18:31:05.310272800 -0500
+@@ -30,7 +30,8 @@
+         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+             label: Some("RopeShift Bind Group Layout"),
+             entries: &[
+-                wgpu::BindGroupLayoutEntry { // K source (read-only snapshot)
++                wgpu::BindGroupLayoutEntry {
++                    // K source (read-only snapshot)
+                     binding: 0,
+                     visibility: wgpu::ShaderStages::COMPUTE,
+                     ty: wgpu::BindingType::Buffer {
+@@ -40,7 +41,8 @@
+                     },
+                     count: None,
+                 },
+-                wgpu::BindGroupLayoutEntry { // V source (read-only snapshot)
++                wgpu::BindGroupLayoutEntry {
++                    // V source (read-only snapshot)
+                     binding: 1,
+                     visibility: wgpu::ShaderStages::COMPUTE,
+                     ty: wgpu::BindingType::Buffer {
+@@ -50,7 +52,8 @@
+                     },
+                     count: None,
+                 },
+-                wgpu::BindGroupLayoutEntry { // K destination (live cache)
++                wgpu::BindGroupLayoutEntry {
++                    // K destination (live cache)
+                     binding: 2,
+                     visibility: wgpu::ShaderStages::COMPUTE,
+                     ty: wgpu::BindingType::Buffer {
+@@ -60,7 +63,8 @@
+                     },
+                     count: None,
+                 },
+-                wgpu::BindGroupLayoutEntry { // V destination (live cache)
++                wgpu::BindGroupLayoutEntry {
++                    // V destination (live cache)
+                     binding: 3,
+                     visibility: wgpu::ShaderStages::COMPUTE,
+                     ty: wgpu::BindingType::Buffer {
+@@ -70,7 +74,8 @@
+                     },
+                     count: None,
+                 },
+-                wgpu::BindGroupLayoutEntry { // Params
++                wgpu::BindGroupLayoutEntry {
++                    // Params
+                     binding: 4,
+                     visibility: wgpu::ShaderStages::COMPUTE,
+                     ty: wgpu::BindingType::Buffer {
+@@ -158,19 +163,19 @@
+             entries: &[
+                 wgpu::BindGroupEntry {
+                     binding: 0,
+-                    resource: scratch_k.as_entire_binding(),  // read-only snapshot
++                    resource: scratch_k.as_entire_binding(), // read-only snapshot
+                 },
+                 wgpu::BindGroupEntry {
+                     binding: 1,
+-                    resource: scratch_v.as_entire_binding(),  // read-only snapshot
++                    resource: scratch_v.as_entire_binding(), // read-only snapshot
+                 },
+                 wgpu::BindGroupEntry {
+                     binding: 2,
+-                    resource: k_buffer.as_entire_binding(),   // write destination
++                    resource: k_buffer.as_entire_binding(), // write destination
+                 },
+                 wgpu::BindGroupEntry {
+                     binding: 3,
+-                    resource: v_buffer.as_entire_binding(),   // write destination
++                    resource: v_buffer.as_entire_binding(), // write destination
+                 },
+                 wgpu::BindGroupEntry {
+                     binding: 4,
+@@ -207,9 +212,9 @@
+             };
+ 
+             if elements_to_shift > 0 {
+-                let dim_x = head_dim.div_ceil(64);  // head_dim threads, workgroup 64
+-                let dim_y = n_head_kv.div_ceil(4);  // n_head_kv threads, workgroup 4
+-                let dim_z = elements_to_shift;       // one workgroup per seq position
++                let dim_x = head_dim.div_ceil(64); // head_dim threads, workgroup 64
++                let dim_y = n_head_kv.div_ceil(4); // n_head_kv threads, workgroup 4
++                let dim_z = elements_to_shift; // one workgroup per seq position
+ 
+                 cpass.dispatch_workgroups(dim_x, dim_y, dim_z);
+             }
+@@ -262,24 +267,37 @@
+         let k_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+             label: Some("Test K"),
+             contents: bytemuck::cast_slice(&k_data),
+-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
++            usage: wgpu::BufferUsages::STORAGE
++                | wgpu::BufferUsages::COPY_SRC
++                | wgpu::BufferUsages::COPY_DST,
+         });
+         let v_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+             label: Some("Test V"),
+             contents: bytemuck::cast_slice(&v_data),
+-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
++            usage: wgpu::BufferUsages::STORAGE
++                | wgpu::BufferUsages::COPY_SRC
++                | wgpu::BufferUsages::COPY_DST,
+         });
+ 
+         pipeline.execute(
+-            &device, &queue,
+-            &k_buf, &v_buf,
+-            keep_sink, shift_amt, old_seq_len,
+-            n_head_kv, head_dim, head_dim, 10000.0, max_seq_len,
++            &device,
++            &queue,
++            &k_buf,
++            &v_buf,
++            keep_sink,
++            shift_amt,
++            old_seq_len,
++            n_head_kv,
++            head_dim,
++            head_dim,
++            10000.0,
++            max_seq_len,
+         );
+ 
+         // Readback K
+         let staging = device.create_buffer(&wgpu::BufferDescriptor {
+-            label: None, size: buffer_size,
++            label: None,
++            size: buffer_size,
+             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+             mapped_at_creation: false,
+         });
+@@ -289,7 +307,13 @@
+         let slice = staging.slice(..);
+         let (tx, rx) = std::sync::mpsc::channel();
+         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+-        loop { device.poll(wgpu::PollType::Poll).unwrap(); if let Ok(r) = rx.try_recv() { r.unwrap(); break; } }
++        loop {
++            device.poll(wgpu::PollType::Poll).unwrap();
++            if let Ok(r) = rx.try_recv() {
++                r.unwrap();
++                break;
++            }
++        }
+         let data = slice.get_mapped_range();
+         let gpu_k: &[f32] = bytemuck::cast_slice(&data);
+ 
+@@ -305,14 +329,20 @@
+                     let old_idx = (old_pos * n_head_kv * head_dim + h * head_dim + d) as usize;
+                     let new_idx = (new_pos * n_head_kv * head_dim + h * head_dim + d) as usize;
+                     let err = (gpu_k[new_idx] - k_data[old_idx]).abs();
+-                    if err > max_err { max_err = err; }
++                    if err > max_err {
++                        max_err = err;
++                    }
+                 }
+             }
+         }
+         drop(data);
+ 
+         println!("PURE COPY TEST: max K error = {:.2e}", max_err);
+-        assert!(max_err == 0.0, "K shift must be bit-exact copy, got max_err={:.2e}", max_err);
++        assert!(
++            max_err == 0.0,
++            "K shift must be bit-exact copy, got max_err={:.2e}",
++            max_err
++        );
+         println!("PASS: K values are bit-identical after shift (pure copy, no RoPE)");
+     }
+ 
+@@ -357,24 +387,37 @@
+         let k_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+             label: Some("Test K Overlap"),
+             contents: bytemuck::cast_slice(&k_data),
+-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
++            usage: wgpu::BufferUsages::STORAGE
++                | wgpu::BufferUsages::COPY_SRC
++                | wgpu::BufferUsages::COPY_DST,
+         });
+         let v_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+             label: Some("Test V Overlap"),
+             contents: bytemuck::cast_slice(&v_data),
+-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
++            usage: wgpu::BufferUsages::STORAGE
++                | wgpu::BufferUsages::COPY_SRC
++                | wgpu::BufferUsages::COPY_DST,
+         });
+ 
+         pipeline.execute(
+-            &device, &queue,
+-            &k_buf, &v_buf,
+-            keep_sink, shift_amt, old_seq_len,
+-            n_head_kv, head_dim, head_dim, 10000.0, max_seq_len,
++            &device,
++            &queue,
++            &k_buf,
++            &v_buf,
++            keep_sink,
++            shift_amt,
++            old_seq_len,
++            n_head_kv,
++            head_dim,
++            head_dim,
++            10000.0,
++            max_seq_len,
+         );
+ 
+         // Readback K
+         let staging = device.create_buffer(&wgpu::BufferDescriptor {
+-            label: None, size: buffer_size,
++            label: None,
++            size: buffer_size,
+             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+             mapped_at_creation: false,
+         });
+@@ -384,13 +427,20 @@
+         let slice = staging.slice(..);
+         let (tx, rx) = std::sync::mpsc::channel();
+         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+-        loop { device.poll(wgpu::PollType::Poll).unwrap(); if let Ok(r) = rx.try_recv() { r.unwrap(); break; } }
++        loop {
++            device.poll(wgpu::PollType::Poll).unwrap();
++            if let Ok(r) = rx.try_recv() {
++                r.unwrap();
++                break;
++            }
++        }
+         let data = slice.get_mapped_range();
+         let gpu_k: &[f32] = bytemuck::cast_slice(&data);
+ 
+         // Readback V
+         let staging_v = device.create_buffer(&wgpu::BufferDescriptor {
+-            label: None, size: buffer_size,
++            label: None,
++            size: buffer_size,
+             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+             mapped_at_creation: false,
+         });
+@@ -400,7 +450,13 @@
+         let slice_v = staging_v.slice(..);
+         let (tx2, rx2) = std::sync::mpsc::channel();
+         slice_v.map_async(wgpu::MapMode::Read, move |v| tx2.send(v).unwrap());
+-        loop { device.poll(wgpu::PollType::Poll).unwrap(); if let Ok(r) = rx2.try_recv() { r.unwrap(); break; } }
++        loop {
++            device.poll(wgpu::PollType::Poll).unwrap();
++            if let Ok(r) = rx2.try_recv() {
++                r.unwrap();
++                break;
++            }
++        }
+         let data_v = slice_v.get_mapped_range();
+         let gpu_v: &[f32] = bytemuck::cast_slice(&data_v);
+ 
+@@ -417,22 +473,44 @@
+                     let new_idx = (new_pos * n_head_kv * head_dim + h * head_dim + d) as usize;
+                     let k_err = (gpu_k[new_idx] - k_data[old_idx]).abs();
+                     let v_err = (gpu_v[new_idx] - v_data[old_idx]).abs();
+-                    if k_err > max_k_err { max_k_err = k_err; }
+-                    if v_err > max_v_err { max_v_err = v_err; }
++                    if k_err > max_k_err {
++                        max_k_err = k_err;
++                    }
++                    if v_err > max_v_err {
++                        max_v_err = v_err;
++                    }
+                 }
+             }
+         }
+         drop(data);
+         drop(data_v);
+ 
+-        println!("OVERLAP TEST: max K error = {:.2e}, max V error = {:.2e}", max_k_err, max_v_err);
+-        println!("  params: keep={}, shift={}, old_len={}, elements_to_shift={}", 
+-                 keep_sink, shift_amt, old_seq_len, elements_to_shift);
+-        println!("  source range: [{}..{}], dest range: [{}..{}]",
+-                 keep_sink + shift_amt, old_seq_len - 1, keep_sink, keep_sink + elements_to_shift - 1);
++        println!(
++            "OVERLAP TEST: max K error = {:.2e}, max V error = {:.2e}",
++            max_k_err, max_v_err
++        );
++        println!(
++            "  params: keep={}, shift={}, old_len={}, elements_to_shift={}",
++            keep_sink, shift_amt, old_seq_len, elements_to_shift
++        );
++        println!(
++            "  source range: [{}..{}], dest range: [{}..{}]",
++            keep_sink + shift_amt,
++            old_seq_len - 1,
++            keep_sink,
++            keep_sink + elements_to_shift - 1
++        );
+ 
+-        assert!(max_k_err == 0.0, "K must be bit-exact copy, got max_err={:.2e}", max_k_err);
+-        assert!(max_v_err == 0.0, "V must be bit-exact copy, got max_err={:.2e}", max_v_err);
++        assert!(
++            max_k_err == 0.0,
++            "K must be bit-exact copy, got max_err={:.2e}",
++            max_k_err
++        );
++        assert!(
++            max_v_err == 0.0,
++            "V must be bit-exact copy, got max_err={:.2e}",
++            max_v_err
++        );
+         println!("PASS: Overlapping shift is bit-identical for both K and V (pure copy)");
+     }
+ }

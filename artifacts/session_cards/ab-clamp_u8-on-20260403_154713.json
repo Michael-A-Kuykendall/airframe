@@ -1,0 +1,105 @@
+{
+  "session_id": "ab-clamp_u8-on-20260403_154713",
+  "token_window_len": 0,
+  "active_card": {
+    "goal": "write implementation",
+    "success": [
+      "tests included"
+    ],
+    "must": [
+      "reject empty input"
+    ],
+    "must_not": [],
+    "exact": [],
+    "assume": [],
+    "unknown": [],
+    "facts": [],
+    "now": "",
+    "next": [],
+    "blocked": [],
+    "done": [
+      "risks"
+    ],
+    "risks": []
+  },
+  "card_history": [
+    {
+      "phase": "bootstrap",
+      "recorded_at": 1775249985160,
+      "card": {
+        "goal": "write implementation",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [
+          "panic"
+        ],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "write implementation",
+        "next": [
+          "add tests"
+        ],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    },
+    {
+      "phase": "post_turn",
+      "recorded_at": 1775250060505,
+      "card": {
+        "goal": "write implementation",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "write implementation",
+        "next": [],
+        "blocked": [],
+        "done": [
+          "risks"
+        ],
+        "risks": []
+      }
+    },
+    {
+      "phase": "post_turn",
+      "recorded_at": 1775250182296,
+      "card": {
+        "goal": "write implementation",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "",
+        "next": [],
+        "blocked": [],
+        "done": [
+          "risks"
+        ],
+        "risks": []
+      }
+    }
+  ],
+  "last_card_error": null
+}

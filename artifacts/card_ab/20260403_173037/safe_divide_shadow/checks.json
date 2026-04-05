@@ -1,0 +1,32 @@
+[
+    {
+        "Desc":  "fn safe_divide defined",
+        "Require":  true,
+        "Matched":  true,
+        "Pass":  true
+    },
+    {
+        "Desc":  "returns Result",
+        "Require":  true,
+        "Matched":  true,
+        "Pass":  true
+    },
+    {
+        "Desc":  "division by zero message",
+        "Require":  true,
+        "Matched":  true,
+        "Pass":  true
+    },
+    {
+        "Desc":  "has unit tests",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "no unwrap/expect",
+        "Require":  false,
+        "Matched":  false,
+        "Pass":  true
+    }
+]

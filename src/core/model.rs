@@ -1218,63 +1218,7 @@ fn dequantize_q4_0(
     mmap: &Mmap,
     tensor_data_base_offset: u64,
 ) -> Result<Tensor> {
-    let total_elements: usize = tensor_info.dimensions.iter().product();
-
-    // Q4_0 format: 32 elements per block, each block = 2 bytes (fp16 scale) + 16 bytes (4-bit values)
-    let block_size = 32;
-    let bytes_per_block = 18; // 2 + 16
-    let num_blocks = total_elements.div_ceil(block_size);
-
-    // Tensor offset is relative to the aligned tensor data section start
-    let data_start = (tensor_data_base_offset + tensor_info.offset) as usize;
-    let data_end = data_start + num_blocks * bytes_per_block;
-
-    if data_end > mmap.len() {
-        return Err(LibshimmyError::FixtureError {
-            msg: "Tensor data extends beyond file".to_string(),
-        });
-    }
-
-    let mut fp32_data = Vec::with_capacity(total_elements);
-
-    for block_idx in 0..num_blocks {
-        let block_start = data_start + block_idx * bytes_per_block;
-
-        // Read scale (fp16 -> f32)
-        let scale_bytes = [mmap[block_start], mmap[block_start + 1]];
-        let scale = crate::core::f16::f16_bits_to_f32(u16::from_le_bytes(scale_bytes));
-
-        // Read 4-bit values - GGML layout: low nibbles at j, high nibbles at j+16
-        // Each byte's low nibble goes to position j (0-15)
-        // Each byte's high nibble goes to position j+16 (16-31)
-        let mut block_values = [0.0f32; 32];
-
-        for byte_idx in 0..16 {
-            let byte_offset = block_start + 2 + byte_idx;
-            let byte_val = mmap[byte_offset];
-
-            // Low nibble -> position byte_idx
-            let val_low = (byte_val & 0x0F) as i8 - 8;
-            // High nibble -> position byte_idx + 16
-            let val_high = ((byte_val >> 4) & 0x0F) as i8 - 8;
-
-            block_values[byte_idx] = val_low as f32 * scale;
-            block_values[byte_idx + 16] = val_high as f32 * scale;
-        }
-
-        // Append block values, respecting total_elements limit
-        let block_base = block_idx * block_size;
-        for (i, &val) in block_values.iter().enumerate() {
-            if block_base + i < total_elements {
-                fp32_data.push(val);
-            }
-        }
-    }
-
-    // Truncate to exact size
-    fp32_data.truncate(total_elements);
-
-    Tensor::new(fp32_data, tensor_info.dimensions.clone())
+    crate::core::dequant::dequantize_q4_0(tensor_info, mmap, tensor_data_base_offset)
 }
 
 /// Validate all required weights are present

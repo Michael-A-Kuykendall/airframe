@@ -1,0 +1,17 @@
+{
+  "trial_uuid": "gpu-20260322T191740.206Z",
+  "backend": "gpu",
+  "runs": 5,
+  "canonical_hash": "8f19bac2a65cd0f574d25be57042b4fb2bb5e136487ff5a9ee74df601f98850c",
+  "match_count": 5,
+  "mismatches": [],
+  "run_hashes": [
+    "8f19bac2a65cd0f574d25be57042b4fb2bb5e136487ff5a9ee74df601f98850c",
+    "8f19bac2a65cd0f574d25be57042b4fb2bb5e136487ff5a9ee74df601f98850c",
+    "8f19bac2a65cd0f574d25be57042b4fb2bb5e136487ff5a9ee74df601f98850c",
+    "8f19bac2a65cd0f574d25be57042b4fb2bb5e136487ff5a9ee74df601f98850c",
+    "8f19bac2a65cd0f574d25be57042b4fb2bb5e136487ff5a9ee74df601f98850c"
+  ],
+  "started_at_utc": "2026-03-22T19:17:43.759309200+00:00",
+  "completed_at_utc": "2026-03-22T19:17:57.655268400+00:00"
+}

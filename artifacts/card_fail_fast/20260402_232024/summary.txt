@@ -1,0 +1,10 @@
+
+mode        outcome   stop_reason    tokens_generated chars card_generated
+----        -------   -----------    ---------------- ----- --------------
+off         completed grammar_accept              222     0          False
+instruction completed max_tokens                  512     0          False
+prefix      failed                                                   False
+bootstrap   failed                                                   False
+
+
+

@@ -1,0 +1,49 @@
+104:+    pub session_id: Option<String>,
+109:     prompt_mode: Option<String>,
+114:     ignore_eos: Option<bool>,
+116:     top_p: Option<f32>,
+136:+    pub partial_text: Option<String>,
+263:-    let job_states = Arc::new(Mutex::new(std::collections::HashMap::<String, JobState>::new()));
+265:+        std::collections::HashMap::<String, JobState>::new(),
+267:+    let session_states = Arc::new(Mutex::new(
+273:     let (tx_queue, mut rx_queue) = tokio::sync::mpsc::channel::<JobRequest>(15);
+299:+        let session_states_clone = Arc::clone(&session_states);
+349:+                session_states_clone,
+403:     tx: tokio::sync::mpsc::Sender<JobRequest>,
+404:     states: Arc<Mutex<std::collections::HashMap<String, JobState>>>,
+546:         let state = JobState {
+559:+            partial_text: None,
+569:-        if tx.try_send(JobRequest { job_id: job_id.clone(), req }).is_err() {
+577:+            .try_send(JobRequest {
+760:+    states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JobState>>>,
+761:+    session_states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, SessionState>>>,
+774:+    const SESSION_WINDOW_TOKENS: usize = 2048;
+779:     let rep_penalty = req.repetition_penalty.unwrap_or(1.1);
+783:-    eprintln!("[GPU Server] Sampling: temp={:.2}, top_p={:.2}, rep_penalty={:.2}, stream={}", temperature, top_p, rep_penalty, use_stream);
+786:+        "[GPU Server] Sampling: temp={:.2}, top_p={:.2}, rep_penalty={:.2}, stream={}",
+787:+        temperature, top_p, rep_penalty, use_stream
+799:     // For Repro Arena experiments we support prompt_mode to compare behaviors.
+806:+    let session_id = req.session_id.clone();
+807:+    if let Some(session_id) = session_id.as_ref() {
+809:+            let st = session_states.lock().unwrap();
+810:+            st.get(session_id)
+820:+                .take(SESSION_WINDOW_TOKENS)
+840:     let mut grammar_state: Option<GrammarState> = if prompt_mode == "developer" {
+1005:-            sample_token(&mut logits_vec, temperature, top_p, rep_penalty, &recent_tokens, &mut rng)
+1009:+                top_p,
+1010:+                rep_penalty,
+1020:             if req.ignore_eos.unwrap_or(false) {
+1044:+                state.partial_text = Some(generated_text.clone());
+1061:                 let keep_sink = 4;
+1062:                 let shift_amt = cache.max_len() / 4;
+1063:-                eprintln!("[HELICAL] Memory bounds approaching ({}/{}), shifting by {}...", current_len + 1, cache.max_len(), shift_amt);             
+1068:+                    shift_amt
+1083:                 current_len -= shift_amt;
+1152:+    let response_suffix = if prompt_mode == "raw" {
+1158:+    if let Some(session_id) = session_id {
+1161:+            let assistant_tail = format!("{}{}", final_text, response_suffix);
+1166:+            let mut st = session_states.lock().unwrap();
+1167:+            let session = st.entry(session_id).or_default();
+1169:+            if session.token_window.len() > SESSION_WINDOW_TOKENS {
+1170:+                let drop_count = session.token_window.len() - SESSION_WINDOW_TOKENS;
+1186:         debug_sanitizer_reason: (include_debug_raw && prompt_mode == "developer")

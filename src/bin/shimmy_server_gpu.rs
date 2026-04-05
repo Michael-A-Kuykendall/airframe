@@ -113,6 +113,12 @@ fn sample_token(
     nucleus.last().unwrap().0 as u32
 }
 
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 fn developer_mode_grammar() -> &'static str {
     r#"
 root ::= start body end
@@ -186,7 +192,7 @@ fn rust_compile_check(source: &str) -> Result<(), String> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct InferenceRequest {
     pub task: Option<String>,
     pub prompt: Option<String>,
@@ -194,7 +200,9 @@ pub struct InferenceRequest {
     /// Prompt templating mode:
     /// - "raw": send prompt verbatim (no system/user/assistant wrapping)
     /// - "developer": wrap in ChatML with developer-focused system prompt
-    /// - "creative" (default): wrap in ChatML with creative-writer system prompt
+    /// - "creative" (default): wrap in the legacy TinyLlama prompt format used by the
+    ///   bit-perfect story repro checkpoints
+    /// - "creative-chatml": wrap in ChatML with creative-writer system prompt
     prompt_mode: Option<String>,
     max_tokens: Option<usize>,
     #[allow(dead_code)]
@@ -324,7 +332,20 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     // === Load Model to GPU ===
     let tokenizer = Tokenizer::from_gguf_file(&model_path)?;
-    let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+    let mut spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+
+    // Apply runtime context / RoPE scale overrides before model load.
+    let max_ctx: u32 = std::env::var("SHIMMY_MAX_CTX")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2048u32);
+    let rope_scale: f32 = std::env::var("SHIMMY_ROPE_SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| if max_ctx > 2048 { 2048.0 / max_ctx as f32 } else { 1.0 });
+    spec.n_ctx = max_ctx as usize;
+    spec.rope_scale = rope_scale;
+
     let gpu_model =
         BindlessModel::load_from_disk(&device, &PathBuf::from(&model_path), Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
@@ -339,10 +360,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[GPU Server] Output head dequantized to F32 (262 MB)");
 
     // === Initialize KV Cache (Phase 4D) ===
-    // Extended context window: 8192 positions
-    // Shader scores array bumped to match (sh_layer_v1.wgsl)
-    // KV cache VRAM: 8192 × 4 heads × 64 dim × 4 bytes × 22 layers × 2 = ~352 MB
-    let max_ctx: u32 = 4096;
     let kv_cache = Arc::new(Mutex::new(KVCache::new(
         &device,
         spec.n_layer,
@@ -377,20 +394,20 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx_queue, mut rx_queue) = tokio::sync::mpsc::channel::<JobRequest>(15);
 
     let states_for_http = Arc::clone(&job_states);
+    let sessions_for_http = Arc::clone(&session_states);
     let streams_for_http = Arc::clone(&stream_channels);
     let http_bind_addr = shimmy_bind_addr.clone();
+    let listener = tokio::net::TcpListener::bind(&http_bind_addr).await?;
+    eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
     tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind(&http_bind_addr)
-            .await
-            .unwrap();
-        eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
         loop {
             if let Ok((stream, _)) = listener.accept().await {
                 let tx = tx_queue.clone();
                 let states = Arc::clone(&states_for_http);
+                let sessions = Arc::clone(&sessions_for_http);
                 let streams = Arc::clone(&streams_for_http);
                 tokio::spawn(async move {
-                    if let Err(e) = handle_http_connection(stream, tx, states, streams).await {
+                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams).await {
                         eprintln!("[HTTP] Connection error: {}", e);
                     }
                 });
@@ -532,16 +549,16 @@ async fn handle_http_connection(
     mut stream: tokio::net::TcpStream,
     tx: tokio::sync::mpsc::Sender<JobRequest>,
     states: Arc<Mutex<std::collections::HashMap<String, JobState>>>,
+    _session_states: Arc<Mutex<std::collections::HashMap<String, SessionState>>>,
     stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut buffer = [0; 10240];
-    let bytes_read = stream.read(&mut buffer).await?;
-    if bytes_read == 0 {
+    use tokio::io::AsyncWriteExt;
+    let request_bytes = read_http_request(&mut stream).await?;
+    if request_bytes.is_empty() {
         return Ok(());
     }
 
-    let request_str = String::from_utf8_lossy(&buffer[..bytes_read]);
+    let request_str = String::from_utf8_lossy(&request_bytes);
 
     let mut lines = request_str.lines();
     let first_line = lines.next().unwrap_or("");
@@ -757,6 +774,66 @@ async fn handle_http_connection(
     Ok(())
 }
 
+fn find_header_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn parse_content_length(header_text: &str) -> usize {
+    header_text
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.trim().eq_ignore_ascii_case("Content-Length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0)
+}
+
+async fn read_http_request(
+    stream: &mut tokio::net::TcpStream,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use tokio::io::AsyncReadExt;
+
+    const MAX_REQUEST_SIZE: usize = 1024 * 1024;
+
+    let mut buffer = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    let mut expected_len = None;
+
+    loop {
+        let bytes_read = stream.read(&mut chunk).await?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        buffer.extend_from_slice(&chunk[..bytes_read]);
+
+        if buffer.len() > MAX_REQUEST_SIZE {
+            return Err("request too large".into());
+        }
+
+        if expected_len.is_none() {
+            if let Some(header_end) = find_header_end(&buffer) {
+                let header_text = String::from_utf8_lossy(&buffer[..header_end]);
+                let content_length = parse_content_length(&header_text);
+                expected_len = Some(header_end + 4 + content_length);
+                if buffer.len() >= header_end + 4 + content_length {
+                    break;
+                }
+            }
+        } else if let Some(total_len) = expected_len {
+            if buffer.len() >= total_len {
+                break;
+            }
+        }
+    }
+
+    Ok(buffer)
+}
+
 /// Load and dequantize output.weight to F32 (workaround for Q6_K on GPU)
 fn load_output_head_f32(
     model_path: &str,
@@ -825,12 +902,39 @@ fn load_output_head_f32(
     Ok(buffer)
 }
 
-async fn process_inference_job(
-    job_id: String,
-    states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JobState>>>,
-    session_states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, SessionState>>>,
-    stream_tx: Option<tokio::sync::broadcast::Sender<String>>,
-    req: InferenceRequest,
+fn build_templated_prompt(
+    prompt_mode: &str,
+    user_prompt: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match prompt_mode {
+        "raw" => Ok(user_prompt.to_string()),
+        "developer" => Ok(format!(
+            "<|im_start|>system\nYou are a Rust code output machine. Output only valid Rust source code, no prose, no markdown fences.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n// BEGIN_RUST_FILE\n",
+            user_prompt
+        )),
+        "creative" => Ok(format!(
+            "<|system|>\nYou are a talented creative writer.</s>\n<|user|>\n{}</s>\n<|assistant|>\n",
+            user_prompt
+        )),
+        "creative-chatml" => Ok(format!(
+            "<|im_start|>system\nYou are a talented creative writer.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+            user_prompt
+        )),
+        other => Err(format!(
+            "Unknown prompt_mode: {} (expected raw|developer|creative|creative-chatml)",
+            other
+        )
+        .into()),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_inference_completion(
+    job_id: Option<&str>,
+    states: Option<&Arc<Mutex<std::collections::HashMap<String, JobState>>>>,
+    stream_tx: Option<&tokio::sync::broadcast::Sender<String>>,
+    req: &InferenceRequest,
+    prior_tokens: &[u32],
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     model: &BindlessModel,
@@ -839,15 +943,13 @@ async fn process_inference_job(
     tokenizer: &Tokenizer,
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
-    output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
-) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
-    const SESSION_WINDOW_TOKENS: usize = 2048;
-
+    output_head_f32: &wgpu::Buffer,
+) -> Result<(InferenceResponse, String), Box<dyn std::error::Error>> {
     let max_new_tokens = req.max_tokens.unwrap_or(64);
     let temperature = req.temperature.unwrap_or(0.8);
     let top_p = req.top_p.unwrap_or(0.95);
     let rep_penalty = req.repetition_penalty.unwrap_or(1.1);
-    let use_stream = req.stream.unwrap_or(false);
+    let use_stream = req.stream.unwrap_or(false) && stream_tx.is_some();
     let mut rng = Rng::new(req.seed.unwrap_or(42));
 
     eprintln!(
@@ -855,55 +957,20 @@ async fn process_inference_job(
         temperature, top_p, rep_penalty, use_stream
     );
 
-    // If streaming, send HTTP headers immediately so data flows to the client
-    if use_stream { /* Streaming not natively fully supported with queue architecture yet */ }
-
-    // === GPU-Specific Inference Setup ===
-    // Historically this server hard-wrapped prompts in a creative-writer chat template.
-    // For Repro Arena experiments we support prompt_mode to compare behaviors.
+    let disable_im_end_stop = env_flag("SHIMMY_DISABLE_IM_END_STOP");
+    let disable_helical_shift = env_flag("SHIMMY_DISABLE_HELICAL_SHIFT");
     let prompt_mode = req.prompt_mode.as_deref().unwrap_or("creative").to_string();
-    let user_prompt = req.prompt.as_deref().unwrap();
-    // TinyLlama-Chat expects ChatML (<|im_start|> ... <|im_end|>), not <|system|> ... </s>.
-    let templated_prompt = match prompt_mode.as_str() {
-        "raw" => user_prompt.to_string(),
-        "developer" => format!(
-            "<|im_start|>system\nYou are a Rust code output machine. Output only valid Rust source code, no prose, no markdown fences.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n// BEGIN_RUST_FILE\n",
-            user_prompt
-        ),
-        "creative" => format!(
-            "<|im_start|>system\nYou are a talented creative writer.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-            user_prompt
-        ),
-        other => {
-            return Err(format!(
-                "Unknown prompt_mode: {} (expected raw|developer|creative)",
-                other
-            )
-            .into());
-        }
-    };
+    let user_prompt = req.prompt.as_deref().ok_or("missing prompt")?;
+    let templated_prompt = build_templated_prompt(&prompt_mode, user_prompt)?;
     let mut prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
-    let session_id = req.session_id.clone();
-    if let Some(session_id) = session_id.as_ref() {
-        let prior_tokens = {
-            let st = session_states.lock().unwrap();
-            st.get(session_id)
-                .map(|state| state.token_window.clone())
-                .unwrap_or_default()
-        };
-
-        if !prior_tokens.is_empty() {
-            prompt_tokens = prior_tokens
-                .into_iter()
-                .chain(prompt_tokens.into_iter())
-                .rev()
-                .take(SESSION_WINDOW_TOKENS)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect();
-        }
+    if !prior_tokens.is_empty() {
+        prompt_tokens = prior_tokens
+            .iter()
+            .copied()
+            .chain(prompt_tokens.into_iter())
+            .collect();
     }
+
     let eos = tokenizer.eos_token();
     let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
         if v.len() == 1 {
@@ -913,8 +980,14 @@ async fn process_inference_job(
         }
     });
 
-    let mut grammar_state: Option<GrammarState> = if prompt_mode == "developer" {
-        let grammar = Grammar::new(developer_mode_grammar())
+    let grammar_text = if prompt_mode == "developer" {
+        Some(developer_mode_grammar())
+    } else {
+        None
+    };
+
+    let mut grammar_state: Option<GrammarState> = if let Some(grammar_text) = grammar_text {
+        let grammar = Grammar::new(grammar_text)
             .map_err(|e| format!("developer grammar parse failed: {}", e))?;
         Some(
             GrammarState::new(grammar)
@@ -927,11 +1000,7 @@ async fn process_inference_job(
     let vocab_texts: Option<Vec<String>> = if grammar_state.is_some() {
         Some(
             (0..spec.n_vocab)
-                .map(|tid| {
-                    tokenizer
-                        .decode_single(tid as u32, true)
-                        .unwrap_or_default()
-                })
+                .map(|tid| tokenizer.decode_single(tid as u32, true).unwrap_or_default())
                 .collect(),
         )
     } else {
@@ -946,13 +1015,12 @@ async fn process_inference_job(
         prompt_tokens.len()
     );
 
-    // Get model parameters
     let dim = spec.n_embd as u32;
     let embd_weight_offset = model
         .metadata
         .get_tensor_offset("token_embd.weight")
         .expect("token_embd.weight not found");
-    let row_bytes = (dim / 32) * 18; // Q4_0 quantization
+    let row_bytes = (dim / 32) * 18;
 
     let layer_params = LayerParams {
         dim,
@@ -972,54 +1040,40 @@ async fn process_inference_job(
     let mut metrics_violation = None;
     let mut generated_count = 0;
 
-    // === Reset KV Cache for New Conversation ===
     {
         let mut cache = kv_cache.lock().unwrap();
         cache.reset();
     }
 
-    // === PREFILL PHASE: Process all prompt tokens ===
     eprintln!(
         "[GPU Server] Prefill phase: processing {} prompt tokens...",
         prompt_tokens.len()
     );
 
-    // Batch dequant all prompt tokens on CPU (via GPU calls, but aggregated)
     let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
-    for (_seq_pos, &token_id) in prompt_tokens.iter().enumerate() {
+    for &token_id in &prompt_tokens {
         let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
         let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
         batched_embd.extend_from_slice(&embd);
     }
 
-    // Run full model prefill in one shot
-    // Note: We use the existing KV cache state (which was reset earlier)
-    // The pipeline will handle batch_size calculation from input length.
     let (_final_act, _l21, prefill_logits_f32) = {
         let cache_guard = kv_cache.lock().unwrap();
-        pipeline.run_full_model_with_cache_state(
+        pipeline.run_full_model_prefill_chunked_with_cache_state(
             device,
             queue,
             model,
             &batched_embd,
             Some(&output_head_f32),
-            0,                          // starting pos
-            prompt_tokens.len() as u32, // resulting seq_len after this batch
+            0,
             Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
             spec,
+            128,
         )
     };
 
-    // Update KV cache position tracking (since run_full_model doesn't update the struct field)
     {
         let mut cache = kv_cache.lock().unwrap();
-        // Manually advance position
-        // The pipelines wrote to pos 0..len-1
-        // So next token will be at pos = len
-        // We need to simulate `increment` call N times or set field directly if accessible.
-        // KVCache struct in `kv_cache.rs` has `length` and `max_length`.
-        // Let's check KVCache methods.
-        // It has `increment()`.
         for _ in 0..prompt_tokens.len() {
             cache.increment();
         }
@@ -1027,8 +1081,6 @@ async fn process_inference_job(
 
     eprintln!("[GPU Server] Prefill complete. Cache info updated.");
 
-    // === COMPUTE INITIAL LOGITS FROM PREFILL OUTPUT ===
-    // Define `norm_params` for decoding phase
     let norm_weight_offset = model
         .metadata
         .get_tensor_offset("output_norm.weight")
@@ -1040,20 +1092,13 @@ async fn process_inference_job(
         padding: 0,
     };
 
-    // We can use `prefill_logits_f32` as the initial logits_vec.
     let mut logits_vec = prefill_logits_f32;
 
-    // === DECODE PHASE: Generate new tokens ===
-    // Note: We already have logits from prefill ready for first sample
-
     for _step in 0..max_new_tokens {
-        // === STEP 1: Token Selection from Current Logits ===
-
         if let (Some(gs), Some(vocab)) = (grammar_state.as_ref(), vocab_texts.as_ref()) {
             apply_grammar_mask(&mut logits_vec, gs, vocab, eos, im_end_token);
         }
 
-        // FSE Metrics Computation (CPU)
         let raw_logits: Vec<f32> = logits_vec
             .iter()
             .filter(|&&x| x > -100.0)
@@ -1070,7 +1115,6 @@ async fn process_inference_job(
         ppl_window.push_back(entropy.exp());
         let perplexity = ppl_window.iter().sum::<f32>() / ppl_window.len() as f32;
 
-        // Safety Check (Redo Switch)
         let is_unsafe = perplexity > 500.0 || norm > 1e5;
 
         let next_token = if is_unsafe {
@@ -1081,10 +1125,8 @@ async fn process_inference_job(
             if metrics_violation.is_none() {
                 metrics_violation = Some(format!("Self-Healed PPL Spike: {:.2}", perplexity));
             }
-            // Greedy fallback on safety violation
             sample_token(&mut logits_vec, 0.0, 1.0, 1.0, &[], &mut rng)
         } else {
-            // Temperature + Top-P + Repetition Penalty sampling
             sample_token(
                 &mut logits_vec,
                 temperature,
@@ -1095,36 +1137,25 @@ async fn process_inference_job(
             )
         };
 
-        // Track recent tokens for repetition penalty (sliding window of 64)
         recent_tokens.push(next_token);
         if recent_tokens.len() > 64 {
             recent_tokens.remove(0);
         }
 
-        // === STEP 2: Check EOS ===
-        if next_token == eos {
-            if req.ignore_eos.unwrap_or(false) {
-                // Keep going, but let the user know by emitting a space or similar,
-                // or just skip termination and let the model hallucinate forward
-            } else {
-                stop_reason = "eos";
-                break;
-            }
+        if next_token == eos && !req.ignore_eos.unwrap_or(false) {
+            stop_reason = "eos";
+            break;
         }
 
-        // TinyLlama-Chat uses ChatML; allow clean termination on <|im_end|>.
-        if let Some(im_end) = im_end_token {
-            if next_token == im_end {
-                if req.ignore_eos.unwrap_or(false) {
-                    // Explicit override: keep generating even after <|im_end|>
-                } else {
+        if !disable_im_end_stop {
+            if let Some(im_end) = im_end_token {
+                if next_token == im_end && !req.ignore_eos.unwrap_or(false) {
                     stop_reason = "im_end";
                     break;
                 }
             }
         }
 
-        // === STEP 3: Decode Token ===
         let piece = tokenizer.decode_single(next_token, true)?;
         eprintln!(
             "[TOKEN] Step {}: id={}, text={:?}",
@@ -1133,13 +1164,15 @@ async fn process_inference_job(
         generated_text.push_str(&piece);
         generated_count += 1;
 
-        if let Some(tx) = stream_tx.as_ref() {
+        if let Some(tx) = stream_tx {
             let _ = tx.send(piece.clone());
         }
 
-        if let Ok(mut st) = states.lock() {
-            if let Some(state) = st.get_mut(&job_id) {
-                state.partial_text = Some(generated_text.clone());
+        if let (Some(states_map), Some(job_id_ref)) = (states, job_id) {
+            if let Ok(mut st) = states_map.lock() {
+                if let Some(state) = st.get_mut(job_id_ref) {
+                    state.partial_text = Some(generated_text.clone());
+                }
             }
         }
 
@@ -1160,11 +1193,16 @@ async fn process_inference_job(
             break;
         }
 
-        // === STEP 4: Compute Next Logits ===
-        // Process the newly selected token through all layers
+        if disable_helical_shift {
+            let cache = kv_cache.lock().unwrap();
+            if cache.get_seq_len() >= cache.max_len() {
+                stop_reason = "context_limit";
+                metrics_violation = Some(format!("context_limit:{}", cache.max_len()));
+                break;
+            }
+        }
 
-        // Check for Helical shift BEFORE running layers to ensure new token has room at correct position
-        {
+        if !disable_helical_shift {
             let mut cache = kv_cache.lock().unwrap();
             let mut current_len = cache.get_seq_len();
 
@@ -1177,7 +1215,6 @@ async fn process_inference_job(
                     cache.max_len(),
                     shift_amt
                 );
-                // Shift all layers
                 for layer_idx in 0..spec.n_layer {
                     shift_pipeline.execute(
                         device,
@@ -1195,7 +1232,6 @@ async fn process_inference_job(
                     );
                 }
 
-                // Update length
                 current_len -= shift_amt;
                 cache.set_seq_len(current_len);
                 eprintln!(
@@ -1205,12 +1241,10 @@ async fn process_inference_job(
             }
         }
 
-        // 4a. Get embedding for next token
         let row_offset = embd_weight_offset + (next_token as u64 * row_bytes as u64);
         let mut layer_output =
             pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
 
-        // 4b. Run all transformer layers with KV cache
         for layer_idx in 0..spec.n_layer {
             let layer_offsets = model
                 .metadata
@@ -1230,28 +1264,24 @@ async fn process_inference_job(
             );
         }
 
-        // 4c. Increment KV Cache position
         {
             let mut cache = kv_cache.lock().unwrap();
             cache.increment();
         }
 
-        // 4d. Final RMSNorm
         let normed_output =
             pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
 
-        // 4e. Output head (LM head projection)
         logits_vec = pipeline.run_matmul_f32(
             device,
             queue,
             output_head_f32,
             &normed_output,
-            spec.n_vocab as u32, // vocab_size
+            spec.n_vocab as u32,
             dim,
         );
     }
 
-    // === Return Result to Engine Worker ===
     let include_debug_raw = std::env::var("SHIMMY_DEBUG_RAW")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
@@ -1302,36 +1332,6 @@ async fn process_inference_job(
         (None, None)
     };
 
-    let response_suffix = if prompt_mode == "raw" {
-        "</s>\n"
-    } else {
-        ""
-    };
-
-    if let Some(session_id) = session_id {
-        let mut appended_tokens = tokenizer.encode(&templated_prompt, true)?;
-        if !final_text.is_empty() {
-            let assistant_tail = format!("{}{}", final_text, response_suffix);
-            appended_tokens.extend(tokenizer.encode(&assistant_tail, false)?);
-        }
-
-        let new_window = {
-            let mut st = session_states.lock().unwrap();
-            let session = st.entry(session_id).or_default();
-            session.token_window.extend(appended_tokens);
-            if session.token_window.len() > SESSION_WINDOW_TOKENS {
-                let drop_count = session.token_window.len() - SESSION_WINDOW_TOKENS;
-                session.token_window.drain(0..drop_count);
-            }
-            session.token_window.clone()
-        };
-
-        eprintln!(
-            "[SESSION] Stored {} tokens in rolling window",
-            new_window.len()
-        );
-    }
-
     let resp = InferenceResponse {
         text: final_text,
         stop_reason: stop_reason.to_string(),
@@ -1346,6 +1346,98 @@ async fn process_inference_job(
         debug_sanitizer_reason: (include_debug_raw && prompt_mode == "developer")
             .then(|| debug_sanitizer_reason.unwrap_or_else(|| "(no_reason)".to_string())),
     };
+
+    Ok((resp, templated_prompt))
+}
+
+async fn process_inference_job(
+    job_id: String,
+    states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JobState>>>,
+    session_states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, SessionState>>>,
+    stream_tx: Option<tokio::sync::broadcast::Sender<String>>,
+    req: InferenceRequest,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    model: &BindlessModel,
+    pipeline: &BindlessPipeline,
+    shift_pipeline: &RopeShiftPipeline,
+    tokenizer: &Tokenizer,
+    spec: &ModelSpec,
+    kv_cache: Arc<Mutex<KVCache>>,
+    output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
+) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
+    let session_window_tokens = spec.n_ctx;
+    let disable_session_window = env_flag("SHIMMY_DISABLE_SESSION_WINDOW");
+    let session_id = req.session_id.clone();
+
+    let prior_tokens = if !disable_session_window {
+        if let Some(session_id_ref) = session_id.as_deref() {
+            let st = session_states.lock().unwrap();
+            st.get(session_id_ref)
+                .map(|state| {
+                    state
+                        .token_window
+                        .iter()
+                        .copied()
+                        .rev()
+                        .take(session_window_tokens)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    let (resp, templated_prompt) = run_inference_completion(
+        Some(&job_id),
+        Some(&states),
+        stream_tx.as_ref(),
+        &req,
+        &prior_tokens,
+        device,
+        queue,
+        model,
+        pipeline,
+        shift_pipeline,
+        tokenizer,
+        spec,
+        Arc::clone(&kv_cache),
+        output_head_f32,
+    )?;
+
+    if !disable_session_window {
+        if let Some(session_id_ref) = session_id.as_deref() {
+            let response_suffix = if req.prompt_mode.as_deref().unwrap_or("creative") == "raw" {
+                "</s>\n"
+            } else {
+                ""
+            };
+            let mut appended_tokens = tokenizer.encode(&templated_prompt, true)?;
+            if !resp.text.is_empty() {
+                let assistant_tail = format!("{}{}", resp.text, response_suffix);
+                appended_tokens.extend(tokenizer.encode(&assistant_tail, false)?);
+            }
+
+            let new_window = {
+                let mut st = session_states.lock().unwrap();
+                let session = st.entry(session_id_ref.to_string()).or_default();
+                session.token_window.extend(appended_tokens);
+                if session.token_window.len() > session_window_tokens {
+                    let drop_count = session.token_window.len() - session_window_tokens;
+                    session.token_window.drain(0..drop_count);
+                }
+                session.token_window.clone()
+            };
+
+            eprintln!("[SESSION] Stored {} tokens in rolling window", new_window.len());
+        }
+    }
 
     Ok(resp)
 }

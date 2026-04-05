@@ -1,0 +1,99 @@
+{
+  "session_id": "ab-count_vowels-shadow-20260403_154713",
+  "token_window_len": 153,
+  "active_card": {
+    "goal": "Write a function named count_vowel that takes a &str and returns the count of ASCII vowel as usize. It must not allocate a new string.",
+    "success": [
+      "tests included"
+    ],
+    "must": [
+      "reject empty input"
+    ],
+    "must_not": [],
+    "exact": [],
+    "assume": [],
+    "unknown": [],
+    "facts": [],
+    "now": "",
+    "next": [],
+    "blocked": [],
+    "done": [],
+    "risks": []
+  },
+  "card_history": [
+    {
+      "phase": "bootstrap",
+      "recorded_at": 1775250267203,
+      "card": {
+        "goal": "write a function named count_vowel that takes a &str and returns the count of ascii vowel as usize. It must not allocate a new string. Include at least one unit test.",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [
+          "panic"
+        ],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "write implementation",
+        "next": [
+          "add tests"
+        ],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    },
+    {
+      "phase": "post_turn",
+      "recorded_at": 1775250338168,
+      "card": {
+        "goal": "Write a function named count_vowel that takes a &str and returns the count of ASCII vowel as usize. It must not allocate a new string.",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "",
+        "next": [],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    },
+    {
+      "phase": "post_turn",
+      "recorded_at": 1775250443947,
+      "card": {
+        "goal": "Write a function named count_vowel that takes a &str and returns the count of ASCII vowel as usize. It must not allocate a new string.",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "",
+        "next": [],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    }
+  ],
+  "last_card_error": null
+}

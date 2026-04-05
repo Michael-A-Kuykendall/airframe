@@ -1,0 +1,245 @@
+82f28e1 feat(cli-tools): rescue shimmy-console intact source files and map into airframe crate workspace
+ .beads/.gitignore                                  |   44 +
+ .beads/README.md                                   |   81 +
+ .beads/config.yaml                                 |   62 +
+ .beads/interactions.jsonl                          |    0
+ .beads/issues.jsonl                                |   16 +
+ .beads/metadata.json                               |    4 +
+ .gitattributes                                     |    3 +
+ .github/copilot-instructions.md                    |   46 +
+ .../instructions/airframe-brain.instructions.md    |   29 +
+ .gitignore                                         |    4 +
+ .mcp/airframe-brain-mcp.py                         |  409 ++
+ .mcp/airframe-brain.db                             |  Bin 0 -> 6742016 bytes
+ .../brain-index-00-overview.instructions.md        |   27 +
+ .../brain-index-01-airframe-docsa.instructions.md  |   95 +
+ .../brain-index-01-airframe-docsb.instructions.md  |   95 +
+ .../brain-index-01-airframe-docsc.instructions.md  |   95 +
+ .../brain-index-01-airframe-docsd.instructions.md  |   95 +
+ .../brain-index-01-airframe-docse.instructions.md  |   95 +
+ .../brain-index-01-airframe-docsf.instructions.md  |   95 +
+ .../brain-index-01-airframe-docsg.instructions.md  |   95 +
+ .../brain-index-01-airframe-docsh.instructions.md  |   95 +
+ .../brain-index-01-airframe-docsi.instructions.md  |   94 +
+ .../brain-index-01-airframe-docsj.instructions.md  |   29 +
+ .../brain-index-02-chats.instructions.md           |   18 +
+ .../brain-index-03-topicsa.instructions.md         |   82 +
+ .../brain-index-03-topicsb.instructions.md         |   51 +
+ .../brain-index-04-timeline.instructions.md        |   47 +
+ .mcp/build_airframe_brain.py                       |  478 ++
+ .../data_level0.bin                                |  Bin 0 -> 11640000 bytes
+ .../header.bin                                     |  Bin 0 -> 100 bytes
+ .../index_metadata.pickle                          |  Bin 0 -> 38658 bytes
+ .../length.bin                                     |  Bin 0 -> 40000 bytes
+ .../link_lists.bin                                 |  Bin 0 -> 8856 bytes
+ .../data_level0.bin                                |  Bin 0 -> 11640000 bytes
+ .../header.bin                                     |  Bin 0 -> 100 bytes
+ .../index_metadata.pickle                          |  Bin 0 -> 197202 bytes
+ .../length.bin                                     |  Bin 0 -> 40000 bytes
+ .../link_lists.bin                                 |  Bin 0 -> 43464 bytes
+ .mcp/chroma_db/chroma.sqlite3                      |  Bin 0 -> 41865216 bytes
+ .mcp/chroma_index_state.json                       |    4 +
+ .mcp/generate_brain_index.sh                       |  354 ++
+ .mcp/sqlite3.exe                                   |  Bin 0 -> 3885056 bytes
+ .vscode/mcp.json                                   |   11 +
+ .vscode/settings.json                              |   26 +
+ AGENTS.md                                          |   52 +
+ AIRFRAME_BRAIN_HANDBOOK.md                         |   99 +
+ AIRFRAME_CLI_INTEGRATION_PLAN.md                   |  109 +
+ Cargo.lock                                         | 4213 ++++++++++++++
+ Cargo.toml                                         |   42 +
+ README.md                                          |    1 +
+ crates/console/.clippy.toml                        |    8 +
+ crates/console/.rustfmt.toml                       |  Bin 0 -> 1719 bytes
+ crates/console/Cargo.toml                          |   33 +
+ crates/console/bash.exe.stackdump                  |    9 +
+ crates/console/src/adapters/http_adapter.rs        |  219 +
+ crates/console/src/adapters/mock_adapter.rs        |  248 +
+ crates/console/src/adapters/mod.rs                 |    7 +
+ crates/console/src/adapters/ws_adapter.rs          |  115 +
+ crates/console/src/bin/system_test.rs              |   64 +
+ crates/console/src/commands/analyze.rs             |   48 +
+ crates/console/src/commands/chat.rs                |   36 +
+ crates/console/src/commands/config.rs              |   80 +
+ crates/console/src/commands/edit.rs                |   83 +
+ crates/console/src/commands/license.rs             |   71 +
+ crates/console/src/commands/mod.rs                 |    7 +
+ crates/console/src/commands/model.rs               |   92 +
+ crates/console/src/commands/sessions.rs            |   69 +
+ crates/console/src/config.rs                       |   86 +
+ crates/console/src/context.rs                      |   15 +
+ crates/console/src/discovery/mod.rs                |  129 +
+ crates/console/src/history.rs                      |  340 ++
+ crates/console/src/lib.rs                          |   28 +
+ crates/console/src/license/client.rs               |  108 +
+ crates/console/src/license/mod.rs                  |    5 +
+ crates/console/src/license/validator.rs            |  106 +
+ crates/console/src/plugins.rs                      |    5 +
+ crates/console/src/session_store.rs                |    5 +
+ crates/console/src/tools/analysis.rs               |  235 +
+ crates/console/src/tools/analysis_tests.rs         |   32 +
+ crates/console/src/tools/command.rs                |   88 +
+ crates/console/src/tools/command_git_tests.rs      |   19 +
+ crates/console/src/tools/docs.rs                   |   70 +
+ crates/console/src/tools/docs_tests.rs             |   12 +
+ crates/console/src/tools/file_ops.rs               |  250 +
+ crates/console/src/tools/git.rs                    |  240 +
+ crates/console/src/tools/image.rs                  |  259 +
+ crates/console/src/tools/loader.rs                 |  281 +
+ crates/console/src/tools/mod.rs                    |  251 +
+ crates/console/src/tools/system.rs                 |   80 +
+ crates/console/src/websocket/client.rs             |    0
+ crates/console/src/websocket/mod.rs                |   14 +
+ crates/console/tests/integration_tests.rs          | 1330 +++++
+ crates/console/tests/model_helpers.rs              |   91 +
+ crates/console/tests/websocket_chat_tests.rs       |  302 +
+ crates/libfse/AUDIT_INFO.md                        |   52 +
+ crates/libfse/Cargo.toml                           |   30 +
+ crates/libfse/README.md                            |   42 +
+ crates/libfse/STRATEGY.md                          |   40 +
+ crates/libfse/benches/compare_scanners.rs          |   52 +
+ crates/libfse/benches/damage_assessment.rs         |   83 +
+ crates/libfse/docs/ARCHITECT_FSE_METRICS.md        |  119 +
+ crates/libfse/docs/COMMERCIAL_VALUE_PROP.md        |   36 +
+ crates/libfse/docs/FAIL_FAST_ENTANGLEMENT.md       |   34 +
+ crates/libfse/docs/FAIL_FAST_EXPERIMENT_RESULT.md  |   37 +
+ crates/libfse/docs/FAIL_FAST_FINAL_REPORT.md       |   44 +
+ crates/libfse/docs/FAIL_FAST_MAXPROB_RESULT.md     |   41 +
+ crates/libfse/docs/FAIL_FAST_METRICS_SUITE.md      |   73 +
+ crates/libfse/docs/FAIL_FAST_REDO_RESULT.md        |   39 +
+ crates/libfse/docs/FAIL_FAST_VARIANCE_RESULT.md    |   30 +
+ crates/libfse/docs/INVARIANT_REDO_SWITCH.md        |   81 +
+ crates/libfse/docs/NAMING_CONVENTION_MILITARY.md   |   50 +
+ crates/libfse/docs/PROMPT_FOR_LIBFSE_GENERATION.md |   61 +
+ crates/libfse/docs/REDO_SWITCH_ANALYSIS.md         |   28 +
+ .../docs/UNIQUE_VALUE_PROPOSITION_METRICS.md       |   87 +
+ crates/libfse/docs/V4-RELEASE-MANIFEST.txt         |   23 +
+ crates/libfse/docs/V4_PERFORMANCE_ANALYSIS.md      |   34 +
+ crates/libfse/docs/grok-chat.md                    |  276 +
+ crates/libfse/docs/interior-chat.md                |  939 +++
+ crates/libfse/docs/other-chat.md                   | 5974 ++++++++++++++++++++
+ crates/libfse/docs/patent_materials/Drawings.pdf   |  213 +
+ .../libfse/docs/patent_materials/Specification.pdf |  Bin 0 -> 132332 bytes
+ crates/libfse/examples/fail_fast_entropy.rs        |   76 +
+ crates/libfse/src/lib.rs                           |   67 +
+ crates/libfse/src/metrics.rs                       |  121 +
+ crates/libfse/src/scanner.rs                       |  211 +
+ crates/libfse/src/store.rs                         |  270 +
+ crates/libfse/src/tests_integration.rs             |   77 +
+ crates/libfse/tests/determinism.rs                 |   47 +
+ crates/libfse/tests/differential.rs                |   57 +
+ crates/libfse/tests/no_alloc.rs                    |   59 +
+ examples/simple_flight.rs                          |   69 +
+ fixtures/oracle_22layer_hello.csv                  |   23 +
+ fixtures/wikitext-2-raw/wiki.test.raw              |    1 +
+ shimmy_integration                                 |    1 +
+ src/adapter.rs                                     |   54 +
+ src/backend/bindless/kv_cache.rs                   |  358 ++
+ src/backend/bindless/loader.rs                     |   98 +
+ src/backend/bindless/metadata.rs                   |  333 ++
+ src/backend/bindless/mod.rs                        |   17 +
+ src/backend/bindless/pipeline.rs                   | 2684 +++++++++
+ src/backend/bindless/pipeline_shift.rs             |  516 ++
+ src/backend/bindless/preflight.rs                  |  148 +
+ src/backend/bindless/sh_dequant_q4_0.wgsl          |  108 +
+ src/backend/bindless/sh_layer_v1.wgsl              |  551 ++
+ src/backend/bindless/sh_layer_v1.wgsl.bak          |  542 ++
+ src/backend/bindless/sh_matmul_f32.wgsl            |   35 +
+ src/backend/bindless/sh_matmul_q4_0.wgsl           |   80 +
+ src/backend/bindless/sh_rmsnorm.wgsl               |   69 +
+ src/backend/bindless/sh_rope_shift.wgsl            |   66 +
+ src/backend/bindless/test_layer_dump.rs            |  219 +
+ src/backend/bindless/test_parity.rs                |  282 +
+ src/backend/bindless/test_rope.rs                  |   60 +
+ src/backend/bindless/tests.rs                      |  552 ++
+ src/backend/bindless/tests_gpu_math.rs             |  249 +
+ src/backend/logit_mask.wgsl                        |   31 +
+ src/backend/mod.rs                                 |    4 +
+ src/backend/pipeline.rs                            |  118 +
+ src/backend/tests.rs                               |   82 +
+ src/backend/wgpu.rs                                |   41 +
+ src/bin/layer_dump_gpu.rs                          |  241 +
+ src/bin/shimmy_eval.rs                             | 2285 ++++++++
+ src/bin/shimmy_server_gpu.rs                       | 1258 +++++
+ src/bin/window_boundary_probe.rs                   |  422 ++
+ src/conformance/diff.rs                            |  404 ++
+ src/conformance/fixtures.rs                        |  495 ++
+ src/conformance/mod.rs                             |    2 +
+ src/control.rs                                     |   58 +
+ src/core/dequant/mod.rs                            |    9 +
+ src/core/dequant/q4_k.rs                           |  196 +
+ src/core/dequant/q6_k.rs                           |  182 +
+ src/core/error.rs                                  |   96 +
+ src/core/f16.rs                                    |   43 +
+ src/core/ggml_types.rs                             |  248 +
+ src/core/mod.rs                                    |    8 +
+ src/core/model.rs                                  | 1548 +++++
+ src/core/spec.rs                                   |  391 ++
+ src/core/tensor.rs                                 |  234 +
+ src/core/weight_id.rs                              |   93 +
+ src/family/llama.rs                                |  742 +++
+ src/family/mod.rs                                  |    1 +
+ src/fixtures/mod.rs                                |    3 +
+ src/fixtures/prompt_fixtures.rs                    |  302 +
+ src/lib.rs                                         |   19 +
+ src/ops/dispatch.rs                                |  163 +
+ src/ops/mod.rs                                     |    2 +
+ src/ops/reference/activations.rs                   |  136 +
+ src/ops/reference/attention.rs                     |  873 +++
+ src/ops/reference/ffn.rs                           |  278 +
+ src/ops/reference/matmul.rs                        |  255 +
+ src/ops/reference/mod.rs                           |    7 +
+ src/ops/reference/rmsnorm.rs                       |  213 +
+ src/ops/reference/rope.rs                          |  329 ++
+ src/ops/reference/softmax.rs                       |  286 +
+ src/runtime/engine.rs                              |  533 ++
+ src/runtime/kvcache.rs                             |  455 ++
+ src/runtime/mod.rs                                 |    4 +
+ src/runtime/multi_token_engine.rs                  |  540 ++
+ src/runtime/sampling.rs                            |  104 +
+ src/validation/artifacts.rs                        |  162 +
+ src/validation/errors.rs                           |   85 +
+ src/validation/evidence.rs                         |  140 +
+ src/validation/mod.rs                              |   16 +
+ src/validation/projection.rs                       |   72 +
+ src/validation/slice_validator.rs                  |  319 ++
+ tests/attention_f6_f7_verify.rs                    |  304 +
+ tests/cpu_layer1_attention_trace.rs                |   54 +
+ tests/cpu_layer_dump.rs                            |   99 +
+ tests/cpu_prefill_trace.rs                         |   48 +
+ tests/debug_kv_cache_bos.rs                        |  163 +
+ tests/debug_layer1_offsets.rs                      |  108 +
+ tests/debug_weight_loading_layer1.rs               |   67 +
+ tests/ffn_f8_verify.rs                             |  220 +
+ tests/final_norm_algebraic_isolation.rs            |  133 +
+ tests/generate_22layer_oracle.rs                   |  159 +
+ tests/gpu_22layer_verify.rs                        |  331 ++
+ tests/layer1_attention_forensics.rs                |  271 +
+ tests/parity.rs                                    |  164 +
+ tests/spike_fp16_precision.rs                      |  159 +
+ tests/spike_gpu_limits.rs                          |   81 +
+ tests/spike_two_position_cache.rs                  |  314 +
+ tests/spike_wgsl_limits.rs                         |  206 +
+ tests/test_cache_isolation.rs                      |   95 +
+ tests/verify_gpu_buffer_algebraic.rs               |  161 +
+ tests/verify_layer1_weights_on_gpu.rs              |  116 +
+ tests/verify_norm_bank_extraction.rs               |  192 +
+ tests/verify_uniforms_algebraic.rs                 |  205 +
+ 226 files changed, 47561 insertions(+)
+a7d9621 feat: stream token deltas over chunked job transport
+ crates/console/src/adapters/shimmy_adapter.rs | 52 ++++++---------
+ docs/airframe-optimization-checklist.md       |  8 ++-
+ src/bin/shimmy_server_gpu.rs                  | 96 ++++++++++++++++++++++++++-
+ 3 files changed, 119 insertions(+), 37 deletions(-)
+8b66198 feat: add session-based rolling chat context
+ crates/console/src/adapters/shimmy_adapter.rs |  79 ++++++++++++++++---
+ crates/console/src/commands/chat.rs           |  61 +++++++++++++--
+ docs/airframe-optimization-checklist.md       |   8 +-
+ src/bin/shimmy_server_gpu.rs                  | 107 +++++++++++++++++++++++---
+ 4 files changed, 226 insertions(+), 29 deletions(-)
+639895c chore: checkpoint console branch and release plan
+ .gitignore                               |   1 +
+ .vscode/tasks.json                       |  45 +++++
+ docs/shimmy-airframe-release-strategy.md | 317 +++++++++++++++++++++++++++++++
+ src/bin/shimmy_server_gpu.rs             |   1 +
+ 4 files changed, 364 insertions(+)

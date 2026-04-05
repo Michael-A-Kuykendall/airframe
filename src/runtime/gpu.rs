@@ -124,7 +124,7 @@ impl GpuRuntime {
         let output_head_f32 = Self::load_output_head_f32(&model_path_str, &gpu_model, &device, &spec)?;
 
         // KV cache
-        let max_ctx: u32 = 4096;
+        let max_ctx = spec.n_ctx as u32;
         let kv_cache = Arc::new(Mutex::new(KVCache::new(
             &device,
             spec.n_layer,
@@ -220,16 +220,16 @@ impl GpuRuntime {
         // Run prefill through all layers
         let (_final_act, _l21, prefill_logits) = {
             let cache_guard = self.kv_cache.lock().unwrap();
-            self.pipeline.run_full_model_with_cache_state(
+            self.pipeline.run_full_model_prefill_chunked_with_cache_state(
                 &self.device,
                 &self.queue,
                 &self.model,
                 &batched_embd,
                 Some(&self.output_head_f32),
                 0,
-                prompt_tokens.len() as u32,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 &self.spec,
+                128,
             )
         };
 

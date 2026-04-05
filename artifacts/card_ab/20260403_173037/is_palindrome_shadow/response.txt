@@ -1,0 +1,30 @@
+struct is_palindrome {
+    fn is_palindrome(s: &str) -> bool {
+        s.chars().all(|c| c.is_ascii_alphanumeric()) && s.chars().all(|c| c.to_ascii_lowercase() == c)
+    }
+}
+
+// BEGIN_RUST_FILE
+// Tests
+// Empty string
+assert_eq!(is_palindrome(""), true);
+// Single char
+assert_eq!(is_palindrome("a"), true);
+// Mixed-case palindrome
+assert_eq!(is_palindrome("A"), true);
+// Empty string, single char, and mixed-case palindrome
+assert_eq!(is_palindrome("A"), true);
+assert_eq!(is_palindrome("a"), true);
+assert_eq!(is_palindrome("A"), true);
+// End of Rust file
+
+// End of Rust file
+
+// BEGIN_RUST_FILE
+// Tests
+// Empty string
+assert_eq!(is_palindrome(""), true);
+// Single char
+assert_eq!(is_palindrome("a"), true);
+// Mixed-case palindrome
+assert_eq!(is_palind

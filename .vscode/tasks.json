@@ -11,12 +11,216 @@
 				"--bin",
 				"shimmy_server_gpu"
 			],
+			"options": {
+				"env": {
+					"RUST_BACKTRACE": "1",
+					"SHIMMY_PORT": "8080"
+				}
+			},
 			"isBackground": true,
+			"problemMatcher": [
+				{
+					"owner": "custom",
+					"pattern": {
+						"regexp": "^(.*)$",
+						"message": 1
+					},
+					"background": {
+						"activeOnStart": true,
+						"beginsPattern": ".",
+						"endsPattern": "\\[HTTP\\] Async listener spawned on .+"
+					}
+				}
+			],
 			"presentation": {
 				"panel": "dedicated",
 				"reveal": "always",
 				"clear": false
 			},
+			"group": "build"
+		},
+		{
+			"label": "Validate Airframe Short SHA",
+			"type": "process",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\short_story_sha_check.ps1"
+			],
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
+			"label": "Validate Airframe Long Story",
+			"type": "process",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\long_story_check.ps1"
+			],
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
+			"label": "Run Airframe GPU Server (Helical Off)",
+			"type": "process",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--release",
+				"--bin",
+				"shimmy_server_gpu"
+			],
+			"options": {
+				"env": {
+					"RUST_BACKTRACE": "1",
+					"SHIMMY_PORT": "8081",
+					"SHIMMY_DISABLE_HELICAL_SHIFT": "1"
+				}
+			},
+			"isBackground": true,
+			"problemMatcher": [
+				{
+					"owner": "custom",
+					"pattern": {
+						"regexp": "^(.*)$",
+						"message": 1
+					},
+					"background": {
+						"activeOnStart": true,
+						"beginsPattern": ".",
+						"endsPattern": "\\[HTTP\\] Async listener spawned on .+"
+					}
+				}
+			],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
+			"label": "Validate Airframe Long Story (Helical Off)",
+			"type": "process",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\long_story_check.ps1",
+				"-BaseUrl",
+				"http://127.0.0.1:8081",
+				"-OutputFile",
+				"${workspaceFolder}\\artifacts\\story_4k_exact_helical_off_text.txt"
+			],
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
+			"label": "Validate Card Smoke (Shadow)",
+			"type": "process",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\card_smoke_check.ps1",
+				"-CardProcessingMode",
+				"shadow"
+			],
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
+			"label": "Validate Card Smoke (On)",
+			"type": "process",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\card_smoke_check.ps1",
+				"-CardProcessingMode",
+				"on"
+			],
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": false
+			},
+			"group": "build"
+		},
+		{
+			"label": "U: Validate Airframe Default Path",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Run Airframe GPU Server",
+				"Validate Airframe Short SHA",
+				"Validate Airframe Long Story"
+			],
+			"group": "build"
+		},
+		{
+			"label": "U: Validate Airframe Helical-Off Path",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Run Airframe GPU Server (Helical Off)",
+				"Validate Airframe Long Story (Helical Off)"
+			],
+			"group": "build"
+		},
+		{
+			"label": "U: Smoke Shimmy Provider Path",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Run Airframe GPU Server",
+				"Run Shimmy OpenClaw Provider",
+				"Smoke Test Shimmy OpenClaw Provider"
+			],
+			"group": "build"
+		},
+		{
+			"label": "U: Validate Card Shadow Path",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Run Airframe GPU Server",
+				"Validate Card Smoke (Shadow)"
+			],
+			"group": "build"
+		},
+		{
+			"label": "U: Validate Card On Path",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Run Airframe GPU Server",
+				"Validate Card Smoke (On)"
+			],
 			"group": "build"
 		},
 		{
@@ -46,6 +250,20 @@
 				}
 			},
 			"isBackground": true,
+			"problemMatcher": [
+				{
+					"owner": "custom",
+					"pattern": {
+						"regexp": "^(.*)$",
+						"message": 1
+					},
+					"background": {
+						"activeOnStart": true,
+						"beginsPattern": ".",
+						"endsPattern": "listening|Listening|serve"
+					}
+				}
+			],
 			"presentation": {
 				"panel": "dedicated",
 				"reveal": "always",
@@ -101,7 +319,7 @@
 			"id": "shimmyProviderModelPath",
 			"type": "promptString",
 			"description": "Absolute GGUF path for the Shimmy/OpenClaw provider",
-			"default": "C:\\models\\TinyLlama.gguf"
+			"default": "C:\\Users\\micha\\repos\\llama.cpp\\models\\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"
 		},
 		{
 			"id": "shimmyProviderBindAddress",

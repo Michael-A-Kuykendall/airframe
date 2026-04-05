@@ -1,0 +1,4 @@
+Before solving this task, internally create a compact task card with goal, must, must_not, exact, assume, unknown, now, next, done, and risks. Use that card as your operative state. Do not output the card unless necessary. Then solve the task.
+
+Task:
+Write a Rust function parse_port(input: &str) -> Result<u16, String>. Requirements: trim whitespace, reject non-numeric input, reject values outside 1..65535, no panics, no external crates, include unit tests, output Rust source only.

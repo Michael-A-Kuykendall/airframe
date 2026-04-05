@@ -1,0 +1,154 @@
+data: {"token":"Det","step":1}
+
+data: {"token":"ect","step":2}
+
+data: {"token":"ive","step":3}
+
+data: {"token":" E","step":4}
+
+data: {"token":"ve","step":5}
+
+data: {"token":" Ryan","step":6}
+
+data: {"token":" had","step":7}
+
+data: {"token":" never","step":8}
+
+data: {"token":" worked","step":9}
+
+data: {"token":" a","step":10}
+
+data: {"token":" case","step":11}
+
+data: {"token":" quite","step":12}
+
+data: {"token":" like","step":13}
+
+data: {"token":" this","step":14}
+
+data: {"token":" one","step":15}
+
+data: {"token":".","step":16}
+
+data: {"token":" There","step":17}
+
+data: {"token":" was","step":18}
+
+data: {"token":" something","step":19}
+
+data: {"token":" about","step":20}
+
+data: {"token":" the","step":21}
+
+data: {"token":" case","step":22}
+
+data: {"token":" that","step":23}
+
+data: {"token":" intr","step":24}
+
+data: {"token":"igu","step":25}
+
+data: {"token":"ed","step":26}
+
+data: {"token":" her","step":27}
+
+data: {"token":",","step":28}
+
+data: {"token":" and","step":29}
+
+data: {"token":" as","step":30}
+
+data: {"token":" she","step":31}
+
+data: {"token":" del","step":32}
+
+data: {"token":"ved","step":33}
+
+data: {"token":" deeper","step":34}
+
+data: {"token":" into","step":35}
+
+data: {"token":" the","step":36}
+
+data: {"token":" investigation","step":37}
+
+data: {"token":",","step":38}
+
+data: {"token":" it","step":39}
+
+data: {"token":" became","step":40}
+
+data: {"token":" apparent","step":41}
+
+data: {"token":" that","step":42}
+
+data: {"token":" it","step":43}
+
+data: {"token":" wasn","step":44}
+
+data: {"token":"'","step":45}
+
+data: {"token":"t","step":46}
+
+data: {"token":" going","step":47}
+
+data: {"token":" to","step":48}
+
+data: {"token":" be","step":49}
+
+data: {"token":" an","step":50}
+
+data: {"token":" ordinary","step":51}
+
+data: {"token":" matter","step":52}
+
+data: {"token":".","step":53}
+
+data: {"token":" The","step":54}
+
+data: {"token":" lies","step":55}
+
+data: {"token":" were","step":56}
+
+data: {"token":" thick","step":57}
+
+data: {"token":" on","step":58}
+
+data: {"token":" all","step":59}
+
+data: {"token":" sides","step":60}
+
+data: {"token":" of","step":61}
+
+data: {"token":" the","step":62}
+
+data: {"token":" \"","step":63}
+
+data: {"token":"spe","step":64}
+
+data: {"token":"ak","step":65}
+
+data: {"token":"ea","step":66}
+
+data: {"token":",\"","step":67}
+
+data: {"token":" and","step":68}
+
+data: {"token":" E","step":69}
+
+data: {"token":"ve","step":70}
+
+data: {"token":" knew","step":71}
+
+data: {"token":" immediately","step":72}
+
+data: {"token":" who","step":73}
+
+data: {"token":" to","step":74}
+
+data: {"token":" call","step":75}
+
+data: {"token":" for","step":76}
+
+data: {"token":" a","step":77}
+

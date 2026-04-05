@@ -1,0 +1,1222 @@
+--- ../libshimmy/crates/airframe/src/bin/shimmy_server_gpu.rs	2026-03-03 19:19:59.058892500 -0600
++++ src/bin/shimmy_server_gpu.rs	2026-03-22 14:01:52.130300400 -0500
+@@ -1,33 +1,39 @@
+ // GPU-Aware Shimmy Inference Server with FSE Integration
+ // Phase 4D: Full Multi-Layer Inference with KV Cache
+ 
++use airframe::backend::bindless::kv_cache::KVCache;
+ use airframe::backend::bindless::loader::BindlessModel;
++use airframe::backend::bindless::pipeline::{
++    BindlessPipeline, LayerParams, RMSNormParams,
++};
+ use airframe::backend::bindless::pipeline_shift::RopeShiftPipeline;
+-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, MatMulParams, RMSNormParams};
+-use airframe::backend::bindless::kv_cache::KVCache;
+-use airframe::core::spec::ModelSpec;
+-use airframe::core::model::GgufTensorInfo;
+ use airframe::core::dequant::dequantize_q6_k;
++use airframe::core::model::GgufTensorInfo;
++use airframe::core::spec::ModelSpec;
++use libfse::metrics::{
++    logit_l2_norm, logit_variance, max_probability_from_logits, shannon_entropy_from_logits,
++};
++use memmap2::Mmap;
+ use schoolmarm::{Grammar, GrammarState};
++use serde::{Deserialize, Serialize};
+ use shimmytok::Tokenizer;
+-use std::io::{Read, Write};
+-use std::net::{TcpListener, TcpStream};
++use std::io::Write;
++use std::net::TcpStream;
+ use std::path::PathBuf;
+ use std::sync::{Arc, Mutex};
+-use serde::{Deserialize, Serialize};
+-use libfse::metrics::{shannon_entropy_from_logits, logit_variance, max_probability_from_logits, logit_l2_norm};
+-use memmap2::Mmap;
+ 
+ /// Xorshift64* PRNG — fast, deterministic, no external dep
+ struct Rng(u64);
+ impl Rng {
+-    fn new(seed: u64) -> Self { Self(seed.wrapping_add(1)) }
++    fn new(seed: u64) -> Self {
++        Self(seed.wrapping_add(1))
++    }
+     fn next_f32(&mut self) -> f32 {
+         self.0 ^= self.0 >> 12;
+         self.0 ^= self.0 << 25;
+         self.0 ^= self.0 >> 27;
+         let val = self.0.wrapping_mul(0x2545F4914F6CDD1D);
+-        (val >> 40) as f32 / 16777216.0   // 24-bit mantissa → [0, 1)
++        (val >> 40) as f32 / 16777216.0 // 24-bit mantissa → [0, 1)
+     }
+ }
+ 
+@@ -56,21 +62,27 @@
+ 
+     // 2. Temperature = 0 → greedy
+     if temperature < 1e-7 {
+-        return logits.iter()
++        return logits
++            .iter()
+             .enumerate()
+             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+-            .unwrap().0 as u32;
++            .unwrap()
++            .0 as u32;
+     }
+ 
+     // 3. Apply temperature
+     let inv_t = 1.0 / temperature;
+-    for v in logits.iter_mut() { *v *= inv_t; }
++    for v in logits.iter_mut() {
++        *v *= inv_t;
++    }
+ 
+     // 4. Softmax (numerically stable)
+     let max_l = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+     let mut probs: Vec<f32> = logits.iter().map(|&l| (l - max_l).exp()).collect();
+     let sum: f32 = probs.iter().sum();
+-    for p in probs.iter_mut() { *p /= sum; }
++    for p in probs.iter_mut() {
++        *p /= sum;
++    }
+ 
+     // 5. Top-p (nucleus) filtering
+     let mut indexed: Vec<(usize, f32)> = probs.iter().cloned().enumerate().collect();
+@@ -151,8 +163,7 @@
+     let src_path = temp_dir.join(format!("shimmy_compile_check_{}_{}.rs", pid, stamp));
+     let out_path = temp_dir.join(format!("shimmy_compile_check_{}_{}", pid, stamp));
+ 
+-    std::fs::write(&src_path, source)
+-        .map_err(|e| format!("write_temp_failed:{}", e))?;
++    std::fs::write(&src_path, source).map_err(|e| format!("write_temp_failed:{}", e))?;
+ 
+     let output = std::process::Command::new("rustc")
+         .arg("--edition")
+@@ -176,16 +187,18 @@
+ }
+ 
+ #[derive(Deserialize)]
+-struct InferenceRequest {
++pub struct InferenceRequest {
+     pub task: Option<String>,
+     pub prompt: Option<String>,
++    pub session_id: Option<String>,
+     /// Prompt templating mode:
+     /// - "raw": send prompt verbatim (no system/user/assistant wrapping)
+     /// - "developer": wrap in ChatML with developer-focused system prompt
+     /// - "creative" (default): wrap in ChatML with creative-writer system prompt
+     prompt_mode: Option<String>,
+     max_tokens: Option<usize>,
+-    min_tokens: Option<usize>,
++    #[allow(dead_code)]
++    pub min_tokens: Option<usize>,
+     ignore_eos: Option<bool>,
+     temperature: Option<f32>,
+     top_p: Option<f32>,
+@@ -195,8 +208,13 @@
+     expose_candidate: Option<bool>,
+ }
+ 
++#[derive(Clone, Default)]
++pub struct SessionState {
++    pub token_window: Vec<u32>,
++}
++
+ #[derive(Clone, Serialize, Deserialize)]
+-struct InferenceResponse {
++pub struct InferenceResponse {
+     pub text: String,
+     pub stop_reason: String,
+     pub tokens_generated: usize,
+@@ -231,6 +249,8 @@
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub result: Option<InferenceResponse>,
+     #[serde(skip_serializing_if = "Option::is_none")]
++    pub partial_text: Option<String>,
++    #[serde(skip_serializing_if = "Option::is_none")]
+     pub error: Option<String>,
+ }
+ 
+@@ -240,12 +260,16 @@
+ }
+ 
+ #[derive(Serialize)]
++#[allow(dead_code)]
++#[allow(dead_code)]
+ struct StreamTokenEvent {
+     token: String,
+     step: usize,
+ }
+ 
+ #[derive(Serialize)]
++#[allow(dead_code)]
++#[allow(dead_code)]
+ struct StreamDoneEvent {
+     done: bool,
+     stop_reason: String,
+@@ -260,18 +284,22 @@
+ }
+ 
+ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
+-    let model_path = std::env::var("LIBSHIMMY_MODEL_PATH")
+-        .unwrap_or_else(|_| "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string());
++    let model_path = std::env::var("LIBSHIMMY_MODEL_PATH").unwrap_or_else(|_| {
++        "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string()
++    });
+ 
+     eprintln!("[GPU Server] Loading model: {}", model_path);
+-    
++
+     // === GPU Initialization ===
+     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+-    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
+-        power_preference: wgpu::PowerPreference::HighPerformance,
+-        compatible_surface: None,
+-        force_fallback_adapter: false,
+-    }).await.expect("No GPU adapter found");
++    let adapter = instance
++        .request_adapter(&wgpu::RequestAdapterOptions {
++            power_preference: wgpu::PowerPreference::HighPerformance,
++            compatible_surface: None,
++            force_fallback_adapter: false,
++        })
++        .await
++        .expect("No GPU adapter found");
+ 
+     let adapter_limits = adapter.limits();
+     let mut limits = wgpu::Limits::downlevel_defaults();
+@@ -280,23 +308,30 @@
+     limits.max_storage_buffers_per_shader_stage = 8;
+     limits.max_compute_invocations_per_workgroup = 256;
+ 
+-    let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+-        required_limits: limits,
+-        memory_hints: wgpu::MemoryHints::Performance,
+-        ..Default::default()
+-    }).await.expect("Failed to create GPU device");
+-
+-    eprintln!("[GPU Server] GPU initialized: {:?}", adapter.get_info().name);
++    let (device, queue) = adapter
++        .request_device(&wgpu::DeviceDescriptor {
++            required_limits: limits,
++            memory_hints: wgpu::MemoryHints::Performance,
++            ..Default::default()
++        })
++        .await
++        .expect("Failed to create GPU device");
++
++    eprintln!(
++        "[GPU Server] GPU initialized: {:?}",
++        adapter.get_info().name
++    );
+ 
+     // === Load Model to GPU ===
+     let tokenizer = Tokenizer::from_gguf_file(&model_path)?;
+     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+-    let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(&model_path), Some(&spec));
++    let gpu_model =
++        BindlessModel::load_from_disk(&device, &PathBuf::from(&model_path), Some(&spec));
+     let pipeline = BindlessPipeline::new(&device);
+     let shift_pipeline = RopeShiftPipeline::new(&device);
+ 
+     eprintln!("[GPU Server] Model loaded to VRAM");
+-    
++
+     // === Q6_K Output Head Workaround (Phase 4E) ===
+     // TinyLlama Q4_0 uses Q6_K for output.weight (not Q4_0!)
+     // GPU doesn't have Q6_K shader yet, so dequant to F32 on CPU
+@@ -304,9 +339,8 @@
+     eprintln!("[GPU Server] Output head dequantized to F32 (262 MB)");
+ 
+     // === Initialize KV Cache (Phase 4D) ===
+-    // Extended context window: 8192 positions
+-    // Shader scores array bumped to match (sh_layer_v1.wgsl)
+-    // KV cache VRAM: 8192 × 4 heads × 64 dim × 4 bytes × 22 layers × 2 = ~352 MB
++    // The rolling KV cache is larger than the truthful public context window.
++    // Current launch envelope: 2048 effective content tokens with a 4096-slot KV cache.
+     let max_ctx: u32 = 4096;
+     let kv_cache = Arc::new(Mutex::new(KVCache::new(
+         &device,
+@@ -315,27 +349,47 @@
+         spec.head_dim as u32,
+         max_ctx,
+     )));
+-    let kv_mb = (max_ctx as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4 * spec.n_layer as u64) / (1024 * 1024);
+-    eprintln!("[GPU Server] KV Cache initialized ({} MB F32, ctx={})", kv_mb, max_ctx);
++    let kv_mb =
++        (max_ctx as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4 * spec.n_layer as u64)
++            / (1024 * 1024);
++    eprintln!(
++        "[GPU Server] KV Cache initialized ({} MB F32, ctx={})",
++        kv_mb, max_ctx
++    );
+     eprintln!("[GPU Server] FSE enabled (CrewChief active)");
+     let shimmy_port = std::env::var("SHIMMY_PORT").unwrap_or_else(|_| "8080".to_string());
+     let shimmy_bind_addr = format!("0.0.0.0:{}", shimmy_port);
+-    eprintln!("[GPU Server] Async Listener will start on {}", shimmy_bind_addr);
++    eprintln!(
++        "[GPU Server] Async Listener will start on {}",
++        shimmy_bind_addr
++    );
+ 
+-    let job_states = Arc::new(Mutex::new(std::collections::HashMap::<String, JobState>::new()));
++    let job_states = Arc::new(Mutex::new(
++        std::collections::HashMap::<String, JobState>::new(),
++    ));
++    let session_states = Arc::new(Mutex::new(
++        std::collections::HashMap::<String, SessionState>::new(),
++    ));
++    let stream_channels = Arc::new(Mutex::new(
++        std::collections::HashMap::<String, tokio::sync::broadcast::Sender<String>>::new(),
++    ));
+     let (tx_queue, mut rx_queue) = tokio::sync::mpsc::channel::<JobRequest>(15);
+ 
+     let states_for_http = Arc::clone(&job_states);
++    let streams_for_http = Arc::clone(&stream_channels);
+     let http_bind_addr = shimmy_bind_addr.clone();
+     tokio::spawn(async move {
+-        let listener = tokio::net::TcpListener::bind(&http_bind_addr).await.unwrap();
++        let listener = tokio::net::TcpListener::bind(&http_bind_addr)
++            .await
++            .unwrap();
+         eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
+         loop {
+             if let Ok((stream, _)) = listener.accept().await {
+                 let tx = tx_queue.clone();
+                 let states = Arc::clone(&states_for_http);
++                let streams = Arc::clone(&streams_for_http);
+                 tokio::spawn(async move {
+-                    if let Err(e) = handle_http_connection(stream, tx, states).await {
++                    if let Err(e) = handle_http_connection(stream, tx, states, streams).await {
+                         eprintln!("[HTTP] Connection error: {}", e);
+                     }
+                 });
+@@ -366,12 +420,21 @@
+         }
+ 
+         let cache_clone = Arc::clone(&kv_cache);
++        let session_states_clone = Arc::clone(&session_states);
+         let job_id_clone = job.job_id.clone();
+-        
++        let stream_tx = {
++            let st = stream_channels.lock().unwrap();
++            st.get(&job_id_clone).cloned()
++        };
++
+         let task_type = job.req.task.clone().unwrap_or_else(|| "story".to_string());
+         let result = if task_type == "wikitext2" || task_type == "lambada" {
+             eprintln!("[GPU Worker] Running eval task: {}", task_type);
+-            let target_bin = if task_type == "wikitext2" { "shimmy_eval" } else { "shimmy_eval" }; // adjust later if they differ
++            let _target_bin = if task_type == "wikitext2" {
++                "shimmy_eval"
++            } else {
++                "shimmy_eval"
++            }; // adjust later if they differ
+             let cmd = format!("source ~/.cargo/env && cargo run -p shimmy_eval --bin shimmy_eval --release -- --model /opt/repro-arena/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -t {} --limit 3000", task_type);
+             let output = std::process::Command::new("bash")
+                 .args(&["-c", &cmd])
+@@ -383,9 +446,9 @@
+                     let stdout_str = String::from_utf8_lossy(&out.stdout).to_string();
+                     let stderr_str = String::from_utf8_lossy(&out.stderr).to_string();
+                     let combined = format!("{}\n{}", stdout_str, stderr_str);
+-                    
++
+                     let (ppl_val, acc_val) = if task_type == "wikitext2" {
+-                        (Some(23.4), None) 
++                        (Some(23.4), None)
+                     } else {
+                         (None, Some(0.62))
+                     };
+@@ -403,17 +466,33 @@
+                         debug_raw_text: None,
+                         debug_sanitizer_reason: None,
+                     })
+-                },
+-                Err(e) => Err(format!("Failed to run eval: {}", e).into())
++                }
++                Err(e) => Err(format!("Failed to run eval: {}", e).into()),
+             }
+         } else {
+             let mut inference_req = job.req;
+             if inference_req.prompt.is_none() {
+                 inference_req.prompt = Some("Once upon a time".to_string());
+             }
+-            process_inference_job(inference_req, &device, &queue, &gpu_model, &pipeline, &shift_pipeline, &tokenizer, &spec, cache_clone, &output_head_f32).await
++            process_inference_job(
++                job_id_clone.clone(),
++                job_states.clone(),
++                session_states_clone,
++                stream_tx,
++                inference_req,
++                &device,
++                &queue,
++                &gpu_model,
++                &pipeline,
++                &shift_pipeline,
++                &tokenizer,
++                &spec,
++                cache_clone,
++                &output_head_f32,
++            )
++            .await
+         };
+-        
++
+         let mut st = job_states.lock().unwrap();
+         if let Some(state) = st.get_mut(&job_id_clone) {
+             match result {
+@@ -421,15 +500,28 @@
+                     state.status = "completed".to_string();
+                     state.result = Some(resp);
+                     state.eta_seconds = Some(0);
+-                    state.completed_at = Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+-                },
++                    state.completed_at = Some(
++                        std::time::SystemTime::now()
++                            .duration_since(std::time::UNIX_EPOCH)
++                            .unwrap()
++                            .as_millis(),
++                    );
++                }
+                 Err(e) => {
+                     state.status = "failed".to_string();
+                     state.error = Some(e.to_string());
+-                    state.completed_at = Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
++                    state.completed_at = Some(
++                        std::time::SystemTime::now()
++                            .duration_since(std::time::UNIX_EPOCH)
++                            .unwrap()
++                            .as_millis(),
++                    );
+                 }
+             }
+         }
++
++        let mut streams = stream_channels.lock().unwrap();
++        streams.remove(&job_id_clone);
+     }
+ 
+     Ok(())
+@@ -439,14 +531,16 @@
+     mut stream: tokio::net::TcpStream,
+     tx: tokio::sync::mpsc::Sender<JobRequest>,
+     states: Arc<Mutex<std::collections::HashMap<String, JobState>>>,
++    stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
+ ) -> Result<(), Box<dyn std::error::Error>> {
+-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+-    let mut buffer = [0; 10240];
+-    let bytes_read = stream.read(&mut buffer).await?;
+-    if bytes_read == 0 { return Ok(()); }
+-    
+-    let request_str = String::from_utf8_lossy(&buffer[..bytes_read]);
+-    
++    use tokio::io::AsyncWriteExt;
++    let request_bytes = read_http_request(&mut stream).await?;
++    if request_bytes.is_empty() {
++        return Ok(());
++    }
++
++    let request_str = String::from_utf8_lossy(&request_bytes);
++
+     let mut lines = request_str.lines();
+     let first_line = lines.next().unwrap_or("");
+     let mut parts = first_line.split_whitespace();
+@@ -467,8 +561,84 @@
+         stream.write_all(response.as_bytes()).await?;
+         stream.flush().await?;
+         return Ok(());
++    } else if method == "GET" && path.starts_with("/api/repro/job-stream") {
++        let job_id = path
++            .split("job_id=")
++            .nth(1)
++            .unwrap_or("")
++            .split('&')
++            .next()
++            .unwrap_or("");
++
++        let existing_result = {
++            let st = states.lock().unwrap();
++            st.get(job_id).and_then(|state| state.result.as_ref().map(|resp| resp.text.clone()))
++        };
++
++        let maybe_sender = {
++            let st = stream_channels.lock().unwrap();
++            st.get(job_id).cloned()
++        };
++
++        if let Some(text) = existing_result {
++            let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nTransfer-Encoding: chunked\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
++            stream.write_all(headers.as_bytes()).await?;
++            if !text.is_empty() {
++                let chunk = format!("{:X}\r\n{}\r\n", text.len(), text);
++                stream.write_all(chunk.as_bytes()).await?;
++            }
++            stream.write_all(b"0\r\n\r\n").await?;
++            stream.flush().await?;
++            return Ok(());
++        }
++
++        let Some(sender) = maybe_sender else {
++            let body = format!("{{\"error\":\"Unknown stream job {}\"}}", job_id);
++            let response = format!(
++                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
++                body.len(), body
++            );
++            stream.write_all(response.as_bytes()).await?;
++            stream.flush().await?;
++            return Ok(());
++        };
++
++        let mut rx = sender.subscribe();
++        drop(sender);
++        let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nTransfer-Encoding: chunked\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
++        stream.write_all(headers.as_bytes()).await?;
++        stream.flush().await?;
++
++        loop {
++            match rx.recv().await {
++                Ok(chunk_text) => {
++                    if chunk_text.is_empty() {
++                        continue;
++                    }
++                    let chunk = format!("{:X}\r\n{}\r\n", chunk_text.len(), chunk_text);
++                    stream.write_all(chunk.as_bytes()).await?;
++                    stream.flush().await?;
++                }
++                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
++                    break;
++                }
++                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
++                    continue;
++                }
++            }
++        }
++
++        stream.write_all(b"0\r\n\r\n").await?;
++        stream.flush().await?;
++        return Ok(());
+     } else if method == "GET" && path.starts_with("/api/repro/job-status") {
+-        let job_id = path.split("job_id=").nth(1).unwrap_or("").split('&').next().unwrap_or("");
++        let job_id = path
++            .split("job_id=")
++            .nth(1)
++            .unwrap_or("")
++            .split('&')
++            .next()
++            .unwrap_or("");
+         let state_json = {
+             let st = states.lock().unwrap();
+             match st.get(job_id) {
+@@ -492,7 +662,7 @@
+         let body_start = request_str.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+         let body = &request_str[body_start..];
+         let body_clean = body.trim_matches(char::from(0));
+-        
++
+         let req: InferenceRequest = match serde_json::from_str(body_clean) {
+             Ok(r) => r,
+             Err(_) => {
+@@ -505,13 +675,23 @@
+                                 return Ok(());
+                             }
+                         }
+-                    } else { return Ok(()); }
+-                } else { return Ok(()); }
++                    } else {
++                        return Ok(());
++                    }
++                } else {
++                    return Ok(());
++                }
+             }
+         };
+ 
+-        let job_id = format!("job_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+-        
++        let job_id = format!(
++            "job_{}",
++            std::time::SystemTime::now()
++                .duration_since(std::time::UNIX_EPOCH)
++                .unwrap()
++                .as_nanos()
++        );
++
+         let pos = tx.max_capacity() - tx.capacity();
+         let state = JobState {
+             job_id: job_id.clone(),
+@@ -520,25 +700,46 @@
+             status: "queued".to_string(),
+             position: Some(pos),
+             eta_seconds: Some((pos as u64 + 1) * 30),
+-            started_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(),
++            started_at: std::time::SystemTime::now()
++                .duration_since(std::time::UNIX_EPOCH)
++                .unwrap()
++                .as_millis(),
+             completed_at: None,
+             result: None,
++            partial_text: None,
+             error: None,
+         };
+-        
++
+         {
+             let mut st = states.lock().unwrap();
+             st.insert(job_id.clone(), state);
+         }
+ 
+-        if tx.try_send(JobRequest { job_id: job_id.clone(), req }).is_err() {
++        let (stream_sender, _) = tokio::sync::broadcast::channel::<String>(256);
++        {
++            let mut st = stream_channels.lock().unwrap();
++            st.insert(job_id.clone(), stream_sender);
++        }
++
++        if tx
++            .try_send(JobRequest {
++                job_id: job_id.clone(),
++                req,
++            })
++            .is_err()
++        {
+             let resp = "{\"error\": \"Queue full\"}";
+             let response = format!("HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}", resp.len(), resp);
+             let _ = stream.write_all(response.as_bytes()).await;
+             return Ok(());
+         }
+ 
+-        let resp_json = format!("{{\"queued\": true, \"job_id\": \"{}\", \"position\": {}, \"eta_seconds\": {}}}", job_id, pos, (pos + 1) * 30);
++        let resp_json = format!(
++            "{{\"queued\": true, \"job_id\": \"{}\", \"position\": {}, \"eta_seconds\": {}}}",
++            job_id,
++            pos,
++            (pos + 1) * 30
++        );
+         let response = format!(
+             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+             resp_json.len(), resp_json
+@@ -548,10 +749,72 @@
+         return Ok(());
+     }
+ 
+-    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\n\r\n").await;
++    let _ = stream
++        .write_all(b"HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\n\r\n")
++        .await;
+     Ok(())
+ }
+ 
++fn find_header_end(buffer: &[u8]) -> Option<usize> {
++    buffer.windows(4).position(|window| window == b"\r\n\r\n")
++}
++
++fn parse_content_length(header_text: &str) -> usize {
++    header_text
++        .lines()
++        .find_map(|line| {
++            let (name, value) = line.split_once(':')?;
++            if name.trim().eq_ignore_ascii_case("Content-Length") {
++                value.trim().parse::<usize>().ok()
++            } else {
++                None
++            }
++        })
++        .unwrap_or(0)
++}
++
++async fn read_http_request(
++    stream: &mut tokio::net::TcpStream,
++) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
++    use tokio::io::AsyncReadExt;
++
++    const MAX_REQUEST_SIZE: usize = 1024 * 1024;
++
++    let mut buffer = Vec::new();
++    let mut chunk = [0_u8; 4096];
++    let mut expected_len = None;
++
++    loop {
++        let bytes_read = stream.read(&mut chunk).await?;
++        if bytes_read == 0 {
++            break;
++        }
++
++        buffer.extend_from_slice(&chunk[..bytes_read]);
++
++        if buffer.len() > MAX_REQUEST_SIZE {
++            return Err("request too large".into());
++        }
++
++        if expected_len.is_none() {
++            if let Some(header_end) = find_header_end(&buffer) {
++                let header_text = String::from_utf8_lossy(&buffer[..header_end]);
++                let content_length = parse_content_length(&header_text);
++                expected_len = Some(header_end + 4 + content_length);
++                if buffer.len() >= header_end + 4 + content_length {
++                    break;
++                }
++            }
++        } else if let Some(total_len) = expected_len {
++            if buffer.len() >= total_len {
++                break;
++            }
++        }
++    }
++
++    Ok(buffer)
++}
++
+ /// Load and dequantize output.weight to F32 (workaround for Q6_K on GPU)
+ fn load_output_head_f32(
+     model_path: &str,
+@@ -559,43 +822,51 @@
+     device: &wgpu::Device,
+     spec: &ModelSpec,
+ ) -> Result<wgpu::Buffer, Box<dyn std::error::Error>> {
+-    let output_weight_type = gpu_model.metadata.get_tensor_type("output.weight")
++    let output_weight_type = gpu_model
++        .metadata
++        .get_tensor_type("output.weight")
+         .expect("output.weight type not found");
+-    
++
+     eprintln!("[DEBUG] output.weight metadata check:");
+     eprintln!("  Type: {} (Q6_K)", output_weight_type);
+-    
++
+     if output_weight_type != 14 {
+         // Not Q6_K, can use bindless path directly (panic for now)
+-        panic!("Expected Q6_K (type 14) for output.weight, got type {}", output_weight_type);
++        panic!(
++            "Expected Q6_K (type 14) for output.weight, got type {}",
++            output_weight_type
++        );
+     }
+-    
++
+     eprintln!("[GPU Server] Dequantizing Q6_K output.weight to F32...");
+-    
++
+     // Re-mmap the file for CPU dequant
+     let file = std::fs::File::open(model_path)?;
+     let mmap = unsafe { Mmap::map(&file)? };
+-    
++
+     // Construct tensor info from spec
+     // **CRITICAL**: GGUF stores weight matrices as [out_features, in_features]
+     // For output projection: out=vocab, in=hidden_dim
+     let tensor_info = GgufTensorInfo {
+         name: "output.weight".to_string(),
+-        dimensions: vec![spec.n_vocab as usize, spec.n_embd as usize],  // GGUF order: [N_vocab, N_embd]
+-        ggml_type: 14,  // Q6_K
+-        offset: 0,  // Tensor data starts at offset 0 (relative to data_start)
++        dimensions: vec![spec.n_vocab as usize, spec.n_embd as usize], // GGUF order: [N_vocab, N_embd]
++        ggml_type: 14,                                                 // Q6_K
++        offset: 0, // Tensor data starts at offset 0 (relative to data_start)
+     };
+-    
++
+     // Get data_start offset from metadata
+     let data_start = gpu_model.metadata.data_start_offset;
+-    
++
+     // Dequantize Q6_K → F32 on CPU
+     let tensor_f32 = dequantize_q6_k(&tensor_info, &mmap, data_start)?;
+-    
++
+     eprintln!("[DEBUG] Dequantized tensor shape: {:?}", tensor_f32.shape);
+     eprintln!("[DEBUG] Total elements: {}", tensor_f32.data.len());
+-    eprintln!("[DEBUG] First 10 values: {:?}", &tensor_f32.data[..10.min(tensor_f32.data.len())]);
+-    
++    eprintln!(
++        "[DEBUG] First 10 values: {:?}",
++        &tensor_f32.data[..10.min(tensor_f32.data.len())]
++    );
++
+     // Upload to GPU (STORAGE usage for matmul shader)
+     use wgpu::util::DeviceExt;
+     let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+@@ -603,15 +874,21 @@
+         contents: bytemuck::cast_slice(&tensor_f32.data),
+         usage: wgpu::BufferUsages::STORAGE,
+     });
+-    
+-    eprintln!("[GPU Server] Output head F32 buffer: {} MB", 
+-             (tensor_f32.data.len() * 4) as f32 / 1024.0 / 1024.0);
+-    
++
++    eprintln!(
++        "[GPU Server] Output head F32 buffer: {} MB",
++        (tensor_f32.data.len() * 4) as f32 / 1024.0 / 1024.0
++    );
++
+     Ok(buffer)
+ }
+ 
+ async fn process_inference_job(
+-    req: InferenceRequest, 
++    job_id: String,
++    states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JobState>>>,
++    session_states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, SessionState>>>,
++    stream_tx: Option<tokio::sync::broadcast::Sender<String>>,
++    req: InferenceRequest,
+     device: &wgpu::Device,
+     queue: &wgpu::Queue,
+     model: &BindlessModel,
+@@ -620,8 +897,9 @@
+     tokenizer: &Tokenizer,
+     spec: &ModelSpec,
+     kv_cache: Arc<Mutex<KVCache>>,
+-    output_head_f32: &wgpu::Buffer,  // Pre-dequantized F32 output weights
++    output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
+ ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
++    const SESSION_WINDOW_TOKENS: usize = 2048;
+ 
+     let max_new_tokens = req.max_tokens.unwrap_or(64);
+     let temperature = req.temperature.unwrap_or(0.8);
+@@ -629,14 +907,15 @@
+     let rep_penalty = req.repetition_penalty.unwrap_or(1.1);
+     let use_stream = req.stream.unwrap_or(false);
+     let mut rng = Rng::new(req.seed.unwrap_or(42));
+-    
+-    eprintln!("[GPU Server] Sampling: temp={:.2}, top_p={:.2}, rep_penalty={:.2}, stream={}", temperature, top_p, rep_penalty, use_stream);
++
++    eprintln!(
++        "[GPU Server] Sampling: temp={:.2}, top_p={:.2}, rep_penalty={:.2}, stream={}",
++        temperature, top_p, rep_penalty, use_stream
++    );
+ 
+     // If streaming, send HTTP headers immediately so data flows to the client
+-    if use_stream {
+-        /* Streaming not natively fully supported with queue architecture yet */
+-    }
+-    
++    if use_stream { /* Streaming not natively fully supported with queue architecture yet */ }
++
+     // === GPU-Specific Inference Setup ===
+     // Historically this server hard-wrapped prompts in a creative-writer chat template.
+     // For Repro Arena experiments we support prompt_mode to compare behaviors.
+@@ -661,12 +940,36 @@
+             .into());
+         }
+     };
+-    let prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
++    let mut prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
++    let session_id = req.session_id.clone();
++    if let Some(session_id) = session_id.as_ref() {
++        let prior_tokens = {
++            let st = session_states.lock().unwrap();
++            st.get(session_id)
++                .map(|state| state.token_window.clone())
++                .unwrap_or_default()
++        };
++
++        if !prior_tokens.is_empty() {
++            prompt_tokens = prior_tokens
++                .into_iter()
++                .chain(prompt_tokens.into_iter())
++                .rev()
++                .take(SESSION_WINDOW_TOKENS)
++                .collect::<Vec<_>>()
++                .into_iter()
++                .rev()
++                .collect();
++        }
++    }
+     let eos = tokenizer.eos_token();
+-    let im_end_token: Option<u32> = tokenizer
+-        .encode("<|im_end|>", false)
+-        .ok()
+-        .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None });
++    let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
++        if v.len() == 1 {
++            Some(v[0])
++        } else {
++            None
++        }
++    });
+ 
+     let mut grammar_state: Option<GrammarState> = if prompt_mode == "developer" {
+         let grammar = Grammar::new(developer_mode_grammar())
+@@ -682,22 +985,30 @@
+     let vocab_texts: Option<Vec<String>> = if grammar_state.is_some() {
+         Some(
+             (0..spec.n_vocab)
+-                .map(|tid| tokenizer.decode_single(tid as u32, true).unwrap_or_default())
++                .map(|tid| {
++                    tokenizer
++                        .decode_single(tid as u32, true)
++                        .unwrap_or_default()
++                })
+                 .collect(),
+         )
+     } else {
+         None
+     };
+-    
+-    
++
+     let mut recent_tokens: Vec<u32> = Vec::new();
+ 
+-    eprintln!("=== Request: '{}' → {} tokens (templated)", 
+-             user_prompt, prompt_tokens.len());
++    eprintln!(
++        "=== Request: '{}' → {} tokens (templated)",
++        user_prompt,
++        prompt_tokens.len()
++    );
+ 
+     // Get model parameters
+     let dim = spec.n_embd as u32;
+-    let embd_weight_offset = model.metadata.get_tensor_offset("token_embd.weight")
++    let embd_weight_offset = model
++        .metadata
++        .get_tensor_offset("token_embd.weight")
+         .expect("token_embd.weight not found");
+     let row_bytes = (dim / 32) * 18; // Q4_0 quantization
+ 
+@@ -713,7 +1024,8 @@
+     };
+ 
+     let mut generated_text = String::new();
+-    let mut ppl_window: std::collections::VecDeque<f32> = std::collections::VecDeque::with_capacity(10);
++    let mut ppl_window: std::collections::VecDeque<f32> =
++        std::collections::VecDeque::with_capacity(10);
+     let mut stop_reason = "max_tokens";
+     let mut metrics_violation = None;
+     let mut generated_count = 0;
+@@ -725,14 +1037,17 @@
+     }
+ 
+     // === PREFILL PHASE: Process all prompt tokens ===
+-    eprintln!("[GPU Server] Prefill phase: processing {} prompt tokens...", prompt_tokens.len());
+-    
++    eprintln!(
++        "[GPU Server] Prefill phase: processing {} prompt tokens...",
++        prompt_tokens.len()
++    );
++
+     // Batch dequant all prompt tokens on CPU (via GPU calls, but aggregated)
+     let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
+-    for (seq_pos, &token_id) in prompt_tokens.iter().enumerate() {
+-         let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
+-         let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
+-         batched_embd.extend_from_slice(&embd);
++    for (_seq_pos, &token_id) in prompt_tokens.iter().enumerate() {
++        let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
++        let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
++        batched_embd.extend_from_slice(&embd);
+     }
+ 
+     // Run full model prefill in one shot
+@@ -741,10 +1056,12 @@
+     let (_final_act, _l21, prefill_logits_f32) = {
+         let cache_guard = kv_cache.lock().unwrap();
+         pipeline.run_full_model_with_cache_state(
+-            device, queue, model, 
+-            &batched_embd, 
+-            Some(&output_head_f32), 
+-            0, // starting pos
++            device,
++            queue,
++            model,
++            &batched_embd,
++            Some(&output_head_f32),
++            0,                          // starting pos
+             prompt_tokens.len() as u32, // resulting seq_len after this batch
+             Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+             spec,
+@@ -765,12 +1082,14 @@
+             cache.increment();
+         }
+     }
+-    
++
+     eprintln!("[GPU Server] Prefill complete. Cache info updated.");
+-    
++
+     // === COMPUTE INITIAL LOGITS FROM PREFILL OUTPUT ===
+     // Define `norm_params` for decoding phase
+-    let norm_weight_offset = model.metadata.get_tensor_offset("output_norm.weight")
++    let norm_weight_offset = model
++        .metadata
++        .get_tensor_offset("output_norm.weight")
+         .expect("output_norm.weight not found") as u32;
+     let norm_params = RMSNormParams {
+         count: dim,
+@@ -778,28 +1097,34 @@
+         eps: spec.rms_eps,
+         padding: 0,
+     };
+-    
++
+     // We can use `prefill_logits_f32` as the initial logits_vec.
+     let mut logits_vec = prefill_logits_f32;
+ 
+     // === DECODE PHASE: Generate new tokens ===
+     // Note: We already have logits from prefill ready for first sample
+ 
+-    for step in 0..max_new_tokens {
++    for _step in 0..max_new_tokens {
+         // === STEP 1: Token Selection from Current Logits ===
+ 
+         if let (Some(gs), Some(vocab)) = (grammar_state.as_ref(), vocab_texts.as_ref()) {
+             apply_grammar_mask(&mut logits_vec, gs, vocab, eos, im_end_token);
+         }
+-        
++
+         // FSE Metrics Computation (CPU)
+-        let raw_logits: Vec<f32> = logits_vec.iter().filter(|&&x| x > -100.0).copied().collect();
++        let raw_logits: Vec<f32> = logits_vec
++            .iter()
++            .filter(|&&x| x > -100.0)
++            .copied()
++            .collect();
+         let entropy = shannon_entropy_from_logits(&raw_logits);
+         let _variance = logit_variance(&raw_logits);
+         let _max_prob = max_probability_from_logits(&raw_logits);
+         let norm = logit_l2_norm(&raw_logits);
+-        
+-        if ppl_window.len() >= 10 { ppl_window.pop_front(); }
++
++        if ppl_window.len() >= 10 {
++            ppl_window.pop_front();
++        }
+         ppl_window.push_back(entropy.exp());
+         let perplexity = ppl_window.iter().sum::<f32>() / ppl_window.len() as f32;
+ 
+@@ -807,7 +1132,10 @@
+         let is_unsafe = perplexity > 500.0 || norm > 1e5;
+ 
+         let next_token = if is_unsafe {
+-            eprintln!("[REDO] Metric Violation (PPL={:.2}, Norm={:.2}). Falling back to greedy.", perplexity, norm);
++            eprintln!(
++                "[REDO] Metric Violation (PPL={:.2}, Norm={:.2}). Falling back to greedy.",
++                perplexity, norm
++            );
+             if metrics_violation.is_none() {
+                 metrics_violation = Some(format!("Self-Healed PPL Spike: {:.2}", perplexity));
+             }
+@@ -815,7 +1143,14 @@
+             sample_token(&mut logits_vec, 0.0, 1.0, 1.0, &[], &mut rng)
+         } else {
+             // Temperature + Top-P + Repetition Penalty sampling
+-            sample_token(&mut logits_vec, temperature, top_p, rep_penalty, &recent_tokens, &mut rng)
++            sample_token(
++                &mut logits_vec,
++                temperature,
++                top_p,
++                rep_penalty,
++                &recent_tokens,
++                &mut rng,
++            )
+         };
+ 
+         // Track recent tokens for repetition penalty (sliding window of 64)
+@@ -827,7 +1162,7 @@
+         // === STEP 2: Check EOS ===
+         if next_token == eos {
+             if req.ignore_eos.unwrap_or(false) {
+-                // Keep going, but let the user know by emitting a space or similar, 
++                // Keep going, but let the user know by emitting a space or similar,
+                 // or just skip termination and let the model hallucinate forward
+             } else {
+                 stop_reason = "eos";
+@@ -849,10 +1184,23 @@
+ 
+         // === STEP 3: Decode Token ===
+         let piece = tokenizer.decode_single(next_token, true)?;
+-        eprintln!("[TOKEN] Step {}: id={}, text={:?}", generated_count, next_token, piece);
++        eprintln!(
++            "[TOKEN] Step {}: id={}, text={:?}",
++            generated_count, next_token, piece
++        );
+         generated_text.push_str(&piece);
+         generated_count += 1;
+ 
++        if let Some(tx) = stream_tx.as_ref() {
++            let _ = tx.send(piece.clone());
++        }
++
++        if let Ok(mut st) = states.lock() {
++            if let Some(state) = st.get_mut(&job_id) {
++                state.partial_text = Some(generated_text.clone());
++            }
++        }
++
+         if let Some(gs) = grammar_state.as_mut() {
+             if let Err(err) = gs.accept_token(&piece) {
+                 stop_reason = "grammar_reject";
+@@ -872,7 +1220,6 @@
+ 
+         // === STEP 4: Compute Next Logits ===
+         // Process the newly selected token through all layers
+-        
+ 
+         // Check for Helical shift BEFORE running layers to ensure new token has room at correct position
+         {
+@@ -882,7 +1229,12 @@
+             if current_len >= cache.max_len() - 4 {
+                 let keep_sink = 4;
+                 let shift_amt = cache.max_len() / 4;
+-                eprintln!("[HELICAL] Memory bounds approaching ({}/{}), shifting by {}...", current_len + 1, cache.max_len(), shift_amt);             
++                eprintln!(
++                    "[HELICAL] Memory bounds approaching ({}/{}), shifting by {}...",
++                    current_len + 1,
++                    cache.max_len(),
++                    shift_amt
++                );
+                 // Shift all layers
+                 for layer_idx in 0..spec.n_layer {
+                     shift_pipeline.execute(
+@@ -897,49 +1249,62 @@
+                         spec.head_dim as u32,
+                         spec.rope_dim as u32,
+                         spec.rope_base,
+-                        cache.max_len()
++                        cache.max_len(),
+                     );
+                 }
+ 
+                 // Update length
+                 current_len -= shift_amt;
+                 cache.set_seq_len(current_len);
+-                eprintln!("[HELICAL] Compaction complete. New seq_len: {}", current_len);
++                eprintln!(
++                    "[HELICAL] Compaction complete. New seq_len: {}",
++                    current_len
++                );
+             }
+         }
+ 
+         // 4a. Get embedding for next token
+         let row_offset = embd_weight_offset + (next_token as u64 * row_bytes as u64);
+-        let mut layer_output = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
++        let mut layer_output =
++            pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
+ 
+         // 4b. Run all transformer layers with KV cache
+         for layer_idx in 0..spec.n_layer {
+-            let layer_offsets = model.metadata.get_layer_offsets(layer_idx, spec.arch_string())
++            let layer_offsets = model
++                .metadata
++                .get_layer_offsets(layer_idx, spec.arch_string())
+                 .expect(&format!("Missing offsets for layer {}", layer_idx));
+-            
++
+             let mut cache = kv_cache.lock().unwrap();
+             layer_output = pipeline.run_layer_with_cache(
+-                device, queue, model, &mut cache, layer_idx,
+-                &layer_output, layer_offsets, layer_params
++                device,
++                queue,
++                model,
++                &mut cache,
++                layer_idx,
++                &layer_output,
++                layer_offsets,
++                layer_params,
+             );
+         }
+-        
++
+         // 4c. Increment KV Cache position
+         {
+             let mut cache = kv_cache.lock().unwrap();
+             cache.increment();
+         }
+-        
++
+         // 4d. Final RMSNorm
+-        let normed_output = pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
+-        
++        let normed_output =
++            pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
++
+         // 4e. Output head (LM head projection)
+         logits_vec = pipeline.run_matmul_f32(
+             device,
+             queue,
+             output_head_f32,
+             &normed_output,
+-            spec.n_vocab as u32,  // vocab_size
++            spec.n_vocab as u32, // vocab_size
+             dim,
+         );
+     }
+@@ -995,6 +1360,36 @@
+         (None, None)
+     };
+ 
++    let response_suffix = if prompt_mode == "raw" {
++        "</s>\n"
++    } else {
++        ""
++    };
++
++    if let Some(session_id) = session_id {
++        let mut appended_tokens = tokenizer.encode(&templated_prompt, true)?;
++        if !final_text.is_empty() {
++            let assistant_tail = format!("{}{}", final_text, response_suffix);
++            appended_tokens.extend(tokenizer.encode(&assistant_tail, false)?);
++        }
++
++        let new_window = {
++            let mut st = session_states.lock().unwrap();
++            let session = st.entry(session_id).or_default();
++            session.token_window.extend(appended_tokens);
++            if session.token_window.len() > SESSION_WINDOW_TOKENS {
++                let drop_count = session.token_window.len() - SESSION_WINDOW_TOKENS;
++                session.token_window.drain(0..drop_count);
++            }
++            session.token_window.clone()
++        };
++
++        eprintln!(
++            "[SESSION] Stored {} tokens in rolling window",
++            new_window.len()
++        );
++    }
++
+     let resp = InferenceResponse {
+         text: final_text,
+         stop_reason: stop_reason.to_string(),
+@@ -1009,10 +1404,12 @@
+         debug_sanitizer_reason: (include_debug_raw && prompt_mode == "developer")
+             .then(|| debug_sanitizer_reason.unwrap_or_else(|| "(no_reason)".to_string())),
+     };
+-    
++
+     Ok(resp)
+ }
+ 
++#[allow(dead_code)]
++#[allow(dead_code)]
+ fn send_error(mut stream: TcpStream, msg: &str) {
+     let body = format!("{{\"error\": \"{}\"}}", msg);
+     let resp = format!(
+@@ -1022,6 +1419,8 @@
+     let _ = stream.write_all(resp.as_bytes());
+ }
+ 
++#[allow(dead_code)]
++#[allow(dead_code)]
+ fn sanitize_developer_output(text: &str) -> String {
+     sanitize_developer_output_with_reason(text).0
+ }
+@@ -1046,7 +1445,13 @@
+     } else if candidate.is_empty() {
+         (String::new(), Some("empty_output".to_string()))
+     } else {
+-        (String::new(), Some(format!("invalid_rust(first30={:?})", &candidate[..candidate.len().min(30)])))
++        (
++            String::new(),
++            Some(format!(
++                "invalid_rust(first30={:?})",
++                &candidate[..candidate.len().min(30)]
++            )),
++        )
+     }
+ }
+ 

@@ -1,0 +1,20 @@
+* bb283ef (HEAD -> openclaw-local-provider, origin/openclaw-local-provider) update shimmy submodule: cached GpuRuntime
+* 1a540ac cleanup: remove tracked junk files, update .gitignore
+* b78892b feat: GpuRuntime library facade + native shimmy integration
+* c2bb520 policy: add shimmy push policy to AGENTS.md and copilot-instructions.md
+* 39a3a8d chore: Airframe integration proof checkpoint
+* 4b982b9 chore: update workspace settings
+* 0683993 chore: add local openclaw provider handoff
+* 639895c (origin/shimmy-airframe-spike, origin/master, shimmy-airframe-spike, master) chore: checkpoint console branch and release plan
+* a7d9621 feat: stream token deltas over chunked job transport
+* 8b66198 feat: add session-based rolling chat context
+* 10b2c71 chore: add optimization checklist and ignore transient artifacts
+* 2c108e2 feat(cli): proxy chat command to shimmy_server_gpu backend
+* 8458ef2 feat(cli): Implement agentic REPL loop in chat command for tool testing
+* 61571ba chore: e2e test verified shimmy-console CLI successfully invokes tooling traits (#984.13, #984)
+* d7a3493 feat(cli): Add CLI entrypoint main.rs and activated Tooling structs with forced stdout flush (#984.11, #984.12)
+* c457478 test: Added exact hash parity test for runtime determinism check (#984.10)
+* e0028ee feat: Bind history to native slider KvSnapshot by serializing metadata (#984.9)
+* abc070d feat: Add schoolmarm InferenceControl grammar hook (#984.8)
+* 3a0956b feat: Add LocalInferenceAdapter wrapping Airframe core (#984.7)
+* 57a88b3 shimmy-console compiliation fixed

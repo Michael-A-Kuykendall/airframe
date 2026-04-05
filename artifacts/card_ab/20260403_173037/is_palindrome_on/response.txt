@@ -1,0 +1,23 @@
+use rusqlite::{self, prelude::*};
+
+fn main() {
+    let conn = conn_from_file("input.db").unwrap();
+    let mut stmt = conn.prepare("SELECT * FROM palindrome").unwrap();
+    let mut rows = stmt.query_map(&mut |row| {
+        let s = row.get(0).unwrap().to_string();
+        (s, row.get(1).unwrap().to_string())
+    }).unwrap();
+    let mut palindromes = vec![];
+    for (s, _) in rows {
+        if s.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_lowercase()) {
+            palindromes.push(s);
+        }
+    }
+    let mut palindromes_str = String::new();
+    for palindrome in palindromes {
+        palindromes_str.push_str(&palindrome);
+    }
+    println!("{}", palindromes_str);
+}
+
+// END_RUST_FILE

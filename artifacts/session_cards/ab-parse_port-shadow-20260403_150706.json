@@ -1,0 +1,76 @@
+{
+  "session_id": "ab-parse_port-shadow-20260403_150706",
+  "token_window_len": 0,
+  "active_card": {
+    "goal": "parse_port",
+    "success": [
+      "tests included"
+    ],
+    "must": [
+      "reject empty input"
+    ],
+    "must_not": [],
+    "exact": [],
+    "assume": [],
+    "unknown": [],
+    "facts": [],
+    "now": "",
+    "next": [],
+    "blocked": [],
+    "done": [],
+    "risks": []
+  },
+  "card_history": [
+    {
+      "phase": "bootstrap",
+      "recorded_at": 1775246911840,
+      "card": {
+        "goal": "parse_port",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [
+          "panic"
+        ],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "write implementation",
+        "next": [
+          "add tests"
+        ],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    },
+    {
+      "phase": "post_turn",
+      "recorded_at": 1775246997242,
+      "card": {
+        "goal": "parse_port",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "",
+        "next": [],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    }
+  ],
+  "last_card_error": null
+}

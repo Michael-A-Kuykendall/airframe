@@ -22,7 +22,7 @@ struct Args {
     #[arg(long, default_value_t = 512)]
     dist_start: usize,
 
-    #[arg(long, default_value_t = 8192)]
+    #[arg(long, default_value_t = 2048)]
     dist_end: usize,
 
     #[arg(long, default_value_t = 256)]
