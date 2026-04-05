@@ -1,0 +1,32 @@
+[
+    {
+        "Desc":  "fn clamp_u8 defined",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "returns u8",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "has unit tests",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "no .clamp( call",
+        "Require":  false,
+        "Matched":  false,
+        "Pass":  true
+    },
+    {
+        "Desc":  "boundary 0 or 255 in tests",
+        "Require":  true,
+        "Matched":  true,
+        "Pass":  true
+    }
+]

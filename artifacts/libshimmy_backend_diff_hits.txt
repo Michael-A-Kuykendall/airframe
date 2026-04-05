@@ -1,0 +1,170 @@
+artifacts/libshimmy_pipeline_shift_diff.patch:111:-            keep_sink, shift_amt, old_seq_len,
+artifacts/libshimmy_pipeline_shift_diff.patch:117:+            keep_sink,
+artifacts/libshimmy_pipeline_shift_diff.patch:118:+            shift_amt,
+artifacts/libshimmy_pipeline_shift_diff.patch:194:-            keep_sink, shift_amt, old_seq_len,
+artifacts/libshimmy_pipeline_shift_diff.patch:200:+            keep_sink,
+artifacts/libshimmy_pipeline_shift_diff.patch:201:+            shift_amt,
+artifacts/libshimmy_pipeline_shift_diff.patch:276:-                 keep_sink, shift_amt, old_seq_len, elements_to_shift);
+artifacts/libshimmy_pipeline_shift_diff.patch:278:-                 keep_sink + shift_amt, old_seq_len - 1, keep_sink, keep_sink + elements_to_shift - 1);
+artifacts/libshimmy_pipeline_shift_diff.patch:285:+            keep_sink, shift_amt, old_seq_len, elements_to_shift
+artifacts/libshimmy_pipeline_shift_diff.patch:289:+            keep_sink + shift_amt,
+artifacts/libshimmy_pipeline_shift_diff.patch:291:+            keep_sink,
+artifacts/libshimmy_pipeline_shift_diff.patch:292:+            keep_sink + elements_to_shift - 1
+artifacts/libshimmy_kv_cache_diff.patch:14:-/// - Causal attention masking
+artifacts/libshimmy_kv_cache_diff.patch:137:-    pub fn set_seq_len(&mut self, new_len: u32) {
+artifacts/libshimmy_kv_cache_diff.patch:148:-    pub fn increment(&mut self) {
+artifacts/libshimmy_kv_cache_diff.patch:267:-        // Test increment
+artifacts/libshimmy_kv_cache_diff.patch:269:-        cache.increment();
+artifacts/libshimmy_kv_cache_diff.patch:271:-        cache.increment();
+artifacts/libshimmy_kv_cache_diff.patch:317:-            cache.increment();  // Should panic at 9th call
+artifacts/libshimmy_kv_cache_diff.patch:331:+/// - Causal attention masking
+artifacts/libshimmy_kv_cache_diff.patch:464:+    pub fn set_seq_len(&mut self, new_len: u32) {
+artifacts/libshimmy_kv_cache_diff.patch:478:+    pub fn increment(&mut self) {
+artifacts/libshimmy_kv_cache_diff.patch:619:+        // Test increment
+artifacts/libshimmy_kv_cache_diff.patch:621:+        cache.increment();
+artifacts/libshimmy_kv_cache_diff.patch:623:+        cache.increment();
+artifacts/libshimmy_kv_cache_diff.patch:675:+            cache.increment(); // Should panic at 9th call
+artifacts/libshimmy_pipeline_diff.patch:80:-    pub matmul_pipeline: wgpu::ComputePipeline,
+artifacts/libshimmy_pipeline_diff.patch:81:-    pub matmul_layout: wgpu::BindGroupLayout,
+artifacts/libshimmy_pipeline_diff.patch:82:-    pub matmul_f32_pipeline: wgpu::ComputePipeline,
+artifacts/libshimmy_pipeline_diff.patch:83:-    pub matmul_f32_layout: wgpu::BindGroupLayout,
+artifacts/libshimmy_pipeline_diff.patch:84:-    pub rmsnorm_pipeline: wgpu::ComputePipeline,
+artifacts/libshimmy_pipeline_diff.patch:85:-    pub rmsnorm_layout: wgpu::BindGroupLayout,
+artifacts/libshimmy_pipeline_diff.patch:236:-        let matmul_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:266:-        let matmul_src = include_str!("sh_matmul_q4_0.wgsl");
+artifacts/libshimmy_pipeline_diff.patch:267:-        let matmul_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:269:-            source: wgpu::ShaderSource::Wgsl(matmul_src.into()),
+artifacts/libshimmy_pipeline_diff.patch:272:-        let matmul_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:274:-            bind_group_layouts: &[&matmul_layout],
+artifacts/libshimmy_pipeline_diff.patch:278:-        let matmul_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:280:-            layout: Some(&matmul_pipeline_layout),
+artifacts/libshimmy_pipeline_diff.patch:281:-            module: &matmul_shader,
+artifacts/libshimmy_pipeline_diff.patch:288:-        let matmul_f32_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:318:-        let matmul_f32_src = include_str!("sh_matmul_f32.wgsl");
+artifacts/libshimmy_pipeline_diff.patch:319:-        let matmul_f32_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:321:-            source: wgpu::ShaderSource::Wgsl(matmul_f32_src.into()),
+artifacts/libshimmy_pipeline_diff.patch:324:-        let matmul_f32_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:326:-            bind_group_layouts: &[&matmul_f32_layout],
+artifacts/libshimmy_pipeline_diff.patch:330:-        let matmul_f32_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:332:-            layout: Some(&matmul_f32_pipeline_layout),
+artifacts/libshimmy_pipeline_diff.patch:333:-            module: &matmul_f32_shader,
+artifacts/libshimmy_pipeline_diff.patch:340:-        let rmsnorm_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:370:-        let rmsnorm_src = include_str!("sh_rmsnorm.wgsl");
+artifacts/libshimmy_pipeline_diff.patch:371:-        let rmsnorm_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:373:-            source: wgpu::ShaderSource::Wgsl(rmsnorm_src.into()),
+artifacts/libshimmy_pipeline_diff.patch:376:-        let rmsnorm_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:378:-            bind_group_layouts: &[&rmsnorm_layout],
+artifacts/libshimmy_pipeline_diff.patch:382:-        let rmsnorm_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:384:-            layout: Some(&rmsnorm_pipeline_layout),
+artifacts/libshimmy_pipeline_diff.patch:385:-            module: &rmsnorm_shader,
+artifacts/libshimmy_pipeline_diff.patch:500:-            matmul_pipeline,
+artifacts/libshimmy_pipeline_diff.patch:501:-            matmul_layout,
+artifacts/libshimmy_pipeline_diff.patch:502:-            matmul_f32_pipeline,
+artifacts/libshimmy_pipeline_diff.patch:503:-            matmul_f32_layout,
+artifacts/libshimmy_pipeline_diff.patch:504:-            rmsnorm_pipeline,
+artifacts/libshimmy_pipeline_diff.patch:505:-            rmsnorm_layout,
+artifacts/libshimmy_pipeline_diff.patch:749:-    pub fn run_matmul_test(
+artifacts/libshimmy_pipeline_diff.patch:784:-            layout: &self.matmul_layout,
+artifacts/libshimmy_pipeline_diff.patch:796:-            cpass.set_pipeline(&self.matmul_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:833:-    pub fn run_matmul_f32(
+artifacts/libshimmy_pipeline_diff.patch:875:-            layout: &self.matmul_f32_layout,
+artifacts/libshimmy_pipeline_diff.patch:887:-            cpass.set_pipeline(&self.matmul_f32_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:924:-    pub fn run_rmsnorm_test(
+artifacts/libshimmy_pipeline_diff.patch:959:-            layout: &self.rmsnorm_layout,
+artifacts/libshimmy_pipeline_diff.patch:971:-            cpass.set_pipeline(&self.rmsnorm_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:1030:-        self.run_full_model_with_cache_state(
+artifacts/libshimmy_pipeline_diff.patch:1044:-    pub fn run_full_model_with_cache_state(
+artifacts/libshimmy_pipeline_diff.patch:1201:-                    wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
+artifacts/libshimmy_pipeline_diff.patch:1232:-            layout: &self.rmsnorm_layout,
+artifacts/libshimmy_pipeline_diff.patch:1275:-                layout: &self.matmul_f32_layout,
+artifacts/libshimmy_pipeline_diff.patch:1293:-                layout: &self.matmul_layout,
+artifacts/libshimmy_pipeline_diff.patch:1365:-            cpass.set_pipeline(&self.rmsnorm_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:1371:-                 cpass.set_pipeline(&self.matmul_f32_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:1373:-                 cpass.set_pipeline(&self.matmul_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:1496:-                wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
+artifacts/libshimmy_pipeline_diff.patch:1650:-                wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
+artifacts/libshimmy_pipeline_diff.patch:1748:-    /// 1. Uses the provided KVCache for attention context
+artifacts/libshimmy_pipeline_diff.patch:1750:-    /// 3. Reads all cached K/V for attention (with causal masking)
+artifacts/libshimmy_pipeline_diff.patch:1765:-    pub fn run_layer_with_cache(
+artifacts/libshimmy_pipeline_diff.patch:1785:-        // 2. Temp state buffer (for Q, attention scores, FFN intermediate)
+artifacts/libshimmy_pipeline_diff.patch:1845:-                wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
+artifacts/libshimmy_pipeline_diff.patch:1878:-        // Kernel 2: Attention (Q @ cached_K, softmax, weighted sum of cached_V)
+artifacts/libshimmy_pipeline_diff.patch:1935:-        // NOTE: Cache increment happens ONCE per token (after all layers), not per layer
+artifacts/libshimmy_pipeline_diff.patch:1936:-        // Caller must call kv_cache.increment() after processing all 22 layers
+artifacts/libshimmy_pipeline_diff.patch:1942:-    pub fn run_layer_with_cache_debug(
+artifacts/libshimmy_pipeline_diff.patch:1955:-        // 1. Create buffers (same as run_layer_with_cache)
+artifacts/libshimmy_pipeline_diff.patch:2005:-                wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
+artifacts/libshimmy_pipeline_diff.patch:2078:-        // Continue with remaining kernels (2-5) - same as run_layer_with_cache
+artifacts/libshimmy_pipeline_diff.patch:2099:-        // CAPTURE post-attention state after AttnProj (before FFN)
+artifacts/libshimmy_pipeline_diff.patch:2257:+    pub matmul_pipeline: wgpu::ComputePipeline,
+artifacts/libshimmy_pipeline_diff.patch:2258:+    pub matmul_layout: wgpu::BindGroupLayout,
+artifacts/libshimmy_pipeline_diff.patch:2259:+    pub matmul_f32_pipeline: wgpu::ComputePipeline,
+artifacts/libshimmy_pipeline_diff.patch:2260:+    pub matmul_f32_layout: wgpu::BindGroupLayout,
+artifacts/libshimmy_pipeline_diff.patch:2261:+    pub rmsnorm_pipeline: wgpu::ComputePipeline,
+artifacts/libshimmy_pipeline_diff.patch:2262:+    pub rmsnorm_layout: wgpu::BindGroupLayout,
+artifacts/libshimmy_pipeline_diff.patch:2414:+        let matmul_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:2464:+        let matmul_src = include_str!("sh_matmul_q4_0.wgsl");
+artifacts/libshimmy_pipeline_diff.patch:2465:+        let matmul_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:2467:+            source: wgpu::ShaderSource::Wgsl(matmul_src.into()),
+artifacts/libshimmy_pipeline_diff.patch:2470:+        let matmul_pipeline_layout =
+artifacts/libshimmy_pipeline_diff.patch:2473:+                bind_group_layouts: &[&matmul_layout],
+artifacts/libshimmy_pipeline_diff.patch:2477:+        let matmul_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:2479:+            layout: Some(&matmul_pipeline_layout),
+artifacts/libshimmy_pipeline_diff.patch:2480:+            module: &matmul_shader,
+artifacts/libshimmy_pipeline_diff.patch:2487:+        let matmul_f32_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:2537:+        let matmul_f32_src = include_str!("sh_matmul_f32.wgsl");
+artifacts/libshimmy_pipeline_diff.patch:2538:+        let matmul_f32_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:2540:+            source: wgpu::ShaderSource::Wgsl(matmul_f32_src.into()),
+artifacts/libshimmy_pipeline_diff.patch:2543:+        let matmul_f32_pipeline_layout =
+artifacts/libshimmy_pipeline_diff.patch:2546:+                bind_group_layouts: &[&matmul_f32_layout],
+artifacts/libshimmy_pipeline_diff.patch:2550:+        let matmul_f32_pipeline =
+artifacts/libshimmy_pipeline_diff.patch:2553:+                layout: Some(&matmul_f32_pipeline_layout),
+artifacts/libshimmy_pipeline_diff.patch:2554:+                module: &matmul_f32_shader,
+artifacts/libshimmy_pipeline_diff.patch:2561:+        let rmsnorm_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:2611:+        let rmsnorm_src = include_str!("sh_rmsnorm.wgsl");
+artifacts/libshimmy_pipeline_diff.patch:2612:+        let rmsnorm_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:2614:+            source: wgpu::ShaderSource::Wgsl(rmsnorm_src.into()),
+artifacts/libshimmy_pipeline_diff.patch:2617:+        let rmsnorm_pipeline_layout =
+artifacts/libshimmy_pipeline_diff.patch:2620:+                bind_group_layouts: &[&rmsnorm_layout],
+artifacts/libshimmy_pipeline_diff.patch:2624:+        let rmsnorm_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+artifacts/libshimmy_pipeline_diff.patch:2626:+            layout: Some(&rmsnorm_pipeline_layout),
+artifacts/libshimmy_pipeline_diff.patch:2627:+            module: &rmsnorm_shader,
+artifacts/libshimmy_pipeline_diff.patch:2793:+            matmul_pipeline,
+artifacts/libshimmy_pipeline_diff.patch:2794:+            matmul_layout,
+artifacts/libshimmy_pipeline_diff.patch:2795:+            matmul_f32_pipeline,
+artifacts/libshimmy_pipeline_diff.patch:2796:+            matmul_f32_layout,
+artifacts/libshimmy_pipeline_diff.patch:2797:+            rmsnorm_pipeline,
+artifacts/libshimmy_pipeline_diff.patch:2798:+            rmsnorm_layout,
+artifacts/libshimmy_pipeline_diff.patch:3070:+    pub fn run_matmul_test(
+artifacts/libshimmy_pipeline_diff.patch:3108:+            layout: &self.matmul_layout,
+artifacts/libshimmy_pipeline_diff.patch:3136:+            cpass.set_pipeline(&self.matmul_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:3173:+    pub fn run_matmul_f32(
+artifacts/libshimmy_pipeline_diff.patch:3215:+            layout: &self.matmul_f32_layout,
+artifacts/libshimmy_pipeline_diff.patch:3243:+            cpass.set_pipeline(&self.matmul_f32_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:3280:+    pub fn run_rmsnorm_test(
+artifacts/libshimmy_pipeline_diff.patch:3318:+            layout: &self.rmsnorm_layout,
+artifacts/libshimmy_pipeline_diff.patch:3346:+            cpass.set_pipeline(&self.rmsnorm_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:3414:+        self.run_full_model_with_cache_state(
+artifacts/libshimmy_pipeline_diff.patch:3428:+    pub fn run_full_model_with_cache_state(
+artifacts/libshimmy_pipeline_diff.patch:3618:+                            .rope_cache_buffer
+artifacts/libshimmy_pipeline_diff.patch:3663:+            layout: &self.rmsnorm_layout,
+artifacts/libshimmy_pipeline_diff.patch:3715:+                layout: &self.matmul_f32_layout,
+artifacts/libshimmy_pipeline_diff.patch:3742:+                layout: &self.matmul_layout,
+artifacts/libshimmy_pipeline_diff.patch:3844:+            cpass.set_pipeline(&self.rmsnorm_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:3850:+                cpass.set_pipeline(&self.matmul_f32_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:3852:+                cpass.set_pipeline(&self.matmul_pipeline);
+artifacts/libshimmy_pipeline_diff.patch:4026:+                        .rope_cache_buffer
+artifacts/libshimmy_pipeline_diff.patch:4227:+                        .rope_cache_buffer
+artifacts/libshimmy_pipeline_diff.patch:4352:+    /// 1. Uses the provided KVCache for attention context
+artifacts/libshimmy_pipeline_diff.patch:4354:+    /// 3. Reads all cached K/V for attention (with causal masking)
+artifacts/libshimmy_pipeline_diff.patch:4369:+    pub fn run_layer_with_cache(
+artifacts/libshimmy_pipeline_diff.patch:4391:+        // 2. Temp state buffer (for Q, attention scores, FFN intermediate)
+artifacts/libshimmy_pipeline_diff.patch:4484:+                        .rope_cache_buffer
+artifacts/libshimmy_pipeline_diff.patch:4528:+        // Kernel 2: Attention (Q @ cached_K, softmax, weighted sum of cached_V)
+artifacts/libshimmy_pipeline_diff.patch:4585:+        // NOTE: Cache increment happens ONCE per token (after all layers), not per layer
+artifacts/libshimmy_pipeline_diff.patch:4586:+        // Caller must call kv_cache.increment() after processing all 22 layers
+artifacts/libshimmy_pipeline_diff.patch:4592:+    pub fn run_layer_with_cache_debug(
+artifacts/libshimmy_pipeline_diff.patch:4605:+        // 1. Create buffers (same as run_layer_with_cache)
+artifacts/libshimmy_pipeline_diff.patch:4686:+                        .rope_cache_buffer
+artifacts/libshimmy_pipeline_diff.patch:4776:+        // Continue with remaining kernels (2-5) - same as run_layer_with_cache
+artifacts/libshimmy_pipeline_diff.patch:4797:+        // CAPTURE post-attention state after AttnProj (before FFN)

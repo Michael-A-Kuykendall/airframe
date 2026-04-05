@@ -34,7 +34,7 @@ struct LayerParams {
 struct CacheParams {
     current_pos: u32,   // Position to write new K/V (0-based)
     seq_len: u32,       // Total cached positions (current_pos + batch_size)
-    max_seq_len: u32,   // Context window (8192)
+    max_seq_len: u32,   // Context window (2048)
     batch_size: u32,    // Number of tokens in this dispatch
 };
 
@@ -194,161 +194,91 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 
 // -------------------------------------------------------------------------
-// Kernel 2: Attention (QK^T + Scale + Softmax + V-Mix + OutProj + Residual)
+// Kernel 2: Attention — Flash Attention online softmax (no scores buffer)
 // -------------------------------------------------------------------------
-// Full Self-Attention implementation for autoregressive decode.
-// 1. Compute attention scores: Q @ K^T for all cached positions
-// 2. Scale by 1/sqrt(head_dim)
-// 3. Apply causal mask (can't attend beyond current_pos)
-// 4. Softmax across sequence
-// 5. Compute context: weighted sum of V
-// 6. Output projection + residual
+// Computes attention output in a single pass using online softmax
+// (Flash Attention style — Milakov & Gimelshein 2018).
+// Benefits:
+//   - O(1) auxiliary state per thread (running_max, running_sum, running_out)
+//   - No external scratch buffer required
+//   - Handles arbitrary max_seq_len — correct for ctx > 2048
+//   - Works for batched prefill (batch_size > 1) and decode (batch_size == 1)
 @compute @workgroup_size(256, 1, 1)
 fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x; // Output dimension index (0..2047)
-    let token_idx = global_id.y;
-    
+    let idx = global_id.x;       // Output dimension index (0..dim-1)
+    let token_idx = global_id.y; // Batch token index
+
     if (token_idx >= cache_params.batch_size) { return; }
-    let temp_base = token_idx * params.temp_stride;
-    
     if (idx >= params.dim) { return; }
 
-    // Constants for TinyLlama GQA
-    let dim_k = params.head_count_kv * params.head_dim; // 4 * 64 = 256
-    let gqa_ratio = params.head_count / params.head_count_kv; // 32 / 4 = 8
-    let scale = 1.0 / sqrt(f32(params.head_dim)); // 1/sqrt(64) = 0.125
+    let temp_base  = token_idx * params.temp_stride;
+    let gqa_ratio  = params.head_count / params.head_count_kv;
+    let scale      = 1.0 / sqrt(f32(params.head_dim));
+    let head_idx   = idx / params.head_dim;
+    let head_offset = idx % params.head_dim;
+    let kv_head_idx = head_idx / gqa_ratio;
+    let q_base     = temp_base + head_idx * params.head_dim;
+    let n_pairs    = params.head_dim / 2u;
 
-    // Map output index to (head_idx, head_offset)
-    let head_idx = idx / params.head_dim;      // 0..31
-    let head_offset = idx % params.head_dim;   // 0..63
-    let kv_head_idx = head_idx / gqa_ratio;    // GQA: 0..3
-    
-    let q_base = temp_base + head_idx * params.head_dim;    // Q vector base in temp_state
-    
-    // --------------------------------------------------------------------
-    // STEP 1: Compute attention scores for all positions in cache
-    // scores[pos] = (Q · K[pos]) / sqrt(head_dim)
-    // Thread-private local array for attention scores.
-    // Maps to NVIDIA local memory (DRAM-backed, L1/L2 cached).
-    // 8192 × 4 bytes = 32 KB per thread. Safe on RTX 3060.
-    // --------------------------------------------------------------------
-    var scores: array<f32, 8192>;
-    var max_score = -1e10;
-    
-    // Attention sink count: first N tokens are ALWAYS visible regardless of distance.
-    // These serve as the "origin" of the helical manifold — the model was trained
-    // to always see BOS/system tokens and uses them as stable attention sinks
-    // (excess probability mass drains here instead of corrupting content tokens).
-    // StreamingLLM (Xiao et al. 2023) proved 4 sinks enable infinite generation.
     const SINK_COUNT: u32 = 4u;
-    
+
+    // Online softmax accumulators (Flash Attention — O(1) memory)
+    var running_max: f32 = -1e10;
+    var running_sum: f32 = 0.0;
+    var running_out: f32 = 0.0;
+
     for (var pos = 0u; pos < cache_params.seq_len; pos++) {
-        // Compute Q · RoPE(i-j) · K[pos] with relative RoPE
-        // i = current query position, j = cached key position
-        // Only the relative distance (i-j) enters the rotation.
-        // Since i >= j (causal), rel_pos >= 0 and bounded by window size.
-        var rel_pos = (cache_params.current_pos + token_idx) - pos;
-        
-        // Attention sinks: first SINK_COUNT tokens stay visible forever.
-        // Clamp their distance to max 2047 so the RoPE angle stays in-distribution.
-        // The model doesn't use these for positional content — just as stabilizers.
+        // Causal mask: skip positions the current query cannot attend to
+        if (pos > cache_params.current_pos + token_idx) { continue; }
+
+        var rel: u32 = (cache_params.current_pos + token_idx) - pos;
         if (pos < SINK_COUNT) {
-            rel_pos = min(rel_pos, 2047u);
-        } else if (rel_pos > 2047u) {
-            // Regular sliding window: mask out tokens beyond training horizon.
-            scores[pos] = -1e10;
+            // Attention sinks: always attend, clamp RoPE angle to in-distribution range
+            rel = min(rel, cache_params.max_seq_len - 1u);
+        } else if (rel >= cache_params.max_seq_len) {
+            // Beyond sliding window context horizon: skip
             continue;
         }
-        
-        var dot_qk = 0.0;
-        let k_idx_base = (pos * params.head_count_kv * params.head_dim)
-                       + (kv_head_idx * params.head_dim);
-        
-        // Process dimension pairs: dims (2p, 2p+1) form a complex number
-        // Formula: score += (q_re*k_re + q_im*k_im)*cos(Δθ)
-        //                 + (q_re*k_im - q_im*k_re)*sin(Δθ)
-        // where Δ = rel_pos, θ = frequency for this pair
-        // FSE optimization: pre-computed cos/sin table eliminates per-thread trig
-        let n_pairs = params.head_dim / 2u;
+
+        // Compute Q · RoPE(rel) · K[pos]  (grouped-query attention, GQA)
+        var dot_qk: f32 = 0.0;
+        let k_base = pos * params.head_count_kv * params.head_dim
+                   + kv_head_idx * params.head_dim;
         for (var p = 0u; p < n_pairs; p++) {
-            let table_idx = rel_pos * n_pairs * 2u + p * 2u;
-            let cos_a = rope_table[table_idx];
-            let sin_a = rope_table[table_idx + 1u];
-            
-            let d = p * 2u;
-            let q_re = temp_state[q_base + d];
-            let q_im = temp_state[q_base + d + 1u];
-            let k_re = kv_cache_k[k_idx_base + d];
-            let k_im = kv_cache_k[k_idx_base + d + 1u];
-            
+            let tbl   = rel * n_pairs * 2u + p * 2u;
+            let cos_a = rope_table[tbl];
+            let sin_a = rope_table[tbl + 1u];
+            let doff  = p * 2u;
+            let q_re  = temp_state[q_base + doff];
+            let q_im  = temp_state[q_base + doff + 1u];
+            let k_re  = kv_cache_k[k_base + doff];
+            let k_im  = kv_cache_k[k_base + doff + 1u];
             dot_qk += (q_re * k_re + q_im * k_im) * cos_a
                     + (q_re * k_im - q_im * k_re) * sin_a;
         }
-        
-        // Apply scaling
         let score = dot_qk * scale;
-        
-        // Apply causal masking: can only attend to pos <= current_pos + token_idx
-        if (pos <= cache_params.current_pos + token_idx) {
-            scores[pos] = score;
-            max_score = max(max_score, score);
-        } else {
-            scores[pos] = -1e10; // Mask out future positions
-        }
+
+        // V value for this position / kv-head / output element
+        let v_val = kv_cache_v[
+            pos * params.head_count_kv * params.head_dim
+            + kv_head_idx * params.head_dim
+            + head_offset
+        ];
+
+        // Online softmax update (numerically stable)
+        let m_new     = max(running_max, score);
+        let exp_diff  = exp(running_max - m_new);
+        let exp_score = exp(score - m_new);
+        running_sum = running_sum * exp_diff + exp_score;
+        running_out = running_out * exp_diff + exp_score * v_val;
+        running_max = m_new;
     }
-    
-    // --------------------------------------------------------------------
-    // STEP 2: Softmax - numerically stable version
-    // exp(score - max) / sum(exp(score - max))
-    // --------------------------------------------------------------------
-    var sum_exp = 0.0;
-    for (var pos = 0u; pos < cache_params.seq_len; pos++) {
-        if (pos <= cache_params.current_pos + token_idx) {
-            let exp_score = exp(scores[pos] - max_score);
-            scores[pos] = exp_score;
-            sum_exp += exp_score;
-        } else {
-            scores[pos] = 0.0;
-        }
-    }
-    
-    // Normalize to get attention weights
-    for (var pos = 0u; pos < cache_params.seq_len; pos++) {
-        scores[pos] = scores[pos] / sum_exp;
-    }
-    
-    // --------------------------------------------------------------------
-    // STEP 3: Compute context = weighted sum of V values
-    // context[head_offset] = sum over pos of (attn_weight[pos] * V[pos, kv_head, head_offset])
-    // --------------------------------------------------------------------
+
+    // Finalize: divide accumulated output by softmax denominator
     var context_val = 0.0;
-    for (var pos = 0u; pos < cache_params.seq_len; pos++) {
-        if (pos <= cache_params.current_pos + token_idx) {
-            let attn_weight = scores[pos];
-            
-            // V cache index: [pos, kv_head, head_offset]
-            let v_idx = (pos * params.head_count_kv * params.head_dim)
-                      + (kv_head_idx * params.head_dim)
-                      + head_offset;
-            let v_val = kv_cache_v[v_idx];
-            context_val += attn_weight * v_val;
-        }
+    if (running_sum > 0.0) {
+        context_val = running_out / running_sum;
     }
-    
-    // --------------------------------------------------------------------
-    // STEP 4: Output projection - Context @ O_weight
-    // This maps [n_head * head_dim] -> [dim]
-    // Each thread idx computes one element of the output
-    // We need the full context vector [head_idx, head_offset] for all heads
-    // --------------------------------------------------------------------
-    
-    // Store context temporarily (each thread stores its contribution)
-    // Problem: We need the full context vector for matmul, but each thread
-    // only computed one element (for its head_offset).
-    // Solution: Write to temp_state as intermediate, use barrier
-    // OR: Compute full context in matmul loop (redundant but correct)
-    
-    // COMPROMISE: Keep context in temp_state, read from there in matmul
     temp_state[temp_base + idx] = context_val;
 }
 

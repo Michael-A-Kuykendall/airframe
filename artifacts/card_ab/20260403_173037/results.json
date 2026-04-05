@@ -1,0 +1,137 @@
+[
+    {
+        "Case":  "parse_port",
+        "Mode":  "off",
+        "Tokens":  243,
+        "StopReason":  "grammar_accept",
+        "ConstraintsPassed":  4,
+        "ConstraintsTotal":  5,
+        "Score":  80
+    },
+    {
+        "Case":  "parse_port",
+        "Mode":  "shadow",
+        "Tokens":  300,
+        "StopReason":  "max_tokens",
+        "ConstraintsPassed":  2,
+        "ConstraintsTotal":  5,
+        "Score":  40
+    },
+    {
+        "Case":  "parse_port",
+        "Mode":  "on",
+        "Tokens":  102,
+        "StopReason":  "grammar_accept",
+        "ConstraintsPassed":  1,
+        "ConstraintsTotal":  5,
+        "Score":  20
+    },
+    {
+        "Case":  "clamp_u8",
+        "Mode":  "off",
+        "Tokens":  300,
+        "StopReason":  "max_tokens",
+        "ConstraintsPassed":  3,
+        "ConstraintsTotal":  5,
+        "Score":  60
+    },
+    {
+        "Case":  "clamp_u8",
+        "Mode":  "shadow",
+        "Tokens":  300,
+        "StopReason":  "max_tokens",
+        "ConstraintsPassed":  2,
+        "ConstraintsTotal":  5,
+        "Score":  40
+    },
+    {
+        "Case":  "clamp_u8",
+        "Mode":  "on",
+        "Tokens":  300,
+        "StopReason":  "max_tokens",
+        "ConstraintsPassed":  1,
+        "ConstraintsTotal":  5,
+        "Score":  20
+    },
+    {
+        "Case":  "count_vowels",
+        "Mode":  "off",
+        "Tokens":  179,
+        "StopReason":  "grammar_accept",
+        "ConstraintsPassed":  2,
+        "ConstraintsTotal":  5,
+        "Score":  40
+    },
+    {
+        "Case":  "count_vowels",
+        "Mode":  "shadow",
+        "Tokens":  229,
+        "StopReason":  "grammar_accept",
+        "ConstraintsPassed":  1,
+        "ConstraintsTotal":  5,
+        "Score":  20
+    },
+    {
+        "Case":  "count_vowels",
+        "Mode":  "on",
+        "Tokens":  0,
+        "StopReason":  "error",
+        "ConstraintsPassed":  0,
+        "ConstraintsTotal":  5,
+        "Score":  0
+    },
+    {
+        "Case":  "is_palindrome",
+        "Mode":  "off",
+        "Tokens":  93,
+        "StopReason":  "grammar_accept",
+        "ConstraintsPassed":  3,
+        "ConstraintsTotal":  5,
+        "Score":  60
+    },
+    {
+        "Case":  "is_palindrome",
+        "Mode":  "shadow",
+        "Tokens":  300,
+        "StopReason":  "max_tokens",
+        "ConstraintsPassed":  4,
+        "ConstraintsTotal":  5,
+        "Score":  80
+    },
+    {
+        "Case":  "is_palindrome",
+        "Mode":  "on",
+        "Tokens":  258,
+        "StopReason":  "grammar_accept",
+        "ConstraintsPassed":  0,
+        "ConstraintsTotal":  5,
+        "Score":  0
+    },
+    {
+        "Case":  "safe_divide",
+        "Mode":  "off",
+        "Tokens":  300,
+        "StopReason":  "max_tokens",
+        "ConstraintsPassed":  3,
+        "ConstraintsTotal":  5,
+        "Score":  60
+    },
+    {
+        "Case":  "safe_divide",
+        "Mode":  "shadow",
+        "Tokens":  86,
+        "StopReason":  "grammar_accept",
+        "ConstraintsPassed":  4,
+        "ConstraintsTotal":  5,
+        "Score":  80
+    },
+    {
+        "Case":  "safe_divide",
+        "Mode":  "on",
+        "Tokens":  241,
+        "StopReason":  "grammar_accept",
+        "ConstraintsPassed":  3,
+        "ConstraintsTotal":  5,
+        "Score":  60
+    }
+]

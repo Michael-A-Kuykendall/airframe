@@ -1,0 +1,15 @@
+{
+  "airframe_commit": "bb283ef825db1ccbab5c68e333ed691f79c2b33b",
+  "arch": "x86_64",
+  "engine": {
+    "engine": "GPU-Bindless",
+    "wgpu_adapter_name": "NVIDIA GeForce RTX 3060",
+    "wgpu_backend": "Vulkan",
+    "wgpu_driver": "NVIDIA",
+    "wgpu_driver_info": "581.57"
+  },
+  "hostname": "MIKESPC",
+  "os": "windows",
+  "rustc_version": "rustc 1.89.0 (29483883e 2025-08-04)",
+  "trial_uuid": "gpu-20260322T191740.206Z"
+}

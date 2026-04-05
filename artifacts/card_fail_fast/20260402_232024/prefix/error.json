@@ -1,0 +1,4 @@
+{
+    "mode":  "prefix",
+    "error":  "Prefix mode could not obtain a usable card: No JSON object found in card generation output"
+}

@@ -1,0 +1,18 @@
+use std::io::{self, BufRead};
+
+fn parse_port(input: &str) -> i32 {
+    let mut input = input.trim().to_string();
+    let mut input = input.chars().filter(|c| c.is_ascii_digit()).collect::<String>();
+    input.trim_end();
+    let input = input.trim_end().parse().unwrap_or(0);
+    if input < 1 || input > 65535 {
+        panic!("Invalid port number: must be between 1 and 65535");
+    }
+    input
+}
+
+fn main() {
+    let input = std::env::args().next().expect("No input provided");
+    let port = parse_port(&input);
+    println!("Port number: {}", port);
+}

@@ -1,0 +1,105 @@
+{
+  "session_id": "ab-parse_port-on-20260403_173037",
+  "token_window_len": 0,
+  "active_card": {
+    "goal": "parse_port",
+    "success": [
+      "tests included"
+    ],
+    "must": [
+      "reject empty input"
+    ],
+    "must_not": [
+      "panic"
+    ],
+    "exact": [],
+    "assume": [],
+    "unknown": [],
+    "facts": [],
+    "now": "",
+    "next": [],
+    "blocked": [],
+    "done": [],
+    "risks": []
+  },
+  "card_history": [
+    {
+      "phase": "bootstrap",
+      "recorded_at": 1775255715219,
+      "card": {
+        "goal": "parse_port",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [
+          "panic"
+        ],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "write implementation",
+        "next": [
+          "add tests"
+        ],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    },
+    {
+      "phase": "post_turn",
+      "recorded_at": 1775255791113,
+      "card": {
+        "goal": "parse_port",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [
+          "panic"
+        ],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "write implementation",
+        "next": [],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    },
+    {
+      "phase": "post_turn",
+      "recorded_at": 1775255863171,
+      "card": {
+        "goal": "parse_port",
+        "success": [
+          "tests included"
+        ],
+        "must": [
+          "reject empty input"
+        ],
+        "must_not": [
+          "panic"
+        ],
+        "exact": [],
+        "assume": [],
+        "unknown": [],
+        "facts": [],
+        "now": "",
+        "next": [],
+        "blocked": [],
+        "done": [],
+        "risks": []
+      }
+    }
+  ],
+  "last_card_error": null
+}

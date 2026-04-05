@@ -1,0 +1,18 @@
+{
+    "job_id":  "job_1775232121062898500",
+    "task":  "card_smoke",
+    "prompt":  "Write a Rust function named parse_port that trims whitespace, rejects empty input, rejects non-numeric input, rejects values outside 1..65535, does not panic, and includes tests. Output Rust code only.",
+    "status":  "completed",
+    "position":  0,
+    "eta_seconds":  0,
+    "started_at":  1775232121062,
+    "completed_at":  1775232186319,
+    "result":  {
+                   "text":  "use std::io::{self, BufRead};\n\nfn parse_port(input: \u0026str) -\u003e i32 {\n    let mut input = input.trim().to_string();\n    let mut input = input.chars().filter(|c| c.is_ascii_digit()).collect::\u003cString\u003e();\n    input.trim_end();\n    let input = input.trim_end().parse().unwrap_or(0);\n    if input \u003c 1 || input \u003e 65535 {\n        panic!(\"Invalid port number: must be between 1 and 65535\");\n    }\n    input\n}\n\nfn main() {\n    let input = std::env::args().next().expect(\"No input provided\");\n    let port = parse_port(\u0026input);\n    println!(\"Port number: {}\", port);\n}\n",
+                   "stop_reason":  "grammar_accept",
+                   "tokens_generated":  204,
+                   "policy_status":  "pass",
+                   "policy_reason":  "ok:prefill"
+               },
+    "partial_text":  "use std::io::{self, BufRead};\n\nfn parse_port(input: \u0026str) -\u003e i32 {\n    let mut input = input.trim().to_string();\n    let mut input = input.chars().filter(|c| c.is_ascii_digit()).collect::\u003cString\u003e();\n    input.trim_end();\n    let input = input.trim_end().parse().unwrap_or(0);\n    if input \u003c 1 || input \u003e 65535 {\n        panic!(\"Invalid port number: must be between 1 and 65535\");\n    }\n    input\n}\n\nfn main() {\n    let input = std::env::args().next().expect(\"No input provided\");\n    let port = parse_port(\u0026input);\n    println!(\"Port number: {}\", port);\n}\n\n// END_RUST_FILE"
+}

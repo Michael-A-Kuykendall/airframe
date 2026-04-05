@@ -1,0 +1,32 @@
+[
+    {
+        "Desc":  "fn parse_port defined",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "returns Result",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "has unit tests",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "no bare unwrap on parse",
+        "Require":  false,
+        "Matched":  false,
+        "Pass":  true
+    },
+    {
+        "Desc":  "empty check present",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    }
+]

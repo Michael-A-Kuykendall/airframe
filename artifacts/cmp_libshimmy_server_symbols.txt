@@ -1,0 +1,50 @@
+35:fn sample_token(
+40:    recent_tokens: &[u32],
+45:        for &tok in recent_tokens {
+118:    im_end_token: Option<u32>,
+134:        if let Some(im_end) = im_end_token {
+135:            let im_end_idx = im_end as usize;
+136:            if im_end_idx < logits.len() {
+137:                logits[im_end_idx] = 0.0;
+186:    prompt_mode: Option<String>,
+189:    ignore_eos: Option<bool>,
+201:    pub stop_reason: String,
+251:    stop_reason: String,
+395:                        stop_reason: "eval_complete".to_string(),
+642:    // For Repro Arena experiments we support prompt_mode to compare behaviors.
+643:    let prompt_mode = req.prompt_mode.as_deref().unwrap_or("creative").to_string();
+645:    // TinyLlama-Chat expects ChatML (<|im_start|> ... <|im_end|>), not <|system|> ... </s>.
+646:    let templated_prompt = match prompt_mode.as_str() {
+649:            "<|im_start|>system\nYou are a Rust code output machine. Output only valid Rust source code, no prose, no markdown fences.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n// BEGIN_RUST_FILE\n",
+653:            "<|im_start|>system\nYou are a talented creative writer.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+658:                "Unknown prompt_mode: {} (expected raw|developer|creative)",
+664:    let prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
+666:    let im_end_token: Option<u32> = tokenizer
+667:        .encode("<|im_end|>", false)
+671:    let mut grammar_state: Option<GrammarState> = if prompt_mode == "developer" {
+693:    let mut recent_tokens: Vec<u32> = Vec::new();
+717:    let mut stop_reason = "max_tokens";
+792:            apply_grammar_mask(&mut logits_vec, gs, vocab, eos, im_end_token);
+815:            sample_token(&mut logits_vec, 0.0, 1.0, 1.0, &[], &mut rng)
+818:            sample_token(&mut logits_vec, temperature, top_p, rep_penalty, &recent_tokens, &mut rng)
+822:        recent_tokens.push(next_token);
+823:        if recent_tokens.len() > 64 {
+824:            recent_tokens.remove(0);
+829:            if req.ignore_eos.unwrap_or(false) {
+833:                stop_reason = "eos";
+838:        // TinyLlama-Chat uses ChatML; allow clean termination on <|im_end|>.
+839:        if let Some(im_end) = im_end_token {
+840:            if next_token == im_end {
+841:                if req.ignore_eos.unwrap_or(false) {
+842:                    // Explicit override: keep generating even after <|im_end|>
+844:                    stop_reason = "im_end";
+858:                stop_reason = "grammar_reject";
+863:                stop_reason = "grammar_accept";
+868:        if prompt_mode == "developer" && generated_text.contains("// END_RUST_FILE") {
+869:            stop_reason = "end_marker";
+962:    let mut final_text = if prompt_mode == "developer" {
+977:    if prompt_mode == "developer" && !final_text.is_empty() {
+984:    let (policy_status, policy_reason) = if prompt_mode == "developer" {
+1000:        stop_reason: stop_reason.to_string(),
+1009:        debug_sanitizer_reason: (include_debug_raw && prompt_mode == "developer")
+1061:        || s.contains("<|im_end|>")

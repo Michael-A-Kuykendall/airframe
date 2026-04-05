@@ -1,0 +1,74 @@
+41:fn sample_token(
+46:    recent_tokens: &[u32],
+51:        for &tok in recent_tokens {
+130:    im_end_token: Option<u32>,
+146:        if let Some(im_end) = im_end_token {
+147:            let im_end_idx = im_end as usize;
+148:            if im_end_idx < logits.len() {
+149:                logits[im_end_idx] = 0.0;
+193:    pub session_id: Option<String>,
+198:    prompt_mode: Option<String>,
+202:    ignore_eos: Option<bool>,
+219:    pub stop_reason: String,
+252:    pub partial_text: Option<String>,
+275:    stop_reason: String,
+373:    let stream_channels = Arc::new(Mutex::new(
+374:        std::collections::HashMap::<String, tokio::sync::broadcast::Sender<String>>::new(),
+379:    let streams_for_http = Arc::clone(&stream_channels);
+426:            let st = stream_channels.lock().unwrap();
+458:                        stop_reason: "eval_complete".to_string(),
+523:        let mut streams = stream_channels.lock().unwrap();
+534:    stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
+579:            let st = stream_channels.lock().unwrap();
+709:            partial_text: None,
+720:            let mut st = stream_channels.lock().unwrap();
+890:    stream_tx: Option<tokio::sync::broadcast::Sender<String>>,
+902:    const SESSION_WINDOW_TOKENS: usize = 2048;
+921:    // For Repro Arena experiments we support prompt_mode to compare behaviors.
+922:    let prompt_mode = req.prompt_mode.as_deref().unwrap_or("creative").to_string();
+924:    // TinyLlama-Chat expects ChatML (<|im_start|> ... <|im_end|>), not <|system|> ... </s>.
+925:    let templated_prompt = match prompt_mode.as_str() {
+928:            "<|im_start|>system\nYou are a Rust code output machine. Output only valid Rust source code, no prose, no markdown fences.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n// BEGIN_RUST_FILE\n",
+932:            "<|im_start|>system\nYou are a talented creative writer.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+937:                "Unknown prompt_mode: {} (expected raw|developer|creative)",
+943:    let mut prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
+944:    let session_id = req.session_id.clone();
+945:    if let Some(session_id) = session_id.as_ref() {
+948:            st.get(session_id)
+958:                .take(SESSION_WINDOW_TOKENS)
+966:    let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
+974:    let mut grammar_state: Option<GrammarState> = if prompt_mode == "developer" {
+999:    let mut recent_tokens: Vec<u32> = Vec::new();
+1029:    let mut stop_reason = "max_tokens";
+1111:            apply_grammar_mask(&mut logits_vec, gs, vocab, eos, im_end_token);
+1143:            sample_token(&mut logits_vec, 0.0, 1.0, 1.0, &[], &mut rng)
+1146:            sample_token(
+1151:                &recent_tokens,
+1157:        recent_tokens.push(next_token);
+1158:        if recent_tokens.len() > 64 {
+1159:            recent_tokens.remove(0);
+1164:            if req.ignore_eos.unwrap_or(false) {
+1168:                stop_reason = "eos";
+1173:        // TinyLlama-Chat uses ChatML; allow clean termination on <|im_end|>.
+1174:        if let Some(im_end) = im_end_token {
+1175:            if next_token == im_end {
+1176:                if req.ignore_eos.unwrap_or(false) {
+1177:                    // Explicit override: keep generating even after <|im_end|>
+1179:                    stop_reason = "im_end";
+1200:                state.partial_text = Some(generated_text.clone());
+1206:                stop_reason = "grammar_reject";
+1211:                stop_reason = "grammar_accept";
+1216:        if prompt_mode == "developer" && generated_text.contains("// END_RUST_FILE") {
+1217:            stop_reason = "end_marker";
+1327:    let mut final_text = if prompt_mode == "developer" {
+1342:    if prompt_mode == "developer" && !final_text.is_empty() {
+1349:    let (policy_status, policy_reason) = if prompt_mode == "developer" {
+1363:    let response_suffix = if prompt_mode == "raw" {
+1369:    if let Some(session_id) = session_id {
+1370:        let mut appended_tokens = tokenizer.encode(&templated_prompt, true)?;
+1378:            let session = st.entry(session_id).or_default();
+1380:            if session.token_window.len() > SESSION_WINDOW_TOKENS {
+1381:                let drop_count = session.token_window.len() - SESSION_WINDOW_TOKENS;
+1395:        stop_reason: stop_reason.to_string(),
+1404:        debug_sanitizer_reason: (include_debug_raw && prompt_mode == "developer")
+1466:        || s.contains("<|im_end|>")

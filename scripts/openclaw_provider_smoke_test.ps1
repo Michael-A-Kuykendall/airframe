@@ -5,6 +5,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$ready = $false
+for ($i = 0; $i -lt 120; $i++) {
+    try {
+        $null = Invoke-RestMethod -Method Get -Uri "$BaseUrl/v1/models"
+        $ready = $true
+        break
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+
+if (-not $ready) {
+    throw "Provider did not become ready at $BaseUrl"
+}
+
 function Get-ModelId {
     param(
         [string]$ResolvedBaseUrl

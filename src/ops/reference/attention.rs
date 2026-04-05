@@ -28,11 +28,6 @@ pub fn attention_f32(
     rope_scale: f32,
     causal_mask: bool,
 ) -> Result<Tensor> {
-    crate::ensure!(
-        rope_scale == 1.0,
-        "RoPE scaling unsupported (expected rope_scale=1.0, got {rope_scale})"
-    );
-
     // Validate GQA configuration
     if n_head % n_head_kv != 0 {
         return Err(LibshimmyError::Unsupported(format!(
@@ -59,6 +54,7 @@ pub fn attention_f32(
                 position_ids,
                 rope_base,
                 rope_dim,
+                rope_scale,
                 causal_mask,
             )
         }
@@ -77,6 +73,7 @@ pub fn attention_f32(
                 position_ids,
                 rope_base,
                 rope_dim,
+                rope_scale,
                 causal_mask,
             )
         }
@@ -110,11 +107,6 @@ pub fn attention_with_cache_f32(
     layer_idx: usize,
     kv_cache: &mut KvCache,
 ) -> Result<Tensor> {
-    crate::ensure!(
-        rope_scale == 1.0,
-        "RoPE scaling unsupported (expected rope_scale=1.0, got {rope_scale})"
-    );
-
     // Validate GQA configuration
     if n_head % n_head_kv != 0 {
         return Err(LibshimmyError::Unsupported(format!(
@@ -166,8 +158,20 @@ pub fn attention_with_cache_f32(
     let v_heads = reshape_to_heads(&v, seq_len, n_head_kv, head_dim)?; // [seq_len, n_head_kv, head_dim]
 
     // 3. Apply RoPE to Q and K (using position_ids for absolute positions)
-    let q_rope = rope::apply_rope_f32(&q_heads, position_ids, rope_base, rope_dim)?;
-    let k_rope = rope::apply_rope_f32(&k_heads, position_ids, rope_base, rope_dim)?;
+    let q_rope = rope::apply_rope_scaled_f32(
+        &q_heads,
+        position_ids,
+        rope_base,
+        rope_dim,
+        rope_scale,
+    )?;
+    let k_rope = rope::apply_rope_scaled_f32(
+        &k_heads,
+        position_ids,
+        rope_base,
+        rope_dim,
+        rope_scale,
+    )?;
 
     // 4. Store new K, V in cache (before retrieving full cache)
     // Note: We store AFTER RoPE for K, but V is unmodified
@@ -350,6 +354,7 @@ fn attention_2d(
     position_ids: &[usize],
     rope_base: f32,
     rope_dim: usize,
+    rope_scale: f32,
     causal_mask: bool,
 ) -> Result<Tensor> {
     let seq_len = input.shape[0];
@@ -378,8 +383,20 @@ fn attention_2d(
     let v_heads = reshape_to_heads(&v, seq_len, n_head_kv, head_dim)?; // [seq_len, n_head_kv, head_dim]
 
     // 3. Apply RoPE to Q and K
-    let q_rope = rope::apply_rope_f32(&q_heads, position_ids, rope_base, rope_dim)?;
-    let k_rope = rope::apply_rope_f32(&k_heads, position_ids, rope_base, rope_dim)?;
+    let q_rope = rope::apply_rope_scaled_f32(
+        &q_heads,
+        position_ids,
+        rope_base,
+        rope_dim,
+        rope_scale,
+    )?;
+    let k_rope = rope::apply_rope_scaled_f32(
+        &k_heads,
+        position_ids,
+        rope_base,
+        rope_dim,
+        rope_scale,
+    )?;
 
     // DIAGNOSTIC: Check if tracing is enabled
     let trace_attention = std::env::var("LIBSHIMMY_TRACE_ATTENTION").is_ok();
@@ -464,6 +481,7 @@ fn attention_3d(
     position_ids: &[usize],
     rope_base: f32,
     rope_dim: usize,
+    rope_scale: f32,
     causal_mask: bool,
 ) -> Result<Tensor> {
     let batch_size = input.shape[0];
@@ -490,6 +508,7 @@ fn attention_3d(
             position_ids,
             rope_base,
             rope_dim,
+            rope_scale,
             causal_mask,
         )?;
 

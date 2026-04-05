@@ -1,0 +1,29 @@
+## openclaw-local-provider...origin/openclaw-local-provider
+ M .github/copilot-instructions.md
+ M .gitignore
+ M .vscode/settings.json
+ M AGENTS.md
+ M fixtures/wikitext-2-raw/wiki.test.raw
+ m shimmy_integration
+ M src/backend/bindless/pipeline.rs
+ M src/bin/shimmy_eval.rs
+ M src/bin/shimmy_server_gpu.rs
+?? artifacts/
+?? chat-3-22.md
+?? docs/chat-3-22-narrative.md
+?? docs/chat-3-22-reconstruction.md
+?? docs/shimmy-airframe-launch-envelope.md
+?? eval_output.log
+?? eval_output2.log
+?? eval_output3.log
+?? eval_output4.log
+?? eval_staging_crash.log
+?? eval_staging_crash_v2.log
+?? fused_semantic_execution_full_markdown_reconstruction.md
+?? hellaswag_full_run.log
+?? humaneval_server.log
+?? scripts/__pycache__/
+?? scripts/run_humaneval_airframe.py
+?? scripts/run_humaneval_llamacpp.py
+?? staging_crash_repro.log
+?? vendor/

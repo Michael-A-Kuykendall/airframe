@@ -1,0 +1,6 @@
+  master
+* openclaw-local-provider
+  shimmy-airframe-spike
+  remotes/origin/master
+  remotes/origin/openclaw-local-provider
+  remotes/origin/shimmy-airframe-spike

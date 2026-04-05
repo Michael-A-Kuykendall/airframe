@@ -1,6 +1,5 @@
 ---
-applyTo: "**"
-description: "Retrieval rules for airframe MCP brain"
+description: "Use when working on GPU pipeline, WGSL shader, conformance, inference, or GGUF questions that need indexed repo retrieval."
 ---
 
 # Airframe Brain

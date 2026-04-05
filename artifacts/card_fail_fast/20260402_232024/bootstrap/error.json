@@ -1,0 +1,4 @@
+{
+    "mode":  "bootstrap",
+    "error":  "Bootstrap mode could not obtain a usable card: No JSON object found in card generation output"
+}

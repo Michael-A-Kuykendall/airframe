@@ -1,0 +1,129 @@
+src\backend\bindless\kv_cache.rs:25:    seq_len: u32,
+src\backend\bindless\kv_cache.rs:28:    max_seq_len: u32,
+src\backend\bindless\kv_cache.rs:44:    /// Per layer buffer: [max_seq_len, n_head_kv, head_dim] in F32
+src\backend\bindless\kv_cache.rs:53:    /// * `max_seq_len` - Context window size (2048 for TinyLlama)
+src\backend\bindless\kv_cache.rs:59:        max_seq_len: u32,
+src\backend\bindless\kv_cache.rs:63:        let buffer_size = (max_seq_len * n_head_kv * head_dim * 4) as u64;
+src\backend\bindless\kv_cache.rs:67:        eprintln!("  Max seq len: {}", max_seq_len);
+src\backend\bindless\kv_cache.rs:112:            seq_len: 0,
+src\backend\bindless\kv_cache.rs:113:            max_seq_len,
+src\backend\bindless\kv_cache.rs:121:    pub fn get_seq_len(&self) -> u32 {
+src\backend\bindless\kv_cache.rs:122:        self.seq_len
+src\backend\bindless\kv_cache.rs:140:        self.seq_len = 0;
+src\backend\bindless\kv_cache.rs:144:    pub fn set_seq_len(&mut self, new_len: u32) {
+src\backend\bindless\kv_cache.rs:145:        if new_len > self.max_seq_len {
+src\backend\bindless\kv_cache.rs:148:                new_len, self.max_seq_len
+src\backend\bindless\kv_cache.rs:151:        self.seq_len = new_len;
+src\backend\bindless\kv_cache.rs:157:    /// Panics if sequence exceeds max_seq_len (context overflow)
+src\backend\bindless\kv_cache.rs:158:    pub fn increment(&mut self) {
+src\backend\bindless\kv_cache.rs:159:        self.seq_len += 1;
+src\backend\bindless\kv_cache.rs:160:        if self.seq_len > self.max_seq_len {
+src\backend\bindless\kv_cache.rs:163:                self.seq_len, self.max_seq_len
+src\backend\bindless\kv_cache.rs:185:    pub fn max_len(&self) -> u32 {
+src\backend\bindless\kv_cache.rs:186:        self.max_seq_len
+src\backend\bindless\kv_cache.rs:192:    /// * `pos` - Sequence position (0..seq_len)
+src\backend\bindless\kv_cache.rs:220:        let max_seq_len = 2048;
+src\backend\bindless\kv_cache.rs:239:        let cache = KVCache::new(&device, n_layers, n_head_kv, head_dim, max_seq_len);
+src\backend\bindless\kv_cache.rs:252:        assert_eq!(cache.get_seq_len(), 0, "Initial seq_len should be 0");
+src\backend\bindless\kv_cache.rs:253:        assert_eq!(cache.max_len(), 2048, "Max seq len should be 2048");
+src\backend\bindless\kv_cache.rs:257:        let buffer_size = max_seq_len * n_head_kv * head_dim * 4;
+src\backend\bindless\kv_cache.rs:299:        // Test increment
+src\backend\bindless\kv_cache.rs:300:        assert_eq!(cache.get_seq_len(), 0);
+src\backend\bindless\kv_cache.rs:301:        cache.increment();
+src\backend\bindless\kv_cache.rs:302:        assert_eq!(cache.get_seq_len(), 1);
+src\backend\bindless\kv_cache.rs:303:        cache.increment();
+src\backend\bindless\kv_cache.rs:304:        assert_eq!(cache.get_seq_len(), 2);
+src\backend\bindless\kv_cache.rs:308:        assert_eq!(cache.get_seq_len(), 0);
+src\backend\bindless\kv_cache.rs:353:        // Increment beyond max_seq_len
+src\backend\bindless\kv_cache.rs:355:            cache.increment(); // Should panic at 9th call
+src\backend\bindless\pipeline.rs:66:    pub seq_len: u32,     // Total cached positions (current_pos + 1)
+src\backend\bindless\pipeline.rs:67:    pub max_seq_len: u32, // 2048 (context window)
+src\backend\bindless\pipeline.rs:993:    pub fn run_matmul_f32(
+src\backend\bindless\pipeline.rs:1100:    pub fn run_rmsnorm_test(
+src\backend\bindless\pipeline.rs:1231:        seq_len: u32,
+src\backend\bindless\pipeline.rs:1234:        self.run_full_model_with_cache_state(
+src\backend\bindless\pipeline.rs:1241:            seq_len,
+src\backend\bindless\pipeline.rs:1248:    pub fn run_full_model_with_cache_state(
+src\backend\bindless\pipeline.rs:1256:        seq_len: u32,
+src\backend\bindless\pipeline.rs:1362:            seq_len, // Total cached positions (including this batch)
+src\backend\bindless\pipeline.rs:1363:            max_seq_len: spec.n_ctx as u32,
+src\backend\bindless\pipeline.rs:1438:                            .rope_cache_buffer
+src\backend\bindless\pipeline.rs:1846:                        .rope_cache_buffer
+src\backend\bindless\pipeline.rs:1996:            seq_len: 1,
+src\backend\bindless\pipeline.rs:1997:            max_seq_len: 2048, // test default
+src\backend\bindless\pipeline.rs:2047:                        .rope_cache_buffer
+src\backend\bindless\pipeline.rs:2173:    /// 2. Writes new K/V at cache.get_seq_len() position
+src\backend\bindless\pipeline.rs:2189:    pub fn run_layer_with_cache(
+src\backend\bindless\pipeline.rs:2244:            current_pos: kv_cache.get_seq_len(), // Position to write new K/V
+src\backend\bindless\pipeline.rs:2245:            seq_len: kv_cache.get_seq_len() + 1, // After write, this many positions cached
+src\backend\bindless\pipeline.rs:2246:            max_seq_len: kv_cache.max_len(),
+src\backend\bindless\pipeline.rs:2253:                "    [CACHE] Layer {}: current_pos={}, seq_len={}, max={}",
+src\backend\bindless\pipeline.rs:2254:                layer_idx, cache_params.current_pos, cache_params.seq_len, cache_params.max_seq_len
+src\backend\bindless\pipeline.rs:2304:                        .rope_cache_buffer
+src\backend\bindless\pipeline.rs:2405:        // NOTE: Cache increment happens ONCE per token (after all layers), not per layer
+src\backend\bindless\pipeline.rs:2406:        // Caller must call kv_cache.increment() after processing all 22 layers
+src\backend\bindless\pipeline.rs:2412:    pub fn run_layer_with_cache_debug(
+src\backend\bindless\pipeline.rs:2425:        // 1. Create buffers (same as run_layer_with_cache)
+src\backend\bindless\pipeline.rs:2455:            current_pos: kv_cache.get_seq_len(),
+src\backend\bindless\pipeline.rs:2456:            seq_len: kv_cache.get_seq_len() + 1,
+src\backend\bindless\pipeline.rs:2457:            max_seq_len: kv_cache.max_len(),
+src\backend\bindless\pipeline.rs:2506:                        .rope_cache_buffer
+src\backend\bindless\pipeline.rs:2596:        // Continue with remaining kernels (2-5) - same as run_layer_with_cache
+src\backend\bindless\pipeline_shift.rs:13:    shift_amt: u32,
+src\backend\bindless\pipeline_shift.rs:14:    old_seq_len: u32,
+src\backend\bindless\pipeline_shift.rs:17:    rope_dim: u32,
+src\backend\bindless\pipeline_shift.rs:18:    rope_base: f32,
+src\backend\bindless\pipeline_shift.rs:19:    max_seq_len: u32,
+src\backend\bindless\pipeline_shift.rs:24:        let shader_src = include_str!("sh_rope_shift.wgsl");
+src\backend\bindless\pipeline_shift.rs:119:        shift_amt: u32,
+src\backend\bindless\pipeline_shift.rs:120:        old_seq_len: u32,
+src\backend\bindless\pipeline_shift.rs:123:        rope_dim: u32,
+src\backend\bindless\pipeline_shift.rs:124:        rope_base: f32,
+src\backend\bindless\pipeline_shift.rs:125:        max_seq_len: u32,
+src\backend\bindless\pipeline_shift.rs:129:            shift_amt,
+src\backend\bindless\pipeline_shift.rs:130:            old_seq_len,
+src\backend\bindless\pipeline_shift.rs:133:            rope_dim,
+src\backend\bindless\pipeline_shift.rs:134:            rope_base,
+src\backend\bindless\pipeline_shift.rs:135:            max_seq_len,
+src\backend\bindless\pipeline_shift.rs:144:        // Allocate scratch buffers and snapshot the live cache before shift.
+src\backend\bindless\pipeline_shift.rs:195:        // Step 2: Dispatch shift kernel (reads scratch, writes live cache)
+src\backend\bindless\pipeline_shift.rs:208:            let elements_to_shift = if old_seq_len > keep_sink + shift_amt {
+src\backend\bindless\pipeline_shift.rs:209:                old_seq_len - (keep_sink + shift_amt)
+src\backend\bindless\pipeline_shift.rs:214:            if elements_to_shift > 0 {
+src\backend\bindless\pipeline_shift.rs:217:                let dim_z = elements_to_shift; // one workgroup per seq position
+src\backend\bindless\pipeline_shift.rs:233:    fn test_helical_gpu_shift_pure_copy() {
+src\backend\bindless\pipeline_shift.rs:242:        let max_seq_len: u32 = 16;
+src\backend\bindless\pipeline_shift.rs:246:        let shift_amt: u32 = 5;
+src\backend\bindless\pipeline_shift.rs:247:        let old_seq_len: u32 = 12;
+src\backend\bindless\pipeline_shift.rs:248:        // Elements at positions [keep_sink+shift_amt .. old_seq_len) = [9,10,11]
+src\backend\bindless\pipeline_shift.rs:249:        // shift to [keep_sink .. keep_sink+3) = [4,5,6]
+src\backend\bindless\pipeline_shift.rs:251:        let total_floats = (max_seq_len * n_head_kv * head_dim) as usize;
+src\backend\bindless\pipeline_shift.rs:257:        for pos in 0..max_seq_len {
+src\backend\bindless\pipeline_shift.rs:288:            shift_amt,
+src\backend\bindless\pipeline_shift.rs:289:            old_seq_len,
+src\backend\bindless\pipeline_shift.rs:294:            max_seq_len,
+src\backend\bindless\pipeline_shift.rs:322:        let elements_to_shift = old_seq_len - (keep_sink + shift_amt); // 3
+src\backend\bindless\pipeline_shift.rs:324:        for offset in 0..elements_to_shift {
+src\backend\bindless\pipeline_shift.rs:325:            let old_pos = keep_sink + shift_amt + offset;
+src\backend\bindless\pipeline_shift.rs:343:            "K shift must be bit-exact copy, got max_err={:.2e}",
+src\backend\bindless\pipeline_shift.rs:346:        println!("PASS: K values are bit-identical after shift (pure copy, no RoPE)");
+src\backend\bindless\pipeline_shift.rs:350:    /// keep=2, shift=3, old_len=16 GÂ∆ elements_to_shift=11 (pos 5..16 GÂ∆ 2..13)
+src\backend\bindless\pipeline_shift.rs:355:    fn test_helical_gpu_shift_overlapping() {
+src\backend\bindless\pipeline_shift.rs:364:        let max_seq_len: u32 = 16;
+src\backend\bindless\pipeline_shift.rs:368:        let shift_amt: u32 = 3;
+src\backend\bindless\pipeline_shift.rs:369:        let old_seq_len: u32 = 16;
+src\backend\bindless\pipeline_shift.rs:371:        let total_floats = (max_seq_len * n_head_kv * head_dim) as usize;
+src\backend\bindless\pipeline_shift.rs:377:        for pos in 0..max_seq_len {
+src\backend\bindless\pipeline_shift.rs:408:            shift_amt,
+src\backend\bindless\pipeline_shift.rs:409:            old_seq_len,
+src\backend\bindless\pipeline_shift.rs:414:            max_seq_len,
+src\backend\bindless\pipeline_shift.rs:463:        // Verify: every shifted element must be bit-identical to its source
+src\backend\bindless\pipeline_shift.rs:464:        let elements_to_shift = old_seq_len - (keep_sink + shift_amt); // 11
+src\backend\bindless\pipeline_shift.rs:467:        for offset in 0..elements_to_shift {
+src\backend\bindless\pipeline_shift.rs:468:            let old_pos = keep_sink + shift_amt + offset;
+src\backend\bindless\pipeline_shift.rs:493:            "  params: keep={}, shift={}, old_len={}, elements_to_shift={}",
+src\backend\bindless\pipeline_shift.rs:494:            keep_sink, shift_amt, old_seq_len, elements_to_shift
+src\backend\bindless\pipeline_shift.rs:498:            keep_sink + shift_amt,
+src\backend\bindless\pipeline_shift.rs:499:            old_seq_len - 1,
+src\backend\bindless\pipeline_shift.rs:501:            keep_sink + elements_to_shift - 1
+src\backend\bindless\pipeline_shift.rs:514:        println!("PASS: Overlapping shift is bit-identical for both K and V (pure copy)");

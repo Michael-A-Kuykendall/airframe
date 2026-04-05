@@ -1,0 +1,36 @@
+use std::io::{self, BufRead};
+
+fn safe_divide(a: f64, b: f64) -> Result<f64, &'static str> {
+    if b == 0.0 {
+        return Err("division by zero");
+    }
+    Ok(a / b)
+}
+
+fn main() {
+    let mut reader = io::stdin()
+        .read_to_string()?
+        .trim()
+        .split_whitespace()
+        .map(|s| s.parse::<f64>().unwrap())
+        .collect::<Vec<_>>();
+
+    let mut sum = 0.0;
+    for a in &mut reader {
+        sum += a;
+    }
+
+    let mut quotient = sum / reader[0];
+    let mut remainder = sum % reader[0];
+
+    let mut zero_division_message = String::new();
+    loop {
+        match safe_divide(quotient, remainder) {
+            Ok(f) => {
+                if f == 0.0 {
+                    zero_division_message = format!("division by zero: {}", quotient);
+                } else {
+                    break Ok(f);
+                }
+            }
+           

@@ -1,0 +1,32 @@
+[
+    {
+        "Desc":  "fn count_vowels defined",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "takes \u0026str",
+        "Require":  true,
+        "Matched":  true,
+        "Pass":  true
+    },
+    {
+        "Desc":  "returns usize",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "has unit tests",
+        "Require":  true,
+        "Matched":  false,
+        "Pass":  false
+    },
+    {
+        "Desc":  "no to_string() call",
+        "Require":  false,
+        "Matched":  false,
+        "Pass":  true
+    }
+]

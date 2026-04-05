@@ -1,0 +1,24 @@
+[
+  {
+    "label": "2048-baseline",
+    "max_ctx": 2048,
+    "rope_scale": "1.0",
+    "filler_target": 1600,
+    "approx_prompt_tokens": 1664,
+    "pass": true,
+    "found_keyword": true,
+    "response_text": "\r\nSECRET CODE: XYLOPHONE-7743",
+    "error": ""
+  },
+  {
+    "label": "4096-linear",
+    "max_ctx": 4096,
+    "rope_scale": "0.500000",
+    "filler_target": 3600,
+    "approx_prompt_tokens": 3664,
+    "pass": false,
+    "found_keyword": false,
+    "response_text": "\r\nThe secret mentioned code is a long for context retention.",
+    "error": ""
+  }
+]
