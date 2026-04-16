@@ -37,45 +37,66 @@ impl PreflightResources {
     }
 
     fn build_rope_cache(device: &wgpu::Device, spec: &ModelSpec) -> wgpu::Buffer {
-        // Pre-compute full cos/sin lookup table for relative RoPE.
-        // Layout: [distance][pair] where each entry is (cos, sin).
-        //   table[d * n_pairs * 2 + p * 2 + 0] = cos(d * theta_p)
-        //   table[d * n_pairs * 2 + p * 2 + 1] = sin(d * theta_p)
-        // This eliminates per-thread trig in the attention inner loop (FSE: selector-first).
-        let dim = spec.rope_dim; // e.g. 64
-        let base = spec.rope_base; // e.g. 10000.0
-        let scale = spec.rope_scale; // 1.0 = no extension; 0.5 = 2x (2048→4096); 0.25 = 4x (2048→8192)
-        let n_pairs = dim / 2; // 32 frequency pairs
-        let max_dist = spec.n_ctx; // Matches the runtime context window and shader clamp
+        // Pre-compute full cos/sin lookup table using YaRN per-dimension scaling.
+        //
+        // YaRN (Peng et al. 2023) applies a non-uniform frequency correction per
+        // RoPE dimension pair:
+        //
+        //   For pair i with base theta_i = 1 / base^(2i/D):
+        //     wavelength lambda_i = 2*pi / theta_i = 2*pi * base^(2i/D)
+        //     low  = L_train / yarn_alpha  (long-wavelength dims: no scaling needed)
+        //     high = L_train / yarn_beta   (short-wavelength dims: full linear scaling)
+        //
+        //   ramp_i = clamp((L_train / lambda_i - yarn_alpha) / (yarn_beta - yarn_alpha), 0.0, 1.0)
+        //   effective_theta_i = theta_i * (ramp_i / rope_scale + (1.0 - ramp_i))
+        //     = theta_i when ramp=0 (low freq, no scaling)
+        //     = theta_i / rope_scale when ramp=1 (high freq, full linear equiv)
+        //
+        // Layout: [distance][pair] each entry = (cos, sin).
+        //   table[d * n_pairs * 2 + p * 2 + 0] = cos(d * effective_theta_p)
+        //   table[d * n_pairs * 2 + p * 2 + 1] = sin(d * effective_theta_p)
+        let dim = spec.rope_dim;
+        let base = spec.rope_base;
+        let scale = spec.rope_scale; // < 1.0 extends context: rope_scale = L_train / L_target
+        let n_pairs = dim / 2;
+        let max_dist = spec.n_ctx;
 
-        // Compute base frequencies (theta_p)
-        let thetas: Vec<f32> = (0..n_pairs)
-            .map(|i| 1.0 / base.powf((2.0 * i as f32) / dim as f32))
+        let l_train = if scale < 1.0 { (max_dist as f32 * scale).round() as usize } else { max_dist };
+        let alpha = spec.yarn_alpha;
+        let beta = spec.yarn_beta;
+        let use_yarn = scale < 1.0 && alpha > 0.0 && beta > alpha;
+
+        // Compute per-dimension effective theta with optional YaRN correction.
+        let effective_thetas: Vec<f32> = (0..n_pairs)
+            .map(|i| {
+                let theta = 1.0_f32 / base.powf((2.0 * i as f32) / dim as f32);
+                if !use_yarn {
+                    return theta * scale; // plain linear scaling
+                }
+                let lambda = std::f32::consts::TAU / theta; // wavelength = 2*pi / theta
+                let ramp = ((l_train as f32 / lambda - alpha) / (beta - alpha)).clamp(0.0, 1.0);
+                // ramp=0: low-freq dim, no scaling (theta unchanged)
+                // ramp=1: high-freq dim, full linear scaling (theta * scale)
+                theta * (ramp * scale + (1.0 - ramp))
+            })
             .collect();
 
-        // Build the full table: max_dist × n_pairs × 2 (cos, sin)
-        // Linear RoPE scaling: angle = d * scale * theta_p
-        // At scale=0.5, d=4095 maps to the same angle as d=2047 at scale=1.0,
-        // keeping the effective frequencies inside the trained distribution.
         let table_len = max_dist * n_pairs * 2;
         let mut table = Vec::with_capacity(table_len);
         for d in 0..max_dist {
             for p in 0..n_pairs {
-                let angle = (d as f32) * scale * thetas[p];
+                let angle = d as f32 * effective_thetas[p];
                 table.push(angle.cos());
                 table.push(angle.sin());
             }
         }
 
+        let scaling_mode = if use_yarn { "YaRN" } else { "linear" };
         println!(
-            "[Preflight] RoPE Lookup Table: {}×{} = {} entries ({:.1} KB, Base={}, Dim={}, Scale={})",
-            max_dist,
-            n_pairs,
-            table_len,
+            "[Preflight] RoPE Lookup Table: {}×{} = {} entries ({:.1} KB, Base={}, Dim={}, Scale={}, Mode={})",
+            max_dist, n_pairs, table_len,
             (table_len * 4) as f64 / 1024.0,
-            base,
-            dim,
-            scale
+            base, dim, scale, scaling_mode
         );
 
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

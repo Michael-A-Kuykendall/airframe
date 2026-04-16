@@ -211,6 +211,106 @@ The first implementation should assume these logical buffers per active token ba
 
 The exact packing can change, but the contract must preserve the logical distinction between provider buffers and consumer scratch.
 
+## Concrete First-Pass Buffer Contract
+
+The first implementation should not introduce unnecessary new GPU allocations per layer dispatch. The default assumption should be reuse of the existing temporary storage with explicit logical regions.
+
+The first-pass logical layout should be treated as:
+
+1. `activation_in`
+2. `attn_normed_region`
+3. `q_region`
+4. `attn_out_region`
+5. `ffn_normed_region`
+6. `ffn_gate_region`
+7. `ffn_up_region`
+
+The exact byte offsets may remain implementation-defined, but the following must be true:
+
+1. `attn_normed_region` must be immutable for all QKV consumers within a layer pass.
+2. `ffn_normed_region` must be immutable for all FFN gate/up consumers within a layer pass.
+3. provider regions must not alias consumer output regions unless the aliasing is proven safe and documented.
+4. the same layout logic must work for both batch prefill and single-token decode.
+
+The first implementation should prefer region reuse over new buffer proliferation unless measurement proves separate buffers materially improve performance or correctness.
+
+### Derived Region Sizes
+
+For a model with:
+
+- `dim = n_embd`
+- `head_dim = n_embd / n_head`
+- `q_dim = n_head * head_dim`
+- `ffn_dim = feed_forward_length`
+
+the first-pass logical region sizes are:
+
+1. `attn_normed_region = dim`
+2. `q_region = q_dim`
+3. `attn_context_region = dim`
+4. `ffn_normed_region = dim`
+5. `ffn_gate_region = ffn_dim`
+6. `ffn_up_region = ffn_dim`
+
+Peak simultaneous pressure by phase is:
+
+1. attention provider plus Q staging: `dim + q_dim`
+2. FFN provider plus gate/up staging: `dim + 2 * ffn_dim`
+
+For the current TinyLlama 1.1B path:
+
+- `dim = 2048`
+- `n_head = 32`
+- `head_dim = 64`
+- `q_dim = 2048`
+- `ffn_dim = 5632`
+
+So the concrete region sizes are:
+
+1. `attn_normed_region = 2048`
+2. `q_region = 2048`
+3. `attn_context_region = 2048`
+4. `ffn_normed_region = 2048`
+5. `ffn_gate_region = 5632`
+6. `ffn_up_region = 5632`
+
+And the concrete peak working-set sizes are:
+
+1. attention phase peak: `2048 + 2048 = 4096`
+2. FFN phase peak: `2048 + 5632 + 5632 = 13312`
+
+This means the current TinyLlama temp stride can support the first-pass provider architecture by region reuse without introducing a larger scratch allocation, as long as the phase schedule is explicit.
+
+### Required TinyLlama First-Pass Region Reuse Schedule
+
+For the current TinyLlama path, the intended logical reuse schedule should be:
+
+#### Phase A: Attention Provider And Consumers
+
+1. `[0, dim)` -> `attn_normed_region`
+2. `[dim, dim + q_dim)` -> `q_region`
+
+Execution contract:
+
+1. `AttnNormProvider` writes `[0, dim)`
+2. `QKVConsumer` reads `[0, dim)` and writes Q to `[dim, dim + q_dim)` while writing K/V to cache
+3. `AttentionOut` reads Q from `[dim, dim + q_dim)` and writes context to `[0, dim)` by reusing the former attention-provider region
+4. `AttentionProj` reads context from `[0, dim)` and then both regions become available for FFN use
+
+#### Phase B: FFN Provider And Consumers
+
+1. `[0, dim)` -> `ffn_normed_region`
+2. `[dim, dim + ffn_dim)` -> `ffn_gate_region`
+3. `[dim + ffn_dim, dim + 2 * ffn_dim)` -> `ffn_up_region`
+
+Execution contract:
+
+1. `FfnNormProvider` writes `[0, dim)`
+2. `FfnGateUpConsumer` reads `[0, dim)` and writes gate/up outputs to the two FFN regions
+3. `FfnDown` reads both FFN regions and writes the residual update to `activation_in`
+
+The implementation may choose different exact offsets, but if it does, the replacement layout must still satisfy the same peak-memory and non-aliasing rules.
+
 ## Required Runtime Contract
 
 The runtime positional contract must be structurally equivalent to:
@@ -249,6 +349,52 @@ This is still a split-pipeline architecture, but it removes the major repeated e
 
 Later fusion can reduce pass count further. The first milestone is not maximum fusion. The first milestone is correct provider-consumer separation.
 
+## Required Host-Side API Shape
+
+The host-side code should expose the new architecture through explicit structs rather than implicit parameter packing spread across multiple call sites.
+
+At minimum, the implementation should converge toward the following concepts:
+
+1. `LayerExecutionPlan`
+2. `ProviderLayout`
+3. `PositionalPolicyConfig`
+4. `ExecutionMode`
+
+### LayerExecutionPlan
+
+Must describe:
+
+1. which provider stages are active
+2. which consumer passes read which provider regions
+3. which positional resource is bound
+4. whether execution is prefill or decode
+
+### ProviderLayout
+
+Must describe:
+
+1. the logical provider and scratch regions
+2. the element counts and offsets for each region
+3. whether the layout is valid for the current batch shape
+
+### PositionalPolicyConfig
+
+Must describe:
+
+1. policy kind
+2. all scalar parameters required by that policy
+3. the preflight resource identifier or buffer handle
+
+### ExecutionMode
+
+Must distinguish:
+
+1. chunked prefill
+2. single-token decode
+3. debug or probe execution if retained
+
+This is required so the implementation does not silently fork behavior across ad hoc call paths.
+
 ## Mandatory Invariants
 
 ### Normalization Invariants
@@ -269,12 +415,182 @@ Later fusion can reduce pass count further. The first milestone is not maximum f
 1. Determinism must not regress.
 2. F32 KV cache must remain unchanged unless a separate precision study proves otherwise.
 3. Any approximation introduced for performance must be separately benchmarked and justified.
+4. provider extraction must not change the mathematical order of operations without an explicit comparison against the current reference behavior.
 
 ### Operational Invariants
 
 1. The architecture must support direct A/B comparison against the current path.
 2. The rollout must permit rollback by commit boundary.
 3. Validation must separate throughput wins from behavioral regressions.
+4. the first production candidate must preserve a truthful public launch envelope even if the internal architecture is capable of more.
+
+## Failure Modes And Required Mitigations
+
+The architecture is not production-credible unless it explicitly names the main ways it can fail.
+
+### 1. Provider Region Corruption
+
+Failure mode:
+
+- one consumer overwrites provider data needed by another consumer in the same layer execution
+
+Mitigation:
+
+1. explicit region layout contract
+2. debug assertions on region bounds and overlap assumptions
+3. one probe path that stages provider regions back to host for verification
+
+### 2. Prefill And Decode Semantic Drift
+
+Failure mode:
+
+- prefill and decode use nominally the same architecture words but materially different math or buffer semantics
+
+Mitigation:
+
+1. shared host-side execution-plan surface
+2. shared positional-policy contract
+3. parity probes at layer and full-model boundaries
+
+### 3. Positional Policy Drift
+
+Failure mode:
+
+- standard, linear, and YaRN paths diverge because parameters are packed differently or interpreted differently across host and shader
+
+Mitigation:
+
+1. one typed policy config on the host
+2. one shader-side contract layout
+3. explicit reference tests for standard and linear first, then YaRN
+
+### 4. Dispatch Count Improvement With Hidden Numerical Regression
+
+Failure mode:
+
+- throughput improves while output quality, determinism, or long-context behavior regresses
+
+Mitigation:
+
+1. throughput checks never run alone
+2. every performance comparison is paired with correctness and determinism checks
+3. long-context checks remain a release gate, not a later cleanup item
+
+### 5. Helical Shift Interaction Regression
+
+Failure mode:
+
+- provider refactor is locally correct but changes the behavior around shift or compaction boundaries
+
+Mitigation:
+
+1. retain helical shift validation as a required gate
+2. include multi-boundary stress runs before declaring production readiness
+
+## Observability Requirements
+
+The architecture must be observable enough that a regression can be localized without guesswork.
+
+The first production-oriented implementation must expose:
+
+1. dispatch counts per token for decode and per chunk for prefill
+2. provider-stage timings
+3. consumer-stage timings
+4. positional-policy selection for each run
+5. shift and compaction events during long decode
+
+The system does not need a permanent heavyweight tracing stack immediately, but it must have at least one repeatable way to capture these values during validation.
+
+## Benchmark Protocol Requirements
+
+The benchmark protocol must be fixed before implementation claims are accepted.
+
+The first-pass benchmark matrix should include:
+
+1. single-token decode latency at short context
+2. single-token decode latency near the active context limit
+3. chunked prefill wall-clock time for a representative prompt length
+4. throughput stability across repeated seeded runs
+5. memory footprint before and after provider extraction
+
+Every benchmark row must record:
+
+1. commit SHA
+2. model path and quant
+3. prompt or fixture identifier
+4. active positional policy
+5. batch or chunk size
+6. stop reason if generation is involved
+
+### Required First-Pass Fixture Set
+
+The first-pass benchmark and validation cycle should use a small fixed fixture set drawn from the checked-in repo state.
+
+Required fixtures:
+
+1. short sanity fixture: `artifacts/story_seed7777_128tok_request.json`
+2. exact-story long fixture: `artifacts/story_4k_exact_request_nostream.json`
+3. helical stress fixture: `artifacts/helical_multi_boundary_request.json`
+4. short SHA helper: `scripts/short_story_sha_check.ps1`
+5. long-story helper: `scripts/long_story_check.ps1`
+6. rope ladder helper: `scripts/rope_ladder_test.ps1`
+
+Optional coding-benchmark fixtures such as the existing HumanEval runner may still be useful for evaluation work, but they are not required gates for the first provider-consumer refactor.
+
+## Production Availability Gates
+
+The following gates define whether this architecture is ready to be treated as production-capable for the codebase segment it touches.
+
+### Gate 1: Contract Clarity
+
+Required:
+
+1. provider layout is explicit
+2. positional contract is explicit
+3. prefill and decode execution modes are explicit
+
+### Gate 2: Mathematical Preservation
+
+Required:
+
+1. no unexplained CPU/GPU parity regressions
+2. no unexplained decode drift increase versus current tip
+3. deterministic proof path remains intact
+
+### Gate 3: Throughput Win
+
+Required:
+
+1. measurable decode or prefill improvement on TinyLlama 1.1B
+2. no hidden regression large enough to erase that win at realistic context lengths
+
+### Gate 4: Long-Context Safety
+
+Required:
+
+1. no newly introduced context cliff inside the currently supported envelope
+2. helical-shift edge-case validation remains acceptable
+3. positional policy selection does not silently degrade long-context behavior
+
+### Gate 5: Operational Safety
+
+Required:
+
+1. rollback is one commit or a small known series of commits
+2. release envelope remains honest
+3. debug and validation hooks remain available until the architecture is proven stable
+
+## Current Blockers To Calling This Production-Ready
+
+As of this draft, the architecture is not yet production-ready for the full codebase. The current blockers are explicit:
+
+1. provider-consumer refactor is specified but not yet implemented
+2. positional-policy contract is not yet fully wired end to end
+3. YaRN semantics are not yet validated in this engine
+4. long-context and helical-shift validation are still active work, not closed work
+5. current public launch envelope remains narrower than the long-context internal ambition
+
+This section is intentionally blunt. Confidence should rise only when blockers move from this list into recorded validation results.
 
 ## Positional Policy Construction Requirements
 
@@ -371,6 +687,12 @@ The first implementation is not complete unless it passes all of the following:
 2. no new helical-shift regressions
 3. no new out-of-bounds behavior at context edge conditions
 
+### Production Validation
+
+1. no hidden dependency on one-off local artifacts or generated indexes
+2. required runbooks and benchmark scripts exist and still execute from the checked-in repo state
+3. the architecture remains understandable from the docs and code without chat archaeology
+
 ## Open Questions
 
 1. Should provider buffers be separate named buffers or carved from the existing temp buffer with explicit regions?
@@ -378,6 +700,8 @@ The first implementation is not complete unless it passes all of the following:
 3. Should YaRN be table-backed, parameter-backed, or mixed depending on the final relative-position design?
 4. Does the current relative-position attention path want full policy tables, compact factors, or both?
 5. Which performance counter will serve as the primary gate for declaring the first pass successful?
+6. Which exact prompt fixtures should be the permanent decode and prefill benchmark set?
+7. Which parts of the current runtime should be lifted out of binary-oriented paths before calling the system production-capable?
 
 ## Acceptance Bar For The First Code Change
 
@@ -387,6 +711,48 @@ Do not start the first hot-path refactor until all of the following are true:
 2. the positional runtime contract fields are agreed
 3. the benchmark protocol is agreed
 4. the rollback checkpoint exists as a clean commit boundary
+
+## Acceptance Bar For Production Availability
+
+Do not describe this architecture as production-available until all of the following are true:
+
+1. the first-pass provider refactor is merged and benchmarked
+2. standard and linear positional policies are fully wired through the fixed runtime contract
+3. the selected YaRN path is either implemented and validated or explicitly excluded from the release envelope
+4. long-context and helical-shift behavior have recorded validation artifacts
+5. the runtime and docs are coherent enough that another engineer can operate the system without relying on unreproducible chat context
+
+## Production Readiness Matrix
+
+Before calling the work production-capable, every row below must be marked with a concrete result, not an intention.
+
+| Area | Required state | Evidence |
+|---|---|---|
+| Provider extraction | implemented and benchmarked | before/after latency and parity records |
+| Positional contract | wired end to end | host config, shader binding, and policy probe output |
+| Standard RoPE | working | reference comparison output |
+| Linear scaling | working | reference comparison output |
+| YaRN | validated or explicitly deferred | policy note plus validation record or release exclusion |
+| Determinism | preserved | run-hash proof |
+| Helical shift | acceptable | recorded long-run outputs and classification |
+| Rollback | simple | checkpoint commit chain |
+| Runbooks | current | checked-in docs and scripts |
+| Public envelope | honest | release docs consistent with tested behavior |
+
+No row may be marked complete based on chat memory alone.
+
+## Required Sign-Off Artifacts
+
+The architecture should not be considered ready for production use until the repo contains or references all of the following artifacts:
+
+1. one benchmark summary for decode and prefill
+2. one parity summary for layer or full-model comparisons
+3. one determinism summary for the chosen proof path
+4. one helical-shift validation summary
+5. one release-envelope statement consistent with the actual validated behavior
+6. one rollback note identifying the commit or small commit range to revert to if the rollout fails
+
+These do not need to be polished reports. They do need to exist in a form another engineer can inspect without reconstructing the work from conversation history.
 
 ## Current Working Summary
 
@@ -404,3 +770,21 @@ If this architecture is correct, TinyLlama 1.1B becomes the proving ground for:
 1. provider-consumer bindless execution
 2. long-context-safe positional policy selection
 3. later expansion to larger quants and larger same-family models
+
+## Confidence Rule
+
+This document should be revised until confidence comes from explicit contracts, measured benchmarks, and recorded validation outputs rather than intuition.
+
+The standard for confidence is not:
+
+1. the architecture sounds elegant
+2. the hot loop looks cleaner
+3. the design matches an intended philosophy
+
+The standard for confidence is:
+
+1. the contracts are explicit
+2. the implementation matches the contracts
+3. the measurements are favorable
+4. the failure modes are named
+5. the rollback path is simple

@@ -1,4 +1,3 @@
-use airframe::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use airframe::backend::bindless::{
     loader::BindlessModel,
     pipeline::{BindlessPipeline, RMSNormParams},
@@ -117,13 +116,6 @@ struct Args {
 
     #[arg(long)]
     det_output_dir: Option<PathBuf>,
-
-    /// Enable continuous helical mode: process all tokens as one stream with
-    /// StreamingLLM attention sinks. The shift pipeline compacts the KV cache
-    /// when it approaches max context, allowing infinite-length evaluation.
-    /// Value is the number of sink tokens to pin (typically 4).
-    #[arg(long)]
-    keep_sink: Option<u32>,
 }
 
 struct Monitor {
@@ -227,7 +219,6 @@ impl EvalEngine for CpuEvalEngine {
 
 struct GpuEvalEngine {
     pipeline: BindlessPipeline,
-    shift_pipeline: RopeShiftPipeline,
     model: BindlessModel,
     input_embd_table: Vec<f32>,
     vocab_size: usize,
@@ -320,8 +311,7 @@ impl GpuEvalEngine {
 
         let model = BindlessModel::load_from_disk(&device, path, Some(&spec));
         let pipeline = BindlessPipeline::new(&device);
-        let shift_pipeline = RopeShiftPipeline::new(&device);
-        let weights_f32 = load_output_head_f32_override(path, &model, &device, &spec)?;
+        let weights_f32 = load_output_head_f32_override(path, &model, &device, &spec)?;;
         let kv_size_per_buffer = spec.kv_cache_size_per_layer as u64;
         let mut kv_cache_k_layers = Vec::with_capacity(spec.n_layer);
         let mut kv_cache_v_layers = Vec::with_capacity(spec.n_layer);
@@ -346,7 +336,6 @@ impl GpuEvalEngine {
 
         Ok(Self {
             pipeline,
-            shift_pipeline,
             model,
             input_embd_table: emb.data.clone(),
             vocab_size: spec.n_vocab,
@@ -377,45 +366,11 @@ impl EvalEngine for GpuEvalEngine {
             return Ok(vec![0.0; self.vocab_size]);
         }
 
-        // Helical shift: if the KV cache is about to overflow, compact it
-        let max_ctx = self.spec.n_ctx;
-        if self.current_pos + tokens.len() >= max_ctx - 4 {
-            let shift_amt = (max_ctx / 4) as u32;
-            
-            // Only perform a shift if we have enough context to drop, to prevent underflow
-            if self.current_pos >= shift_amt as usize {
-                let keep_sink: u32 = 4;
-                let old_len = self.current_pos as u32;
-                eprintln!(
-                    "[HELICAL-EVAL] Shift triggered at pos {} (max {}), shifting by {}",
-                    self.current_pos, max_ctx, shift_amt
-                );
-                for layer_idx in 0..self.spec.n_layer {
-                    self.shift_pipeline.execute(
-                        &self.device,
-                        &self.queue,
-                        &self.kv_cache_k_layers[layer_idx],
-                        &self.kv_cache_v_layers[layer_idx],
-                        keep_sink,
-                        shift_amt,
-                        old_len,
-                        self.spec.n_head_kv as u32,
-                        self.spec.head_dim as u32,
-                        self.spec.rope_dim as u32,
-                        self.spec.rope_base,
-                        max_ctx as u32,
-                    );
-                }
-                self.current_pos -= shift_amt as usize;
-                eprintln!(
-                    "[HELICAL-EVAL] Compaction complete. New pos: {}",
-                    self.current_pos
-                );
-            } else if self.current_pos + tokens.len() > max_ctx {
-                // In the rare edge case where a single batch exceeds max context 
-                // and we cannot safely shift, reset position
-                self.current_pos = 0;
-            }
+        // Stop at context limit
+        if self.current_pos + tokens.len() > self.spec.n_ctx {
+            return Err(airframe::core::error::LibshimmyError::Unsupported(
+                format!("context limit {} exceeded", self.spec.n_ctx),
+            ));
         }
 
         // Batch Prefill: Collect embeddings for entire prompt
@@ -1111,15 +1066,7 @@ async fn run_wikitext(
     }
 
     // Continuous mode: if --keep-sink is set, process ALL tokens as one stream
-    let continuous = args.keep_sink.is_some();
-    let chunks: Vec<&[usize]> = if continuous {
-        println!(
-            "=== CONTINUOUS HELICAL MODE (keep_sink={}) ===",
-            args.keep_sink.unwrap()
-        );
-        vec![&tokens_usize[..]]
-    } else {
-        // Process in chunks of ctx_size
+    let chunks: Vec<&[usize]> = {
         let mut c: Vec<&[usize]> = tokens_usize.chunks(ctx_size).collect();
         if let Some(max_chunks) = args.max_chunks {
             if c.len() > max_chunks {
@@ -1134,12 +1081,7 @@ async fn run_wikitext(
     println!("=== PHASE 2: GPU PROCESSING ===");
     println!(
         "Will process {} chunks of max {} tokens each",
-        total_chunks,
-        if continuous {
-            tokens_usize.len()
-        } else {
-            ctx_size
-        }
+        total_chunks, ctx_size
     );
     println!("Total tokens to process: {}", tokens_usize.len());
 

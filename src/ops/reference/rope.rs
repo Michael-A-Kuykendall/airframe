@@ -140,33 +140,51 @@ fn apply_rope_3d(
         "rope_dim ({rope_dim}) must be <= head_dim ({head_dim})"
     );
 
-    let actual_rope_dim = rope_dim;
+    // YaRN per-dimension effective frequency.
+    // When rope_scale < 1.0, apply non-uniform scaling:
+    //   high-freq dims (short wavelength) get full linear scaling
+    //   low-freq dims (long wavelength) are left unscaled
+    // This preserves local position accuracy while extending range.
+    const YARN_ALPHA: f32 = 1.0;
+    const YARN_BETA: f32 = 32.0;
+    let use_yarn = rope_scale < 1.0;
 
-    // Precompute frequency coefficients
-    let mut freqs = Vec::with_capacity(actual_rope_dim / 2);
-    for i in 0..(actual_rope_dim / 2) {
-        let freq = 1.0 / rope_base.powf(2.0 * i as f32 / actual_rope_dim as f32);
-        freqs.push(freq);
-    }
+    let n_pairs = rope_dim / 2;
+    let effective_thetas: Vec<f32> = (0..n_pairs)
+        .map(|i| {
+            let theta = 1.0_f32 / rope_base.powf(2.0 * i as f32 / rope_dim as f32);
+            if !use_yarn {
+                return theta * rope_scale;
+            }
+            // Infer training context length from rope_scale = L_train / L_target → L_train ≈ n_ctx * rope_scale
+            // We don't have n_ctx here, but the ramp only needs the relative wavelength ratio.
+            // Use the standard YaRN formula with dimensionless lambda normalised to rope_base.
+            // lambda_normalised = 2*pi*base^(2i/D) / (2*pi) = base^(2i/D)
+            let lambda = 1.0_f32 / theta; // base^(2i/D), proportional to wavelength
+            // L_train proxy: rope_scale tells us the stretch factor (1/scale = L_target/L_train)
+            // Ramp transitions between no-scale (lambda >> L_train) and full-scale (lambda << L_train/beta).
+            // Since we lack absolute L_train, use scale-relative thresholds:
+            //   high_threshold = 1/YARN_BETA  (wavelength < this fraction of base → full scale)
+            //   low_threshold  = 1/YARN_ALPHA  (wavelength > this fraction → no scale)
+            let ramp = ((1.0 / lambda - YARN_ALPHA * rope_scale) /
+                        (YARN_BETA * rope_scale - YARN_ALPHA * rope_scale))
+                .clamp(0.0, 1.0);
+            theta * (ramp * rope_scale + (1.0 - ramp))
+        })
+        .collect();
 
     for (seq_idx, &pos) in position_ids.iter().enumerate() {
         for head in 0..n_head {
             let head_offset = seq_idx * n_head * head_dim + head * head_dim;
-
-            // Apply rotation to pairs of dimensions
-            for (i, &freq) in freqs.iter().enumerate() {
+            for (i, &eff_theta) in effective_thetas.iter().enumerate() {
                 let idx1 = head_offset + 2 * i;
                 let idx2 = head_offset + 2 * i + 1;
-
                 if idx2 < data.len() {
-                    let angle = pos as f32 * rope_scale * freq;
+                    let angle = pos as f32 * eff_theta;
                     let cos_val = angle.cos();
                     let sin_val = angle.sin();
-
                     let x = data[idx1];
                     let y = data[idx2];
-
-                    // Rotation matrix: [cos -sin; sin cos]
                     data[idx1] = x * cos_val - y * sin_val;
                     data[idx2] = x * sin_val + y * cos_val;
                 }
