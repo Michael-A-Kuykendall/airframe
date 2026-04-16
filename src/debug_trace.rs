@@ -122,18 +122,6 @@ pub struct TokenTrace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HelicalShiftTrace {
-    pub phase: String,
-    pub step_index: usize,
-    pub keep_sink: u32,
-    pub shift_amt: u32,
-    pub seq_len_before: u32,
-    pub seq_len_after: u32,
-    pub window_base_before: u32,
-    pub window_base_after: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceTracePackage {
     pub schema_version: u32,
     pub model_arch: String,
@@ -147,7 +135,6 @@ pub struct InferenceTracePackage {
     pub templated_prompt: String,
     pub prefill_steps: Vec<TokenTrace>,
     pub decode_steps: Vec<TokenTrace>,
-    pub helical_shifts: Vec<HelicalShiftTrace>,
     pub final_stop_reason: String,
     pub final_tokens_generated: usize,
     pub final_text: String,

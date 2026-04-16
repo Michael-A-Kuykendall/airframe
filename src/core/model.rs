@@ -642,6 +642,8 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
         rope_base,
         rope_scale,
         rope_dim,
+        yarn_alpha: 1.0,
+        yarn_beta: 32.0,
         n_ctx,
         head_dim: 0,
         gqa_ratio: 0,

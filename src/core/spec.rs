@@ -80,6 +80,12 @@ pub struct ModelSpec {
     pub rope_base: f32,
     pub rope_scale: f32,
     pub rope_dim: usize,
+    /// YaRN: low-frequency threshold. Dims with wavelength > L_train/alpha are not scaled.
+    /// Standard default: 1.0 (scale all dims with wavelengths shorter than training context).
+    pub yarn_alpha: f32,
+    /// YaRN: high-frequency threshold. Dims with wavelength < L_train/beta get full linear scaling.
+    /// Standard default: 32.0 (preserve high-frequency positional accuracy).
+    pub yarn_beta: f32,
     pub n_ctx: usize,
 
     // Derived dimensions (computed once, used everywhere)
@@ -193,6 +199,8 @@ impl ModelSpec {
             rope_base,
             rope_scale: 1.0, // no standard GGUF key for this yet
             rope_dim,
+            yarn_alpha: 1.0,
+            yarn_beta: 32.0,
             n_ctx,
             head_dim: 0,
             gqa_ratio: 0,
@@ -219,6 +227,8 @@ impl ModelSpec {
             rope_base: 10000.0,
             rope_scale: 1.0,
             rope_dim: 64,
+            yarn_alpha: 1.0,
+            yarn_beta: 32.0,
             n_ctx: 2048,
             head_dim: 0,
             gqa_ratio: 0,

@@ -1,0 +1,13 @@
+{
+  "prompt": "Write a story about a detective in 1920s Chicago who discovers that the speakeasy she has been investigating is actually a front for a secret society of time travelers. Include rich period details, multiple characters with distinct voices, plot twists, and at least three chapters. Chapter 1: The Gin Joint on Halsted Street",
+  "max_tokens": 4096,
+  "temperature": 0.85,
+  "top_p": 0.95,
+  "repetition_penalty": 1.15,
+  "seed": 55555,
+  "stream": false,
+  "debug_trace_path": "artifacts/story_4k_trace_boundary.json",
+  "debug_trace_start_step": 1958,
+  "debug_trace_max_steps": 24,
+  "debug_trace_include_prefill": false
+}
