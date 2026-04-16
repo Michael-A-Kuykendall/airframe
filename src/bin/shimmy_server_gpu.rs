@@ -10,6 +10,10 @@ use airframe::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use airframe::core::dequant::dequantize_q6_k;
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::spec::ModelSpec;
+use airframe::debug_trace::{
+    topk_from_logits, HelicalShiftTrace, InferenceTracePackage, LayerTrace, TensorTrace,
+    TokenTrace,
+};
 use libfse::metrics::{
     logit_l2_norm, logit_variance, max_probability_from_logits, shannon_entropy_from_logits,
 };
@@ -17,6 +21,7 @@ use memmap2::Mmap;
 use schoolmarm::{Grammar, GrammarState};
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
+use std::fs;
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -119,6 +124,88 @@ fn env_flag(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn env_usize(name: &str) -> Option<usize> {
+    std::env::var(name).ok()?.parse().ok()
+}
+
+#[derive(Clone)]
+struct TraceConfig {
+    path: String,
+    include_values: bool,
+    include_prefill: bool,
+    start_step: usize,
+    max_steps: Option<usize>,
+    top_k: usize,
+}
+
+impl TraceConfig {
+    fn from_request(req: &InferenceRequest) -> Option<Self> {
+        let path = req
+            .debug_trace_path
+            .clone()
+            .or_else(|| std::env::var("SHIMMY_INFERENCE_TRACE_PATH").ok())?;
+        Some(Self {
+            path,
+            include_values: req
+                .debug_trace_full
+                .unwrap_or_else(|| env_flag("SHIMMY_INFERENCE_TRACE_FULL")),
+            include_prefill: req
+                .debug_trace_include_prefill
+                .unwrap_or_else(|| !matches!(std::env::var("SHIMMY_INFERENCE_TRACE_INCLUDE_PREFILL"), Ok(v) if v == "0" || v.eq_ignore_ascii_case("false"))),
+            start_step: req
+                .debug_trace_start_step
+                .or_else(|| env_usize("SHIMMY_INFERENCE_TRACE_START_STEP"))
+                .unwrap_or(0),
+            max_steps: req
+                .debug_trace_max_steps
+                .or_else(|| env_usize("SHIMMY_INFERENCE_TRACE_MAX_STEPS")),
+            top_k: env_usize("SHIMMY_INFERENCE_TRACE_TOPK").unwrap_or(8),
+        })
+    }
+
+    fn should_capture_step(&self, step_index: usize) -> bool {
+        if step_index < self.start_step {
+            return false;
+        }
+        self.max_steps.map_or(true, |limit| {
+            step_index.saturating_sub(self.start_step) < limit
+        })
+    }
+}
+
+fn build_layer_trace(
+    layer_idx: usize,
+    current_pos: u32,
+    seq_len: u32,
+    logical_pos_base: u32,
+    include_values: bool,
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    post_attn: &[f32],
+    ffn_out: &[f32],
+    output: &[f32],
+) -> LayerTrace {
+    LayerTrace {
+        layer_idx,
+        current_pos,
+        seq_len,
+        logical_pos_base,
+        q: TensorTrace::from_slice(q, include_values),
+        k: TensorTrace::from_slice(k, include_values),
+        v: TensorTrace::from_slice(v, include_values),
+        post_attn: TensorTrace::from_slice(post_attn, include_values),
+        ffn_out: TensorTrace::from_slice(ffn_out, include_values),
+        output: TensorTrace::from_slice(output, include_values),
+    }
+}
+
+fn write_trace_package(path: &str, trace: &InferenceTracePackage) -> Result<(), Box<dyn std::error::Error>> {
+    let json = serde_json::to_string_pretty(trace)?;
+    fs::write(path, json)?;
+    Ok(())
+}
+
 fn developer_mode_grammar() -> &'static str {
     r#"
 root ::= start body end
@@ -214,6 +301,11 @@ pub struct InferenceRequest {
     seed: Option<u64>,
     stream: Option<bool>,
     expose_candidate: Option<bool>,
+    debug_trace_path: Option<String>,
+    debug_trace_full: Option<bool>,
+    debug_trace_start_step: Option<usize>,
+    debug_trace_max_steps: Option<usize>,
+    debug_trace_include_prefill: Option<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -242,6 +334,8 @@ pub struct InferenceResponse {
     pub debug_raw_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debug_sanitizer_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug_trace_path: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -483,6 +577,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                         candidate_text: None,
                         debug_raw_text: None,
                         debug_sanitizer_reason: None,
+                        debug_trace_path: None,
                     })
                 }
                 Err(e) => Err(format!("Failed to run eval: {}", e).into()),
@@ -963,6 +1058,7 @@ fn run_inference_completion(
     let user_prompt = req.prompt.as_deref().ok_or("missing prompt")?;
     let templated_prompt = build_templated_prompt(&prompt_mode, user_prompt)?;
     let mut prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
+    let trace_config = TraceConfig::from_request(req);
     if !prior_tokens.is_empty() {
         prompt_tokens = prior_tokens
             .iter()
@@ -1038,7 +1134,25 @@ fn run_inference_completion(
         std::collections::VecDeque::with_capacity(10);
     let mut stop_reason = "max_tokens";
     let mut metrics_violation = None;
-    let mut generated_count = 0;
+    let mut generated_count: usize = 0;
+    let mut trace_package = trace_config.as_ref().map(|_| InferenceTracePackage {
+        schema_version: 1,
+        model_arch: spec.arch_string().to_string(),
+        prompt_mode: prompt_mode.clone(),
+        seed: req.seed.unwrap_or(42),
+        max_tokens: max_new_tokens,
+        temperature,
+        top_p,
+        repetition_penalty: rep_penalty,
+        prompt_token_count: prompt_tokens.len(),
+        templated_prompt: templated_prompt.clone(),
+        prefill_steps: Vec::new(),
+        decode_steps: Vec::new(),
+        helical_shifts: Vec::new(),
+        final_stop_reason: String::new(),
+        final_tokens_generated: 0,
+        final_text: String::new(),
+    });
 
     {
         let mut cache = kv_cache.lock().unwrap();
@@ -1050,37 +1164,6 @@ fn run_inference_completion(
         prompt_tokens.len()
     );
 
-    let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
-    for &token_id in &prompt_tokens {
-        let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
-        let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
-        batched_embd.extend_from_slice(&embd);
-    }
-
-    let (_final_act, _l21, prefill_logits_f32) = {
-        let cache_guard = kv_cache.lock().unwrap();
-        pipeline.run_full_model_prefill_chunked_with_cache_state(
-            device,
-            queue,
-            model,
-            &batched_embd,
-            Some(&output_head_f32),
-            0,
-            Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
-            spec,
-            128,
-        )
-    };
-
-    {
-        let mut cache = kv_cache.lock().unwrap();
-        for _ in 0..prompt_tokens.len() {
-            cache.increment();
-        }
-    }
-
-    eprintln!("[GPU Server] Prefill complete. Cache info updated.");
-
     let norm_weight_offset = model
         .metadata
         .get_tensor_offset("output_norm.weight")
@@ -1091,6 +1174,158 @@ fn run_inference_completion(
         eps: spec.rms_eps,
         padding: 0,
     };
+
+    let prefill_logits_f32 = if let Some(cfg) = trace_config.as_ref() {
+        if cfg.include_prefill {
+            let mut last_logits = vec![0.0; spec.n_vocab];
+            for (prefill_step, &token_id) in prompt_tokens.iter().enumerate() {
+                let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
+                let mut layer_output =
+                    pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
+                let (cache_len_before, window_base_before) = {
+                    let cache = kv_cache.lock().unwrap();
+                    (cache.get_seq_len(), cache.get_window_base())
+                };
+                let mut layer_traces = Vec::new();
+
+                for layer_idx in 0..spec.n_layer {
+                    let layer_offsets = model
+                        .metadata
+                        .get_layer_offsets(layer_idx, spec.arch_string())
+                        .expect(&format!("Missing offsets for layer {}", layer_idx));
+
+                    let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = {
+                        let mut cache = kv_cache.lock().unwrap();
+                        pipeline.run_layer_with_cache_debug(
+                            device,
+                            queue,
+                            model,
+                            &mut cache,
+                            layer_idx,
+                            &layer_output,
+                            layer_offsets,
+                            layer_params,
+                        )
+                    };
+
+                    if cfg.should_capture_step(prefill_step) {
+                        layer_traces.push(build_layer_trace(
+                            layer_idx,
+                            cache_len_before,
+                            cache_len_before + 1,
+                            window_base_before,
+                            cfg.include_values,
+                            &gpu_q,
+                            &gpu_k,
+                            &gpu_v,
+                            &gpu_post_attn,
+                            &gpu_ffn_out,
+                            &gpu_output,
+                        ));
+                    }
+
+                    layer_output = gpu_output;
+                }
+
+                let normed_output =
+                    pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
+                last_logits = pipeline.run_matmul_f32(
+                    device,
+                    queue,
+                    output_head_f32,
+                    &normed_output,
+                    spec.n_vocab as u32,
+                    dim,
+                );
+
+                let (cache_len_after, window_base_after) = {
+                    let mut cache = kv_cache.lock().unwrap();
+                    cache.increment();
+                    (cache.get_seq_len(), cache.get_window_base())
+                };
+
+                if cfg.should_capture_step(prefill_step) {
+                    if let Some(trace) = trace_package.as_mut() {
+                        trace.prefill_steps.push(TokenTrace {
+                            phase: "prefill".to_string(),
+                            step_index: prefill_step,
+                            token_id,
+                            token_text: tokenizer.decode_single(token_id, true).unwrap_or_default(),
+                            cache_len_before,
+                            cache_len_after,
+                            window_base_before,
+                            window_base_after,
+                            logits_topk: topk_from_logits(&last_logits, cfg.top_k, Some(tokenizer)),
+                            layers: layer_traces,
+                        });
+                    }
+                }
+            }
+            last_logits
+        } else {
+            let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
+            for &token_id in &prompt_tokens {
+                let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
+                let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
+                batched_embd.extend_from_slice(&embd);
+            }
+
+            let (_final_act, _l21, logits) = {
+                let cache_guard = kv_cache.lock().unwrap();
+                pipeline.run_full_model_prefill_chunked_with_cache_state(
+                    device,
+                    queue,
+                    model,
+                    &batched_embd,
+                    Some(&output_head_f32),
+                    0,
+                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                    spec,
+                    128,
+                )
+            };
+
+            {
+                let mut cache = kv_cache.lock().unwrap();
+                for _ in 0..prompt_tokens.len() {
+                    cache.increment();
+                }
+            }
+            logits
+        }
+    } else {
+        let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
+        for &token_id in &prompt_tokens {
+            let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
+            let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
+            batched_embd.extend_from_slice(&embd);
+        }
+
+        let (_final_act, _l21, logits) = {
+            let cache_guard = kv_cache.lock().unwrap();
+            pipeline.run_full_model_prefill_chunked_with_cache_state(
+                device,
+                queue,
+                model,
+                &batched_embd,
+                Some(&output_head_f32),
+                0,
+                Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                spec,
+                128,
+            )
+        };
+
+        {
+            let mut cache = kv_cache.lock().unwrap();
+            for _ in 0..prompt_tokens.len() {
+                cache.increment();
+            }
+        }
+        logits
+    };
+
+    eprintln!("[GPU Server] Prefill complete. Cache info updated.");
 
     let mut logits_vec = prefill_logits_f32;
 
@@ -1193,6 +1428,16 @@ fn run_inference_completion(
             break;
         }
 
+        let trace_step_index = generated_count.saturating_sub(1);
+        let capture_trace_step = trace_config
+            .as_ref()
+            .map(|cfg| cfg.should_capture_step(trace_step_index))
+            .unwrap_or(false);
+        let (cache_len_before_step, window_base_before_step) = {
+            let cache = kv_cache.lock().unwrap();
+            (cache.get_seq_len(), cache.get_window_base())
+        };
+
         if disable_helical_shift {
             let cache = kv_cache.lock().unwrap();
             if cache.get_seq_len() >= cache.max_len() {
@@ -1209,6 +1454,7 @@ fn run_inference_completion(
             if current_len >= cache.max_len() - 4 {
                 let keep_sink = 4;
                 let shift_amt = cache.max_len() / 4;
+                let window_base_before_shift = cache.get_window_base();
                 eprintln!(
                     "[HELICAL] Memory bounds approaching ({}/{}), shifting by {}...",
                     current_len + 1,
@@ -1234,6 +1480,20 @@ fn run_inference_completion(
 
                 current_len -= shift_amt;
                 cache.set_seq_len(current_len);
+                cache.advance_window_base(shift_amt);
+                let window_base_after_shift = cache.get_window_base();
+                if let Some(trace) = trace_package.as_mut() {
+                    trace.helical_shifts.push(HelicalShiftTrace {
+                        phase: "decode".to_string(),
+                        step_index: trace_step_index,
+                        keep_sink,
+                        shift_amt,
+                        seq_len_before: cache_len_before_step,
+                        seq_len_after: current_len,
+                        window_base_before: window_base_before_shift,
+                        window_base_after: window_base_after_shift,
+                    });
+                }
                 eprintln!(
                     "[HELICAL] Compaction complete. New seq_len: {}",
                     current_len
@@ -1245,23 +1505,68 @@ fn run_inference_completion(
         let mut layer_output =
             pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
 
-        for layer_idx in 0..spec.n_layer {
-            let layer_offsets = model
-                .metadata
-                .get_layer_offsets(layer_idx, spec.arch_string())
-                .expect(&format!("Missing offsets for layer {}", layer_idx));
+        let mut step_layer_traces = Vec::new();
+        if capture_trace_step {
+            let cfg = trace_config.as_ref().unwrap();
+            let (current_pos, logical_pos_base) = {
+                let cache = kv_cache.lock().unwrap();
+                (cache.get_seq_len(), cache.get_window_base())
+            };
+            for layer_idx in 0..spec.n_layer {
+                let layer_offsets = model
+                    .metadata
+                    .get_layer_offsets(layer_idx, spec.arch_string())
+                    .expect(&format!("Missing offsets for layer {}", layer_idx));
 
-            let mut cache = kv_cache.lock().unwrap();
-            layer_output = pipeline.run_layer_with_cache(
-                device,
-                queue,
-                model,
-                &mut cache,
-                layer_idx,
-                &layer_output,
-                layer_offsets,
-                layer_params,
-            );
+                let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = {
+                    let mut cache = kv_cache.lock().unwrap();
+                    pipeline.run_layer_with_cache_debug(
+                        device,
+                        queue,
+                        model,
+                        &mut cache,
+                        layer_idx,
+                        &layer_output,
+                        layer_offsets,
+                        layer_params,
+                    )
+                };
+
+                step_layer_traces.push(build_layer_trace(
+                    layer_idx,
+                    current_pos,
+                    current_pos + 1,
+                    logical_pos_base,
+                    cfg.include_values,
+                    &gpu_q,
+                    &gpu_k,
+                    &gpu_v,
+                    &gpu_post_attn,
+                    &gpu_ffn_out,
+                    &gpu_output,
+                ));
+
+                layer_output = gpu_output;
+            }
+        } else {
+            for layer_idx in 0..spec.n_layer {
+                let layer_offsets = model
+                    .metadata
+                    .get_layer_offsets(layer_idx, spec.arch_string())
+                    .expect(&format!("Missing offsets for layer {}", layer_idx));
+
+                let mut cache = kv_cache.lock().unwrap();
+                layer_output = pipeline.run_layer_with_cache(
+                    device,
+                    queue,
+                    model,
+                    &mut cache,
+                    layer_idx,
+                    &layer_output,
+                    layer_offsets,
+                    layer_params,
+                );
+            }
         }
 
         {
@@ -1280,6 +1585,28 @@ fn run_inference_completion(
             spec.n_vocab as u32,
             dim,
         );
+
+        let (cache_len_after_step, window_base_after_step) = {
+            let cache = kv_cache.lock().unwrap();
+            (cache.get_seq_len(), cache.get_window_base())
+        };
+
+        if capture_trace_step {
+            if let (Some(trace), Some(cfg)) = (trace_package.as_mut(), trace_config.as_ref()) {
+                trace.decode_steps.push(TokenTrace {
+                    phase: "decode".to_string(),
+                    step_index: trace_step_index,
+                    token_id: next_token,
+                    token_text: piece,
+                    cache_len_before: cache_len_before_step,
+                    cache_len_after: cache_len_after_step,
+                    window_base_before: window_base_before_step,
+                    window_base_after: window_base_after_step,
+                    logits_topk: topk_from_logits(&logits_vec, cfg.top_k, Some(tokenizer)),
+                    layers: step_layer_traces,
+                });
+            }
+        }
     }
 
     let include_debug_raw = std::env::var("SHIMMY_DEBUG_RAW")
@@ -1345,7 +1672,15 @@ fn run_inference_completion(
         debug_raw_text,
         debug_sanitizer_reason: (include_debug_raw && prompt_mode == "developer")
             .then(|| debug_sanitizer_reason.unwrap_or_else(|| "(no_reason)".to_string())),
+        debug_trace_path: trace_config.as_ref().map(|cfg| cfg.path.clone()),
     };
+
+    if let (Some(mut trace), Some(cfg)) = (trace_package, trace_config.as_ref()) {
+        trace.final_stop_reason = resp.stop_reason.clone();
+        trace.final_tokens_generated = resp.tokens_generated;
+        trace.final_text = resp.text.clone();
+        write_trace_package(&cfg.path, &trace)?;
+    }
 
     Ok((resp, templated_prompt))
 }

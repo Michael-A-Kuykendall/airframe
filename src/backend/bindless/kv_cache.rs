@@ -24,6 +24,12 @@ pub struct KVCache {
     /// Current sequence length (number of tokens cached)
     seq_len: u32,
 
+    /// Logical base position of the compacted sliding window.
+    ///
+    /// Sink tokens remain at absolute positions 0..keep_sink-1, but shifted
+    /// window tokens conceptually start at `window_base + keep_sink`.
+    window_base: u32,
+
     /// Maximum sequence length (context window size)
     max_seq_len: u32,
 
@@ -110,6 +116,7 @@ impl KVCache {
             k_buffers,
             v_buffers,
             seq_len: 0,
+            window_base: 0,
             max_seq_len,
             n_layers,
             n_head_kv,
@@ -120,6 +127,11 @@ impl KVCache {
     /// Get current sequence length (number of cached positions)
     pub fn get_seq_len(&self) -> u32 {
         self.seq_len
+    }
+
+    /// Get the logical base position for the shifted sliding window.
+    pub fn get_window_base(&self) -> u32 {
+        self.window_base
     }
 
     /// Get reference to all K buffers (for full pipeline execution)
@@ -138,6 +150,7 @@ impl KVCache {
     /// This is much faster than deallocating and reallocating.
     pub fn reset(&mut self) {
         self.seq_len = 0;
+        self.window_base = 0;
     }
 
     /// Explicitly override sequence length (used during helical cache compaction)
@@ -149,6 +162,11 @@ impl KVCache {
             );
         }
         self.seq_len = new_len;
+    }
+
+    /// Advance the logical base after helical compaction.
+    pub fn advance_window_base(&mut self, shift_amt: u32) {
+        self.window_base = self.window_base.saturating_add(shift_amt);
     }
 
     /// Increment sequence length after appending new K/V pair

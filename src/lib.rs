@@ -6,6 +6,7 @@
 pub mod conformance;
 pub mod control;
 pub mod core;
+pub mod debug_trace;
 pub mod family;
 pub mod fixtures;
 pub mod ops;

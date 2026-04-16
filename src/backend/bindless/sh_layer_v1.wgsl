@@ -36,6 +36,10 @@ struct CacheParams {
     seq_len: u32,       // Total cached positions (current_pos + batch_size)
     max_seq_len: u32,   // Context window (2048)
     batch_size: u32,    // Number of tokens in this dispatch
+    logical_pos_base: u32, // Logical base of the compacted sliding window
+    pad1: u32,
+    pad2: u32,
+    pad3: u32,
 };
 
 // Bindings
@@ -57,6 +61,33 @@ fn unpack_q4_0(block_val: u32, idx_in_block: u32) -> f32 {
 }
 
 // -------------------------------------------------------------------------
+// Kernel 0: Attention RMSNorm Provider
+// -------------------------------------------------------------------------
+// Computes the shared attention-normalized activation stream once per token.
+// Writes normalized activations into temp_state[0..dim) for Q/K/V consumers.
+@compute @workgroup_size(256, 1, 1)
+fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    let token_idx = global_id.y;
+
+    if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
+
+    let act_base = token_idx * params.dim;
+    let temp_base = token_idx * params.temp_stride;
+
+    var sum_sq = 0.0;
+    for (var i = 0u; i < params.dim; i++) {
+        let val = activation_in[act_base + i];
+        sum_sq += val * val;
+    }
+    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    let norm_offset_base = offsets.layer_idx * 2u * params.dim;
+    let norm_w = norm_bank[norm_offset_base + idx];
+    temp_state[temp_base + idx] = activation_in[act_base + idx] * rms * norm_w;
+}
+
+// -------------------------------------------------------------------------
 // Kernel 1: QKV Generation + RoPE + Cache Update
 // -------------------------------------------------------------------------
 @compute @workgroup_size(256, 1, 1)
@@ -75,17 +106,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     if (idx >= total_out) { return; }
 
-    // 1. Calculate RMS Norm of Input (Naive / Per-Thread)
-    // Optimization: Should be Workgroup Shared Memory reduction.
-    // For now, doing it naively to ensure correctness.
-    var sum_sq = 0.0;
-    for (var i = 0u; i < params.dim; i++) {
-        let val = activation_in[act_base + i];
-        sum_sq += val * val;
-    }
-    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
-
-    // 2. Select Weight Matrix & Row
+    // 1. Select Weight Matrix & Row
     var weight_off_roots: array<u32, 3>;
     weight_off_roots[0] = offsets.attn_q;
     weight_off_roots[1] = offsets.attn_k;
@@ -106,17 +127,11 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let weight_byte_offset = weight_off_roots[target_stage];
     
-    // 3. MatMul (Row `row_idx`)
+    // 2. MatMul (Row `row_idx`) against the staged attention-normalized provider.
     var dot: f32 = 0.0;
     let blocks_per_row = params.dim / 32u;
     // Stride per row: 18 bytes * blocks
     let row_start_byte = weight_byte_offset + (row_idx * blocks_per_row * 18u);
-
-    // Norm Weights (Binding 5)
-    // Offset in bank: layer_idx * 2 * dim (AttnNorm is 1st)
-    // layer_idx now comes from offsets.layer_idx (padding[0] in Rust)
-    let layer_idx = offsets.layer_idx;
-    let norm_offset_base = layer_idx * 2u * params.dim; // AttnNorm is first
 
 
     for (var b = 0u; b < blocks_per_row; b++) {
@@ -135,10 +150,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         for (var i = 0u; i < 32u; i++) {
             let col = b * 32u + i;
-            
-            // Apply Norm On-Fly
-            let norm_w = norm_bank[norm_offset_base + col];
-            let val_x = activation_in[act_base + col] * rms * norm_w;
+            let val_x = temp_state[temp_base + col];
 
             // Extract nibble - GGML Q4_0 SPLIT layout:
             // Elements 0-15:  low nibbles from bytes 0-15
@@ -163,8 +175,8 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // - Max relative distance bounded by window size (always in training range)
     // - No position counter overflow, no extrapolation artifacts
 
-    // 5. Store Output
-    // Q -> Temp State (offset 0)
+    // 4. Store Output
+    // Q -> Temp State (offset dim)
     // K, V -> KV Cache at current position
     // 
     // Cache layout per buffer: [max_seq, n_head_kv, head_dim]
@@ -172,7 +184,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     if (target_stage == 0u) {
         // Q goes to temp_state for attention computation
-        temp_state[temp_base + row_idx] = dot;
+        temp_state[temp_base + params.dim + row_idx] = dot;
     } else if (target_stage == 1u) {
         // K -> K cache
         // row_idx = head * head_dim + dim_in_head (0..255 for 4 heads * 64 dims)
@@ -217,8 +229,10 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let head_idx   = idx / params.head_dim;
     let head_offset = idx % params.head_dim;
     let kv_head_idx = head_idx / gqa_ratio;
-    let q_base     = temp_base + head_idx * params.head_dim;
+    let q_base     = temp_base + params.dim + head_idx * params.head_dim;
     let n_pairs    = params.head_dim / 2u;
+    let compact_query_pos = cache_params.current_pos + token_idx;
+    let logical_query_pos = cache_params.logical_pos_base + compact_query_pos;
 
     const SINK_COUNT: u32 = 4u;
 
@@ -231,9 +245,11 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Causal mask: skip positions the current query cannot attend to
         if (pos > cache_params.current_pos + token_idx) { continue; }
 
-        var rel: u32 = (cache_params.current_pos + token_idx) - pos;
+        var rel: u32 = compact_query_pos - pos;
         if (pos < SINK_COUNT) {
-            // Attention sinks: always attend, clamp RoPE angle to in-distribution range
+            // Sink positions are pinned to absolute slots 0..SINK_COUNT-1 across compactions.
+            // Use the logical query position so sink-relative distance survives helical shift.
+            rel = logical_query_pos - pos;
             rel = min(rel, cache_params.max_seq_len - 1u);
         } else if (rel >= cache_params.max_seq_len) {
             // Beyond sliding window context horizon: skip

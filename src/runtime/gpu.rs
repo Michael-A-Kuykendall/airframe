@@ -304,6 +304,7 @@ impl GpuRuntime {
                         );
                     }
                     cache.set_seq_len(current_len - shift_amt);
+                    cache.advance_window_base(shift_amt);
                 }
             }
 
