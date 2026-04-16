@@ -66,6 +66,10 @@ pub struct CacheParams {
     pub seq_len: u32,     // Total cached positions (current_pos + 1)
     pub max_seq_len: u32, // 2048 (context window)
     pub batch_size: u32,  // Number of tokens in current batch
+    pub logical_pos_base: u32, // Logical base of the compacted sliding window
+    pub pad1: u32,
+    pub pad2: u32,
+    pub pad3: u32,
 }
 
 /// The Control Plane for Bindless Inference.
@@ -82,6 +86,7 @@ pub struct BindlessPipeline {
     pub rmsnorm_layout: wgpu::BindGroupLayout,
 
     // Split Layer Pipelines
+    pub layer_pipeline_attn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_qkv: wgpu::ComputePipeline,
     pub layer_pipeline_attn_out: wgpu::ComputePipeline,
     pub layer_pipeline_attn_proj: wgpu::ComputePipeline,
@@ -599,6 +604,7 @@ impl BindlessPipeline {
             })
         };
 
+        let layer_pipeline_attn_norm = mk_pipeline("main_attn_norm");
         let layer_pipeline_qkv = mk_pipeline("main_qkv");
         let layer_pipeline_attn_out = mk_pipeline("main_attn_out");
         let layer_pipeline_attn_proj = mk_pipeline("main_attn_proj");
@@ -616,6 +622,7 @@ impl BindlessPipeline {
             matmul_f32_layout,
             rmsnorm_pipeline,
             rmsnorm_layout,
+            layer_pipeline_attn_norm,
             layer_pipeline_qkv,
             layer_pipeline_attn_out,
             layer_pipeline_attn_proj,
@@ -1441,6 +1448,10 @@ impl BindlessPipeline {
             seq_len, // Total cached positions (including this batch)
             max_seq_len: spec.n_ctx as u32,
             batch_size,
+            logical_pos_base: 0,
+            pad1: 0,
+            pad2: 0,
+            pad3: 0,
         };
 
         let cache_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1703,6 +1714,10 @@ impl BindlessPipeline {
 
                 cpass.set_bind_group(0, bg, &[]);
 
+                // Attn Norm Provider (compute shared normalized activations once)
+                cpass.set_pipeline(&self.layer_pipeline_attn_norm);
+                cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+
                 // QKV (Calculates Q/K/V and applies Softmax + Attention)       
                 cpass.set_pipeline(&self.layer_pipeline_qkv);
                 cpass.dispatch_workgroups(wg_qkv, batch_size, 1);
@@ -1948,14 +1963,24 @@ impl BindlessPipeline {
             ],
         });
 
-        // 5. Run ONLY QKV kernel
+        // 5. Run attention provider, then QKV kernel
         let q_len = params.head_count * params.head_dim;
         let kv_len = params.head_count_kv * params.head_dim;
         let total_qkv = q_len + kv_len * 2;
         let wg_qkv = (total_qkv + 255) / 256;
+        let wg_dim = (params.dim + 255) / 256;
 
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("AttnNorm Only"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_attn_norm);
+            cpass.dispatch_workgroups(wg_dim, 1, 1);
+        }
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("QKV Only"),
@@ -1989,8 +2014,8 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
 
-        // Q from temp_state[0..q_len]
-        encoder.copy_buffer_to_buffer(&temp_buffer, 0, &staging_q, 0, q_size);
+        // Q from temp_state[dim..dim+q_len]
+        encoder.copy_buffer_to_buffer(&temp_buffer, params.dim as u64 * 4, &staging_q, 0, q_size);
         // K from kv_cache[0..kv_len]
         encoder.copy_buffer_to_buffer(&kv_buffer, 0, &staging_k, 0, kv_unit);
         // V from kv_cache[kv_len..kv_len*2]
@@ -2091,6 +2116,10 @@ impl BindlessPipeline {
             seq_len: 1,
             max_seq_len: 2048, // test default
             batch_size: 1,
+            logical_pos_base: 0,
+            pad1: 0,
+            pad2: 0,
+            pad3: 0,
         };
 
         let cache_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2175,7 +2204,18 @@ impl BindlessPipeline {
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        // Kernel 1: QKV
+        // Kernel 1: Attention Norm Provider
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("AttnNorm"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_attn_norm);
+            cpass.dispatch_workgroups(wg_dim, 1, 1);
+        }
+
+        // Kernel 2: QKV
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("QKV"),
@@ -2186,7 +2226,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_qkv, 1, 1);
         }
 
-        // Kernel 2: Attention
+        // Kernel 3: Attention
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Attn"),
@@ -2197,7 +2237,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 
-        // Kernel 3: Attention Projection
+        // Kernel 4: Attention Projection
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("AttnProj"),
@@ -2219,7 +2259,7 @@ impl BindlessPipeline {
             encoder.copy_buffer_to_buffer(&activation_buffer, 0, &staging_mid, 0, dim * 4);
         }
 
-        // Kernel 4: FFN Projection
+        // Kernel 5: FFN Projection
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FFN"),
@@ -2230,7 +2270,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_ffn, 1, 1);
         }
 
-        // Kernel 5: FFN Down
+        // Kernel 6: FFN Down
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FFNDown"),
@@ -2340,6 +2380,10 @@ impl BindlessPipeline {
             seq_len: kv_cache.get_seq_len() + 1, // After write, this many positions cached
             max_seq_len: kv_cache.max_len(),
             batch_size: 1,
+            logical_pos_base: kv_cache.get_window_base(),
+            pad1: 0,
+            pad2: 0,
+            pad3: 0,
         };
 
         // DIAGNOSTIC: Print cache params for first 2 layers
@@ -2423,13 +2467,24 @@ impl BindlessPipeline {
         let ffn_total = params.ffn_dim * 2;
         let wg_ffn = (ffn_total + 255) / 256;
 
-        // 7. Dispatch compute passes(5 kernels, each in separate pass for synchronization)
+        // 7. Dispatch compute passes (6 kernels, each in separate pass for synchronization)
         // CRITICAL: Each compute pass ensures GPU work completes before next starts
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(&format!("Layer {} Encoder", layer_idx)),
         });
 
-        // Kernel 1: QKV generation + RoPE + cache write
+        // Kernel 1: Attention normalization provider
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - AttnNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_attn_norm);
+            cpass.dispatch_workgroups(wg_dim, 1, 1);
+        } // <- GPU waits for AttnNorm to finish before QKV proceeds
+
+        // Kernel 2: QKV generation + cache write
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - QKV", layer_idx)),
@@ -2440,7 +2495,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_qkv, 1, 1);
         } // ← GPU waits for QKV to finish before proceeding
 
-        // Kernel 2: Attention (Q @ cached_K, softmax, weighted sum of cached_V)
+        // Kernel 3: Attention (Q @ cached_K, softmax, weighted sum of cached_V)
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - Attn", layer_idx)),
@@ -2451,7 +2506,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         } // ← GPU waits for Attn to finish
 
-        // Kernel 3: Attention output projection
+        // Kernel 4: Attention output projection
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - AttnProj", layer_idx)),
@@ -2462,7 +2517,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         } // ← GPU waits for AttnProj to finish
 
-        // Kernel 4: FFN gate/up + SiLU
+        // Kernel 5: FFN gate/up + SiLU
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - FFN", layer_idx)),
@@ -2473,7 +2528,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_ffn, 1, 1);
         } // ← GPU waits for FFN to finish
 
-        // Kernel 5: FFN down + residual
+        // Kernel 6: FFN down + residual
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - FFNDown", layer_idx)),
@@ -2551,6 +2606,10 @@ impl BindlessPipeline {
             seq_len: kv_cache.get_seq_len() + 1,
             max_seq_len: kv_cache.max_len(),
             batch_size: 1,
+            logical_pos_base: kv_cache.get_window_base(),
+            pad1: 0,
+            pad2: 0,
+            pad3: 0,
         };
 
         let cache_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2628,7 +2687,18 @@ impl BindlessPipeline {
             label: Some(&format!("Layer {} Encoder (Debug)", layer_idx)),
         });
 
-        // Kernel 1: QKV generation + RoPE + cache write
+        // Kernel 1: Attention normalization provider
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - AttnNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_attn_norm);
+            cpass.dispatch_workgroups(wg_dim, 1, 1);
+        }
+
+        // Kernel 2: QKV generation + cache write
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - QKV", layer_idx)),
@@ -2639,7 +2709,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_qkv, 1, 1);
         }
 
-        // CAPTURE Q from temp_state (first dim elements = head_count * head_dim)
+        // CAPTURE Q from temp_state[dim..dim+q_len]
         let q_size = (params.head_count as u64) * (params.head_dim as u64) * 4;
         let q_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Q Staging"),
@@ -2647,7 +2717,7 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        encoder.copy_buffer_to_buffer(&temp_buffer, 0, &q_staging, 0, q_size);
+        encoder.copy_buffer_to_buffer(&temp_buffer, params.dim as u64 * 4, &q_staging, 0, q_size);
 
         // CAPTURE K from kv_cache_k for CURRENT position only
         let kv_slice_size = (params.head_count_kv as u64) * (params.head_dim as u64) * 4;
