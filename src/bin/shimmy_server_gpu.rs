@@ -6,12 +6,11 @@ use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{
     BindlessPipeline, LayerParams, RMSNormParams,
 };
-use airframe::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use airframe::core::dequant::dequantize_q6_k;
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::spec::ModelSpec;
 use airframe::debug_trace::{
-    topk_from_logits, HelicalShiftTrace, InferenceTracePackage, LayerTrace, TensorTrace,
+    topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace,
     TokenTrace,
 };
 use libfse::metrics::{
@@ -443,7 +442,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let gpu_model =
         BindlessModel::load_from_disk(&device, &PathBuf::from(&model_path), Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
-    let shift_pipeline = RopeShiftPipeline::new(&device);
 
     eprintln!("[GPU Server] Model loaded to VRAM");
 
@@ -597,7 +595,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 &queue,
                 &gpu_model,
                 &pipeline,
-                &shift_pipeline,
                 &tokenizer,
                 &spec,
                 cache_clone,
@@ -1034,7 +1031,6 @@ fn run_inference_completion(
     queue: &wgpu::Queue,
     model: &BindlessModel,
     pipeline: &BindlessPipeline,
-    shift_pipeline: &RopeShiftPipeline,
     tokenizer: &Tokenizer,
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
@@ -1053,7 +1049,7 @@ fn run_inference_completion(
     );
 
     let disable_im_end_stop = env_flag("SHIMMY_DISABLE_IM_END_STOP");
-    let disable_helical_shift = env_flag("SHIMMY_DISABLE_HELICAL_SHIFT");
+
     let prompt_mode = req.prompt_mode.as_deref().unwrap_or("creative").to_string();
     let user_prompt = req.prompt.as_deref().ok_or("missing prompt")?;
     let templated_prompt = build_templated_prompt(&prompt_mode, user_prompt)?;
@@ -1148,7 +1144,6 @@ fn run_inference_completion(
         templated_prompt: templated_prompt.clone(),
         prefill_steps: Vec::new(),
         decode_steps: Vec::new(),
-        helical_shifts: Vec::new(),
         final_stop_reason: String::new(),
         final_tokens_generated: 0,
         final_text: String::new(),
@@ -1438,66 +1433,12 @@ fn run_inference_completion(
             (cache.get_seq_len(), cache.get_window_base())
         };
 
-        if disable_helical_shift {
+        {
             let cache = kv_cache.lock().unwrap();
             if cache.get_seq_len() >= cache.max_len() {
                 stop_reason = "context_limit";
                 metrics_violation = Some(format!("context_limit:{}", cache.max_len()));
                 break;
-            }
-        }
-
-        if !disable_helical_shift {
-            let mut cache = kv_cache.lock().unwrap();
-            let mut current_len = cache.get_seq_len();
-
-            if current_len >= cache.max_len() - 4 {
-                let keep_sink = 4;
-                let shift_amt = cache.max_len() / 4;
-                let window_base_before_shift = cache.get_window_base();
-                eprintln!(
-                    "[HELICAL] Memory bounds approaching ({}/{}), shifting by {}...",
-                    current_len + 1,
-                    cache.max_len(),
-                    shift_amt
-                );
-                for layer_idx in 0..spec.n_layer {
-                    shift_pipeline.execute(
-                        device,
-                        queue,
-                        cache.get_k_buffer(layer_idx),
-                        cache.get_v_buffer(layer_idx),
-                        keep_sink,
-                        shift_amt,
-                        current_len,
-                        spec.n_head_kv as u32,
-                        spec.head_dim as u32,
-                        spec.rope_dim as u32,
-                        spec.rope_base,
-                        cache.max_len(),
-                    );
-                }
-
-                current_len -= shift_amt;
-                cache.set_seq_len(current_len);
-                cache.advance_window_base(shift_amt);
-                let window_base_after_shift = cache.get_window_base();
-                if let Some(trace) = trace_package.as_mut() {
-                    trace.helical_shifts.push(HelicalShiftTrace {
-                        phase: "decode".to_string(),
-                        step_index: trace_step_index,
-                        keep_sink,
-                        shift_amt,
-                        seq_len_before: cache_len_before_step,
-                        seq_len_after: current_len,
-                        window_base_before: window_base_before_shift,
-                        window_base_after: window_base_after_shift,
-                    });
-                }
-                eprintln!(
-                    "[HELICAL] Compaction complete. New seq_len: {}",
-                    current_len
-                );
             }
         }
 
@@ -1695,7 +1636,6 @@ async fn process_inference_job(
     queue: &wgpu::Queue,
     model: &BindlessModel,
     pipeline: &BindlessPipeline,
-    shift_pipeline: &RopeShiftPipeline,
     tokenizer: &Tokenizer,
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
@@ -1739,7 +1679,6 @@ async fn process_inference_job(
         queue,
         model,
         pipeline,
-        shift_pipeline,
         tokenizer,
         spec,
         Arc::clone(&kv_cache),
