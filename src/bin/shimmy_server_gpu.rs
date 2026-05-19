@@ -386,7 +386,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let model_path = std::env::var("LIBSHIMMY_MODEL_PATH").unwrap_or_else(|_| {
-        "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string()
+        "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string()
     });
 
     eprintln!("[GPU Server] Loading model: {}", model_path);
@@ -425,17 +425,21 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     // === Load Model to GPU ===
     let tokenizer = Tokenizer::from_gguf_file(&model_path)?;
-    let mut spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+    // Auto-derive model spec from GGUF metadata — works with any GGUF model
+    let mut header_file = std::fs::File::open(&model_path)?;
+    let header_meta = airframe::backend::bindless::metadata::BindlessMetadata::new(&mut header_file);
+    drop(header_file);
+    let mut spec = header_meta.to_model_spec();
 
     // Apply runtime context / RoPE scale overrides before model load.
     let max_ctx: u32 = std::env::var("SHIMMY_MAX_CTX")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(2048u32);
+        .unwrap_or(spec.n_ctx as u32);
     let rope_scale: f32 = std::env::var("SHIMMY_ROPE_SCALE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| if max_ctx > 2048 { 2048.0 / max_ctx as f32 } else { 1.0 });
+        .unwrap_or_else(|| if max_ctx as usize > spec.n_ctx { spec.n_ctx as f32 / max_ctx as f32 } else { 1.0 });
     spec.n_ctx = max_ctx as usize;
     spec.rope_scale = rope_scale;
 
@@ -1154,6 +1158,28 @@ fn run_inference_completion(
         cache.reset();
     }
 
+    // Dynamic RoPE selection: use native-scale frequencies for requests that fit
+    // within the model's training context; switch to extended (YaRN) only when the
+    // total sequence would exceed it.  This prevents degraded outputs on short
+    // prompts served by an 8192-context server (rope_scale=0.25 would otherwise
+    // distort all positions, including those well within the training range).
+    if spec.rope_scale < 1.0 {
+        if let Some(preflight) = model.preflight.as_ref() {
+            let l_train = (spec.n_ctx as f32 * spec.rope_scale).round() as usize;
+            let total_seq = prompt_tokens.len() + max_new_tokens;
+            let (rope_data, mode_label) = if total_seq <= l_train {
+                (&preflight.rope_data_native, "native")
+            } else {
+                (&preflight.rope_data_ext, "extended")
+            };
+            queue.write_buffer(&preflight.rope_cache_buffer, 0, bytemuck::cast_slice(rope_data));
+            eprintln!(
+                "[GPU Server] RoPE: {} (seq_needed={}, l_train={})",
+                mode_label, total_seq, l_train
+            );
+        }
+    }
+
     eprintln!(
         "[GPU Server] Prefill phase: processing {} prompt tokens...",
         prompt_tokens.len()
@@ -1276,7 +1302,7 @@ fn run_inference_completion(
                     0,
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     spec,
-                    128,
+                    512,
                 )
             };
 
@@ -1307,7 +1333,7 @@ fn run_inference_completion(
                 0,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 spec,
-                128,
+                512,
             )
         };
 

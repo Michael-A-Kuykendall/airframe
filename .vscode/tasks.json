@@ -75,67 +75,7 @@
 			},
 			"group": "build"
 		},
-		{
-			"label": "Run Airframe GPU Server (Helical Off)",
-			"type": "process",
-			"command": "cargo",
-			"args": [
-				"run",
-				"--release",
-				"--bin",
-				"shimmy_server_gpu"
-			],
-			"options": {
-				"env": {
-					"RUST_BACKTRACE": "1",
-					"SHIMMY_PORT": "8081",
-					"SHIMMY_DISABLE_HELICAL_SHIFT": "1"
-				}
-			},
-			"isBackground": true,
-			"problemMatcher": [
-				{
-					"owner": "custom",
-					"pattern": {
-						"regexp": "^(.*)$",
-						"message": 1
-					},
-					"background": {
-						"activeOnStart": true,
-						"beginsPattern": ".",
-						"endsPattern": "\\[HTTP\\] Async listener spawned on .+"
-					}
-				}
-			],
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "always",
-				"clear": false
-			},
-			"group": "build"
-		},
-		{
-			"label": "Validate Airframe Long Story (Helical Off)",
-			"type": "process",
-			"command": "powershell",
-			"args": [
-				"-ExecutionPolicy",
-				"Bypass",
-				"-File",
-				"${workspaceFolder}\\scripts\\long_story_check.ps1",
-				"-BaseUrl",
-				"http://127.0.0.1:8081",
-				"-OutputFile",
-				"${workspaceFolder}\\artifacts\\story_4k_exact_helical_off_text.txt"
-			],
-			"isBackground": false,
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "always",
-				"clear": false
-			},
-			"group": "build"
-		},
+
 		{
 			"label": "Validate Card Smoke (Shadow)",
 			"type": "process",
@@ -186,15 +126,7 @@
 			],
 			"group": "build"
 		},
-		{
-			"label": "U: Validate Airframe Helical-Off Path",
-			"dependsOrder": "sequence",
-			"dependsOn": [
-				"Run Airframe GPU Server (Helical Off)",
-				"Validate Airframe Long Story (Helical Off)"
-			],
-			"group": "build"
-		},
+
 		{
 			"label": "U: Smoke Shimmy Provider Path",
 			"dependsOrder": "sequence",
@@ -311,6 +243,79 @@
 				"reveal": "always",
 				"clear": false
 			},
+			"group": "build"
+		},
+		{
+			"label": "Run Airframe GPU Server (8K ctx)",
+			"type": "process",
+			"command": "cargo",
+			"args": ["run", "--release", "--bin", "shimmy_server_gpu"],
+			"options": {
+				"env": {
+					"RUST_BACKTRACE": "1",
+					"SHIMMY_PORT": "8080",
+					"SHIMMY_MAX_CTX": "8192"
+				}
+			},
+			"isBackground": true,
+			"problemMatcher": [{
+				"owner": "custom",
+				"pattern": { "regexp": "^(.*)$", "message": 1 },
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".",
+					"endsPattern": "\\[HTTP\\] Async listener spawned on .+"
+				}
+			}],
+			"presentation": { "panel": "dedicated", "reveal": "always", "clear": false },
+			"group": "build"
+		},
+		{
+			"label": "Run Needle Bench (2K ctx)",
+			"type": "process",
+			"command": "python",
+			"args": ["scripts/needle_bench.py", "--ctx", "2048", "--depths", "15,50,85", "--runs", "3", "--timeout", "300", "--out", "artifacts/needle_bench_2k.json"],
+			"isBackground": false,
+			"presentation": { "panel": "dedicated", "reveal": "always", "clear": true },
+			"group": "build"
+		},
+		{
+			"label": "Run Needle Bench (4K ctx)",
+			"type": "process",
+			"command": "python",
+			"args": ["scripts/needle_bench.py", "--ctx", "4096", "--depths", "15,50,85", "--runs", "3", "--timeout", "900", "--out", "artifacts/needle_bench_4k.json"],
+			"isBackground": false,
+			"presentation": { "panel": "dedicated", "reveal": "always", "clear": true },
+			"group": "build"
+		},
+		{
+			"label": "Run Needle Bench (8K ctx)",
+			"type": "process",
+			"command": "python",
+			"args": ["scripts/needle_bench.py", "--ctx", "8192", "--depths", "15,50,85", "--runs", "3", "--timeout", "2400", "--out", "artifacts/needle_bench_8k.json"],
+			"isBackground": false,
+			"presentation": { "panel": "dedicated", "reveal": "always", "clear": true },
+			"group": "build"
+		},
+		{
+			"label": "Run Needle Bench (Full Matrix 2K-8K)",
+			"type": "process",
+			"command": "python",
+			"args": ["scripts/needle_bench.py", "--ctx", "2048,4096,8192", "--depths", "10,25,50,75,90", "--runs", "3", "--timeout", "2400", "--out", "artifacts/needle_bench_full.json"],
+			"isBackground": false,
+			"presentation": { "panel": "dedicated", "reveal": "always", "clear": true },
+			"group": "build"
+		},
+		{
+			"label": "U: Needle Smoke (2K, default server)",
+			"dependsOrder": "sequence",
+			"dependsOn": ["Run Airframe GPU Server", "Run Needle Bench (2K ctx)"],
+			"group": "build"
+		},
+		{
+			"label": "U: Needle Full Matrix (8K server)",
+			"dependsOrder": "sequence",
+			"dependsOn": ["Run Airframe GPU Server (8K ctx)", "Run Needle Bench (Full Matrix 2K-8K)"],
 			"group": "build"
 		}
 	],
