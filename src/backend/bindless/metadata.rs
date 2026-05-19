@@ -22,7 +22,7 @@ pub struct BindlessMetadata {
 impl BindlessMetadata {
     /// scan a GGUF reader and extract tensor offsets.
     pub fn new<R: Read + Seek>(reader: &mut R) -> Self {
-        let start_pos = reader.stream_position().unwrap();
+        let _start_pos = reader.stream_position().unwrap();
 
         // 1. Header
         let mut magic = [0u8; 4];
@@ -148,7 +148,7 @@ impl BindlessMetadata {
     pub fn get_layer_offsets(
         &self,
         layer_idx: usize,
-        model_arch: &str,
+        _model_arch: &str,
     ) -> Option<super::pipeline::LayerOffsets> {
         // e.g., "blk.0.attn_norm.weight"
 

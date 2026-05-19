@@ -156,7 +156,8 @@ foreach ($rung in $Ladder) {
 
     $promptChars = $prompt.Length
     $approxTokens = [int]($promptChars / 4)
-    Write-Host "  Prompt: ~$approxTokens tokens ($promptChars chars)"
+    $promptInfo = "  Prompt: ~" + $approxTokens + " tokens (" + $promptChars + " chars)"
+    Write-Host $promptInfo
 
     $reqBody = @{
         task        = "needle"
