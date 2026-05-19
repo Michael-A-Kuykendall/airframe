@@ -5,6 +5,7 @@
 
 use crate::backend::bindless::kv_cache::KVCache;
 use crate::backend::bindless::loader::BindlessModel;
+use crate::backend::bindless::metadata::BindlessMetadata;
 use crate::backend::bindless::pipeline::{
     BindlessPipeline, LayerParams, RMSNormParams,
 };
@@ -14,7 +15,7 @@ use crate::core::model::GgufTensorInfo;
 use crate::core::spec::ModelSpec;
 use memmap2::Mmap;
 use shimmytok::Tokenizer;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 /// Sampling parameters for generation.
@@ -115,7 +116,20 @@ impl GpuRuntime {
 
         // Load model
         let tokenizer = Tokenizer::from_gguf_file(&model_path_str)?;
-        let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+        // Auto-derive model spec from GGUF metadata — works with any GGUF model
+        let mut header_file = std::fs::File::open(model_path)?;
+        let header_meta = BindlessMetadata::new(&mut header_file);
+        drop(header_file);
+        let mut spec = header_meta.to_model_spec();
+        // Respect SHIMMY_MAX_CTX for extended context (YaRN RoPE)
+        if let Some(max_ctx) = std::env::var("SHIMMY_MAX_CTX").ok().and_then(|s| s.parse::<usize>().ok()) {
+            let rope_scale = std::env::var("SHIMMY_ROPE_SCALE")
+                .ok()
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or_else(|| if max_ctx > spec.n_ctx { spec.n_ctx as f32 / max_ctx as f32 } else { 1.0 });
+            spec.n_ctx = max_ctx;
+            spec.rope_scale = rope_scale;
+        }
         let gpu_model = BindlessModel::load_from_disk(&device, model_path, Some(&spec));
         let pipeline = BindlessPipeline::new(&device);
         let shift_pipeline = RopeShiftPipeline::new(&device);

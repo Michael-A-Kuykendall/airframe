@@ -1739,10 +1739,11 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             
-            // TDR Mitigation: Flush the command list every layer to prevent Windows TDR kills
-            // A long batch can take 2-4 minutes! WDDM resets standard command bounds at ~2s.
+            // TDR Mitigation: submit and WAIT for each layer before encoding the next.
+            // poll(Wait) blocks until the GPU finishes this layer's work, guaranteeing no
+            // single GPU timeline slot exceeds Windows' ~2s TDR watchdog window.
             queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
             encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Execute Batch Cont"),

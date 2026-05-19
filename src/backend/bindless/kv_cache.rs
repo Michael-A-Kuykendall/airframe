@@ -34,6 +34,7 @@ pub struct KVCache {
     max_seq_len: u32,
 
     /// Number of transformer layers
+    #[allow(dead_code)]
     n_layers: usize,
 
     /// Number of KV heads (GQA: 4 for TinyLlama)

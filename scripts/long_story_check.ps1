@@ -2,7 +2,7 @@ param(
     [string]$BaseUrl = "http://127.0.0.1:8080",
     [string]$RequestPath = "C:\Users\micha\repos\airframe\artifacts\story_4k_exact_request_nostream.json",
     [string]$OutputFile = "C:\Users\micha\repos\airframe\artifacts\story_4k_exact_current_status_new_text.txt",
-    [int]$PollSeconds = 300
+    [int]$PollSeconds = 600
 )
 
 $ErrorActionPreference = "Stop"

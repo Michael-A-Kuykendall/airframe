@@ -206,6 +206,7 @@ async fn async_main() -> Result<()> {
 
     if !prefix_tokens.is_empty() {
         {
+            eprintln!("[GPU prefill] {} tokens in chunks of {} ...", prefix_tokens.len(), args.chunk_tokens);
             let prefix_embd = dequantize_embeddings(
                 &pipeline,
                 &device,
@@ -230,6 +231,7 @@ async fn async_main() -> Result<()> {
             for _ in 0..prefix_tokens.len() {
                 gpu_kv.increment();
             }
+            eprintln!("[GPU prefill] done");
         }
     }
 
@@ -244,11 +246,15 @@ async fn async_main() -> Result<()> {
         );
 
         if !prefix_tokens.is_empty() {
+            eprintln!("[CPU prefill] {} tokens ...", prefix_tokens.len());
             let _ = full_model.forward(prefix_tokens, &weights, &mut cpu_kv, &ops)?;
             cpu_kv.complete_prefill(prefix_tokens.len())?;
+            eprintln!("[CPU prefill] done");
         }
 
+        eprintln!("[CPU decode] running target token through all {} layers ...", spec.n_layer);
         let cpu_layers = cpu_debug_target_token(&weights, &ops, &spec, &mut cpu_kv, &target_input)?;
+        eprintln!("[CPU decode] done");
         cpu_kv.complete_decode()?;
         let cpu_hidden = cpu_layers
             .last()
@@ -268,6 +274,7 @@ async fn async_main() -> Result<()> {
         padding: 0,
     };
 
+    eprintln!("[GPU vs CPU] comparing {} layers ...", spec.n_layer);
     let mut gpu_hidden = target_input.clone();
     let mut layer_comparisons = Vec::with_capacity(spec.n_layer);
     for layer_idx in 0..spec.n_layer {
@@ -291,7 +298,7 @@ async fn async_main() -> Result<()> {
             );
 
         let cpu_layer = &cpu_layers[layer_idx];
-        layer_comparisons.push(LayerComparison {
+        let cmp = LayerComparison {
             layer_idx,
             q: summarize_pair(&cpu_layer.q, &gpu_q),
             k: summarize_pair(&cpu_layer.k, &gpu_k),
@@ -299,10 +306,14 @@ async fn async_main() -> Result<()> {
             post_attn: summarize_pair(&cpu_layer.post_attn, &gpu_post_attn),
             ffn_out: summarize_pair(&cpu_layer.ffn_out, &gpu_ffn_out),
             output: summarize_pair(&cpu_layer.output, &gpu_output),
-        });
+        };
+        eprintln!("  layer {:2}: output MAE={:.6}  post_attn MAE={:.6}",
+            layer_idx, cmp.output.mean_abs_err, cmp.post_attn.mean_abs_err);
+        layer_comparisons.push(cmp);
 
         gpu_hidden = gpu_output;
     }
+    eprintln!("[GPU vs CPU] done");
     gpu_kv.increment();
 
     let output_norm = weights
@@ -363,6 +374,7 @@ async fn async_main() -> Result<()> {
         LibshimmyError::Unsupported(format!("failed to write output {}: {err}", args.output.display()))
     })?;
 
+    eprintln!("[done] wrote {}", args.output.display());
     println!("wrote {}", args.output.display());
     Ok(())
 }

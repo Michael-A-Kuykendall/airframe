@@ -8,6 +8,8 @@ SERVER_EXE="${SERVER_EXE:-./target/release/shimmy_server_gpu.exe}"
 RESULTS_OUT="${RESULTS_OUT:-artifacts/rope_ladder_results.json}"
 SERVER_START_SEC="${SERVER_START_SEC:-90}"
 POLL_SEC="${POLL_SEC:-180}"
+STOP_ON_FAIL="${STOP_ON_FAIL:-1}"
+ONLY_LABEL="${ONLY_LABEL:-}"
 
 SECRET="XYLOPHONE-7743"
 QUESTION="What is the secret code mentioned earlier in this document? Reply with ONLY the code, nothing else."
@@ -47,14 +49,29 @@ wait_ready() {
 
 submit_job() {
     local prompt_text="$1"
-    # Build request JSON
-    local body
-    body=$(jq -n \
-        --arg p "$prompt_text" \
-        '{task:"needle", prompt:$p, prompt_mode:"raw", max_tokens:32, temperature:0.0, top_p:1.0, seed:42, stream:false}')
-    curl -sf -X POST "${BASE_URL}/" \
+    # Large prompts exceed Windows command-line length limits if passed via -d.
+    local prompt_file
+    local body_file
+    local job_id
+    prompt_file=$(mktemp)
+    body_file=$(mktemp)
+    printf '%s' "$prompt_text" > "$prompt_file"
+    jq -Rs \
+        '{task:"needle", prompt:., prompt_mode:"raw", max_tokens:32, temperature:0.0, top_p:1.0, seed:42, stream:false}' \
+        < "$prompt_file" > "$body_file"
+
+    if job_id=$(curl -sf -X POST "${BASE_URL}/" \
         -H "Content-Type: application/json" \
-        -d "$body" | jq -r '.job_id'
+        --data-binary "@${body_file}" | jq -r '.job_id'); then
+        rm -f "$prompt_file"
+        rm -f "$body_file"
+        printf '%s' "$job_id"
+        return 0
+    fi
+
+    rm -f "$prompt_file"
+    rm -f "$body_file"
+    return 1
 }
 
 poll_job() {
@@ -117,6 +134,10 @@ for idx in "${!LABELS[@]}"; do
     scale_raw="${SCALES[$idx]}"
     filler="${FILLER[$idx]}"
 
+    if [[ -n "$ONLY_LABEL" && "$label" != "$ONLY_LABEL" ]]; then
+        continue
+    fi
+
     if [[ "$scale_raw" == "auto" ]]; then
         # python/awk float division
         rope_scale=$(awk "BEGIN{printf \"%.6f\", 2048.0/$max_ctx}")
@@ -140,7 +161,10 @@ for idx in "${!LABELS[@]}"; do
         [[ "$first_result" == "true" ]] && first_result=false || results_json+=","
         results_json+="$entry"
         ladder_broken=true
-        break
+        if [[ "$STOP_ON_FAIL" == "1" ]]; then
+            break
+        fi
+        continue
     fi
 
     # Build prompt and log approximate size
@@ -200,7 +224,9 @@ for idx in "${!LABELS[@]}"; do
     if [[ "$found_keyword" != "true" ]]; then
         echo "  Retrieval lost at ${label} — stopping ladder."
         ladder_broken=true
-        break
+        if [[ "$STOP_ON_FAIL" == "1" ]]; then
+            break
+        fi
     fi
 done
 
