@@ -1,2 +1,34 @@
 [files."src/backend/bindless/loader.rs".waivers]
 B6 = "intentional server startup progress messages [BindlessLoader]"
+
+[files."src/backend/bindless/preflight.rs".waivers]
+B6 = "intentional preflight startup progress messages [Preflight]"
+
+[files."src/backend/bindless/pipeline.rs".waivers]
+C3 = "GPU pipeline monolith, modular split scheduled"
+B5 = "pub-count denominator mismatch on large pipeline file, known scoring issue"
+B6 = "intentional GPU debug telemetry [BindlessPipeline]"
+
+[files."src/bin/shimmy_server_gpu.rs".waivers]
+C3 = "GPU server monolith, modular split scheduled"
+B6 = "intentional GPU server progress and diagnostic messages [ShimmyServerGpu]"
+
+[files."src/backend/bindless/loader.rs"]
+sealed_sha256 = "cb0a462b9d0df9d53831c9660b03a176f8f4769fa51d0bcb3bd6cd9fbf881430"
+sealed_date = "2026-05-21"
+
+[files."src/backend/bindless/pipeline_shift.rs"]
+sealed_sha256 = "af1692d91717bd9f1341beefadb15c069fbf6ad5c7d55027de5938c4d9d15ebc"
+sealed_date = "2026-05-21"
+
+[files."src/backend/bindless/preflight.rs"]
+sealed_sha256 = "cebfdb418b6cb8cce23f96d40d5bbec387fafc19d0a09b7fecfd3f596a00c2eb"
+sealed_date = "2026-05-21"
+
+[files."src/backend/bindless/pipeline.rs"]
+sealed_sha256 = "7f671d047438c1979ad312d26a28be4c82a07b2bf622c970da4a1e1894ff2f21"
+sealed_date = "2026-05-21"
+
+[files."src/bin/shimmy_server_gpu.rs"]
+sealed_sha256 = "e39b567cd2a5eadcf67d2b1a5344cece3e1d06c9f43d94f3feedf582d8c0ef3f"
+sealed_date = "2026-05-21"

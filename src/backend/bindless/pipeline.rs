@@ -107,9 +107,9 @@ pub struct BindlessPipeline {
 impl BindlessPipeline {
     /// Creates the pipeline with a "Probe" kernel to verify connectivity.
     pub fn new(device: &wgpu::Device) -> Self {
-        // --- 1. Probe Pipeline (Keep Existing) ---
-        // Binding 0: The GGUF Blob (ReadOnly Storage)
-        // Binding 1: Output Probe (ReadWrite Storage)
+        // --- 1. Probe Pipeline ---
+        // Binding 0: GGUF Blob, read-only storage
+        // Binding 1: Output Probe, read-write storage
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Bindless Layout"),
             entries: &[
@@ -176,9 +176,9 @@ impl BindlessPipeline {
         });
 
         // --- 4. Q4_0 Dequant Pipeline ---
-        // Binding 0: GGUF Blob (ReadOnly)
-        // Binding 1: Output F32 (ReadWrite)
-        // Binding 2: Params (Uniform)
+        // Binding 0: GGUF Blob, read-only
+        // Binding 1: Output F32, read-write
+        // Binding 2: Params, uniform
 
         let dequant_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Dequant Layout"),
@@ -239,11 +239,8 @@ impl BindlessPipeline {
         });
 
         // --- 5. MatMul Pipeline ---
-        // Bindings:
-        // 0: GGUF Blob (Storage Read)
-        // 1: Input Vector (Storage Read)
-        // 2: Output Vector (Storage ReadWrite)
-        // 3: Params (Uniform)
+        // Bindings: 0=GGUF Blob read-only, 1=Input Vector read-only,
+        //           2=Output Vector read-write, 3=Params uniform
 
         let matmul_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("MatMul Layout"),
@@ -465,14 +462,9 @@ impl BindlessPipeline {
         });
 
         // --- 7. Mega-Layer Pipeline ---
-        // Bindings:
-        // 0: GGUF Blob (RO Storage)
-        // 1: Activation In (RW Storage)
-        // 2: Temp State (RW Storage)
-        // 3: LayerOffsets (Uniform)
-        // 4: LayerParams (Uniform)
-        // 5: Norm Bank (Preflight)
-        // 6: RoPE Cache (Preflight)
+        // Bindings: 0=GGUF Blob read-only, 1=Activation In read-write,
+        //           2=Temp State read-write, 3=LayerOffsets uniform,
+        //           4=LayerParams uniform, 5=Norm Bank preflight, 6=RoPE Cache preflight
         let layer_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Layer V1 Layout"),
             entries: &[
@@ -707,7 +699,7 @@ impl BindlessPipeline {
 
         // Loop poll until mapped
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
@@ -796,7 +788,7 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
@@ -890,7 +882,7 @@ impl BindlessPipeline {
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.unwrap();
                 break;
@@ -1039,7 +1031,7 @@ impl BindlessPipeline {
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.unwrap();
                 break;
@@ -1138,7 +1130,7 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
@@ -1245,7 +1237,7 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
@@ -1347,7 +1339,7 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
@@ -1929,7 +1921,7 @@ impl BindlessPipeline {
             // poll(Wait) blocks until the GPU finishes this layer's work, guaranteeing no
             // single GPU timeline slot exceeds Windows' ~2s TDR watchdog window.
             queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost or TDR timeout during layer wait");
 
             encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Execute Batch Cont"),
@@ -2001,7 +1993,7 @@ impl BindlessPipeline {
         let mut main_done = false;
 
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             
             if !pre_done {
                 if let Ok(res) = rx_pre.try_recv() {
@@ -3046,7 +3038,7 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
         loop {
-            device.poll(wgpu::PollType::Poll).unwrap();
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
