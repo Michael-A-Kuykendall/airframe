@@ -264,6 +264,31 @@
 			"group": "build"
 		},
 		{
+			"label": "Run Airframe GPU Server (custom model)",
+			"type": "process",
+			"command": "cargo",
+			"args": ["run", "--release", "--bin", "shimmy_server_gpu"],
+			"options": {
+				"env": {
+					"RUST_BACKTRACE": "1",
+					"SHIMMY_PORT": "8080",
+					"LIBSHIMMY_MODEL_PATH": "${input:airframeModelPath}"
+				}
+			},
+			"isBackground": true,
+			"problemMatcher": [{
+				"owner": "custom",
+				"pattern": { "regexp": "^(.*)$", "message": 1 },
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".",
+					"endsPattern": "\\[HTTP\\] Async listener spawned on .+"
+				}
+			}],
+			"presentation": { "panel": "dedicated", "reveal": "always", "clear": true },
+			"group": "build"
+		},
+		{
 			"label": "Run Airframe GPU Server (8K ctx)",
 			"type": "process",
 			"command": "cargo",
@@ -338,6 +363,12 @@
 		}
 	],
 	"inputs": [
+		{
+			"id": "airframeModelPath",
+			"type": "promptString",
+			"description": "Absolute GGUF path for shimmy_server_gpu (LIBSHIMMY_MODEL_PATH)",
+			"default": "D:\\shimmy-test-models\\gguf_collection\\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"
+		},
 		{
 			"id": "shimmyProviderModelPath",
 			"type": "promptString",

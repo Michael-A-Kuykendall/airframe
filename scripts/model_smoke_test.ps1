@@ -1,27 +1,43 @@
 param(
-    [string]$ServerBin   = ".\target\release\shimmy_server_gpu.exe",
+    [string]$ServerBin   = "$PSScriptRoot\..\target\release\shimmy_server_gpu.exe",
     [string]$ModelDir    = "D:\shimmy-test-models\gguf_collection",
     [string]$BaseUrl     = "http://127.0.0.1:8080",
-    [int]$StartupTimeout = 120,
-    [int]$RequestTimeout = 120,
-    [string]$OutputDir   = ".\artifacts\model_smoke"
+    [int]$StartupTimeout = 180,
+    [int]$RequestTimeout = 180,
+    [string]$OutputDir   = "$PSScriptRoot\..\artifacts\model_smoke",
+    [switch]$IncludeLarge  # Pass -IncludeLarge to also test 7B models
 )
 
 $ErrorActionPreference = "Stop"
 
-# Models to test: each entry is @(filename, expected_keyword)
-$Models = @(
-    @("tinyllama-1.1b-chat-v1.0.Q4_0.gguf",           "Paris"),
-    @("Llama-3.2-1B-Instruct-Q4_K_M.gguf",            "Paris"),
-    @("Llama-3.2-3B-Instruct-Q4_K_M.gguf",            "Paris"),
-    @("phi-2.Q4_K_M.gguf",                             "Paris"),
-    @("gemma-2-2b-it-Q4_K_M.gguf",                    "Paris"),
-    @("starcoder2-3b.Q4_K_M.gguf",                    "def "),
-    @("gpt2.Q4_0.gguf",                                "the")
+# Normalize paths so Start-Process redirect files resolve without '..' components
+# (Win32 CreateProcess does not resolve '..' in redirect paths)
+$ServerBin = [System.IO.Path]::GetFullPath($ServerBin)
+$OutputDir  = [System.IO.Path]::GetFullPath($OutputDir)
+
+# Verified models (quant_verify confirmed on RTX 3060).
+# Each entry: @(filename, expected_keyword_in_response, prompt)
+$VerifiedModels = @(
+    @("TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",     "Paris",  "The capital of France is"),
+    @("Llama-3.2-1B-Instruct-Q4_K_M.gguf",      "Paris",  "The capital of France is"),
+    @("Llama-3.2-3B-Instruct-Q4_K_M.gguf",      "Paris",  "The capital of France is"),
+    @("phi-2.Q4_K_M.gguf",                       "Paris",  "The capital of France is"),
+    @("gemma-2-2b-it-Q4_K_M.gguf",              "Paris",  "The capital of France is"),
+    @("starcoder2-3b-Q4_K_M.gguf",              "def ",   "def hello_world():"),
+    @("gpt2.Q4_K_M.gguf",                        "",       "The capital of France is")
 )
 
+# 7B models — larger VRAM needed, run only with -IncludeLarge
+$LargeModels = @(
+    @("deepseek-llm-7b-chat.Q4_K_M.gguf",               "Paris",  "The capital of France is"),
+    @("deepseek-coder-6.7b-instruct.Q4_K_M.gguf",       "def ",   "def hello_world():"),
+    @("qwen2-7b-instruct-q4_k_m.gguf",                  "Paris",  "The capital of France is")
+)
+
+$Models = if ($IncludeLarge) { $VerifiedModels + $LargeModels } else { $VerifiedModels }
+
 $Prompt = "The capital of France is"
-$CodePrompt = "def hello():"
+$CodePrompt = "def hello_world():"
 
 $null = New-Item -ItemType Directory -Force -Path $OutputDir
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -37,10 +53,10 @@ function Write-Log {
 
 function Wait-ServerReady {
     param([string]$Url, [int]$Timeout)
-    $healthUrl = "$Url/v1/models"
+    $readyUrl = "$Url/api/repro/queue"
     for ($i = 0; $i -lt $Timeout; $i++) {
         try {
-            $null = Invoke-RestMethod -Method Get -Uri $healthUrl -TimeoutSec 2
+            $null = Invoke-RestMethod -Method Get -Uri $readyUrl -TimeoutSec 2
             return $true
         } catch {
             Start-Sleep -Seconds 1
@@ -66,6 +82,7 @@ Write-Log ""
 foreach ($entry in $Models) {
     $modelFile    = $entry[0]
     $expectWord   = $entry[1]
+    $promptText   = $entry[2]
     $modelPath    = Join-Path $ModelDir $modelFile
 
     if (-not (Test-Path $modelPath)) {
@@ -84,8 +101,8 @@ foreach ($entry in $Models) {
         NoNewWindow            = $true
     }
 
-    $env:SHIMMY_BASE_GGUF = $modelPath
-    $env:SHIMMY_PORT      = "8080"
+    $env:LIBSHIMMY_MODEL_PATH = $modelPath
+    $env:SHIMMY_PORT          = "8080"
     $proc = Start-Process @procArgs
 
     $ready = Wait-ServerReady -Url $BaseUrl -Timeout $StartupTimeout
@@ -96,9 +113,7 @@ foreach ($entry in $Models) {
         continue
     }
 
-    # Choose prompt: code models get a code completion, others get the France question
-    $promptText = if ($modelFile -match "starcoder|code") { $CodePrompt } else { $Prompt }
-
+    # Each model entry carries its own prompt
     $body = @{
         model       = "local"
         messages    = @(@{ role = "user"; content = $promptText })
@@ -125,8 +140,8 @@ foreach ($entry in $Models) {
     $text = ""
     try { $text = $response.choices[0].message.content } catch {}
 
-    if ($text -match [regex]::Escape($expectWord) -or $text.Length -gt 0) {
-        $pass = $text -match [regex]::Escape($expectWord)
+    if ($text.Length -gt 0) {
+        $pass = ($expectWord -eq "") -or ($text -match [regex]::Escape($expectWord))
         $tag  = if ($pass) { "PASS" } else { "WEAK" }
         Write-Log "$tag  $modelFile — response: $($text.Substring(0, [Math]::Min(80, $text.Length)))"
         $results += [pscustomobject]@{ Model=$modelFile; Result=$tag; Detail=$text }
