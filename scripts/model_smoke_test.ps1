@@ -29,7 +29,7 @@ $VerifiedModels = @(
 # Models with known hardware/architecture limitations — not run, recorded as LIMIT.
 # Remove from this list only after the blocking issue is resolved.
 $KnownLimitationModels = @(
-    @("gemma-2-2b-it-Q4_K_M.gguf",  "Output head = 2.19 GB exceeds WebGPU 2 GB buffer limit. Needs output head chunking.")
+    ,@("gemma-2-2b-it-Q4_K_M.gguf", "Output head = 2.19 GB exceeds WebGPU 2 GB buffer limit. Needs output head chunking.")
 )
 
 # 7B models — larger VRAM needed, run only with -IncludeLarge
@@ -119,8 +119,8 @@ foreach ($entry in $Models) {
 
     $ready = Wait-ServerReady -Url $BaseUrl -Timeout $StartupTimeout -Proc $proc
     if (-not $ready) {
-        $detail = if ($proc.HasExited) { "server process exited (exit code $($proc.ExitCode)) — check terminal for panic/OOM" } else { "startup timeout after ${StartupTimeout}s" }
-        Write-Log "FAIL  $modelFile — $detail"
+        $detail = if ($proc.HasExited) { "server process exited (exit code $($proc.ExitCode)) -- check terminal for panic/OOM" } else { "startup timeout after ${StartupTimeout}s" }
+        Write-Log "FAIL  $modelFile -- $detail"
         $results += [pscustomobject]@{ Model=$modelFile; Result="FAIL"; Detail=$detail }
         Stop-ServerProcess $proc
         continue
@@ -144,7 +144,7 @@ foreach ($entry in $Models) {
             -Body $body `
             -TimeoutSec $RequestTimeout
     } catch {
-        Write-Log "FAIL  $modelFile — request error: $_"
+        Write-Log "FAIL  $modelFile -- request error: $_"
         $results += [pscustomobject]@{ Model=$modelFile; Result="FAIL"; Detail="request error: $_" }
         Stop-ServerProcess $proc
         continue
@@ -156,10 +156,10 @@ foreach ($entry in $Models) {
     if ($text.Length -gt 0) {
         $pass = ($expectWord -eq "") -or ($text -match [regex]::Escape($expectWord))
         $tag  = if ($pass) { "PASS" } else { "WEAK" }
-        Write-Log "$tag  $modelFile — response: $($text.Substring(0, [Math]::Min(80, $text.Length)))"
+        Write-Log "$tag  $modelFile -- response: $($text.Substring(0, [Math]::Min(80, $text.Length)))"
         $results += [pscustomobject]@{ Model=$modelFile; Result=$tag; Detail=$text }
     } else {
-        Write-Log "FAIL  $modelFile — empty response"
+        Write-Log "FAIL  $modelFile -- empty response"
         $results += [pscustomobject]@{ Model=$modelFile; Result="FAIL"; Detail="empty response" }
     }
 
