@@ -153,7 +153,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
-        padding: 0,
+        quant_type: 0,
     };
 
     let mut kv_cache = KVCache::new(

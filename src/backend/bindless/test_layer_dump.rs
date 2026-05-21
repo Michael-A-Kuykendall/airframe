@@ -75,7 +75,7 @@ mod layer_dump_tests {
             rms_eps: 1e-5,
             ffn_dim: 5632,
             temp_stride: 16384,
-            padding: 0,
+            quant_type: 0,
         };
 
         // Process sequence: BOS (1), "Hello" (15043), then 1 decode step
