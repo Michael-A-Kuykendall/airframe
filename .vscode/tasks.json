@@ -126,6 +126,24 @@
 			],
 			"group": "build"
 		},
+		{
+			"label": "Run Model Smoke Test",
+			"type": "process",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\model_smoke_test.ps1"
+			],
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			},
+			"group": "build"
+		},
 
 		{
 			"label": "U: Smoke Shimmy Provider Path",
