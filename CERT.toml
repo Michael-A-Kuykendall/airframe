@@ -1,0 +1,2 @@
+[files."src/backend/bindless/loader.rs".waivers]
+B6 = "intentional server startup progress messages [BindlessLoader]"
