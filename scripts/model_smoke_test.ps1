@@ -92,13 +92,11 @@ foreach ($entry in $Models) {
     }
 
     Write-Log "START $modelFile"
+    # No output redirection — server stdout/stderr flows to this terminal so failures are visible.
     $procArgs = @{
-        FilePath               = $ServerBin
-        ArgumentList           = @()
-        RedirectStandardOutput = (Join-Path $OutputDir "stdout_$($modelFile -replace '[^\w]','_').txt")
-        RedirectStandardError  = (Join-Path $OutputDir "stderr_$($modelFile -replace '[^\w]','_').txt")
-        PassThru               = $true
-        NoNewWindow            = $true
+        FilePath    = $ServerBin
+        PassThru    = $true
+        NoNewWindow = $true
     }
 
     $env:LIBSHIMMY_MODEL_PATH = $modelPath
