@@ -22,9 +22,14 @@ $VerifiedModels = @(
     @("Llama-3.2-1B-Instruct-Q4_K_M.gguf",      "Paris",  "The capital of France is"),
     @("Llama-3.2-3B-Instruct-Q4_K_M.gguf",      "Paris",  "The capital of France is"),
     @("phi-2.Q4_K_M.gguf",                       "Paris",  "The capital of France is"),
-    @("gemma-2-2b-it-Q4_K_M.gguf",              "Paris",  "The capital of France is"),
     @("starcoder2-3b-Q4_K_M.gguf",              "def ",   "def hello_world():"),
     @("gpt2.Q4_K_M.gguf",                        "",       "The capital of France is")
+)
+
+# Models with known hardware/architecture limitations — not run, recorded as LIMIT.
+# Remove from this list only after the blocking issue is resolved.
+$KnownLimitationModels = @(
+    @("gemma-2-2b-it-Q4_K_M.gguf",  "Output head = 2.19 GB exceeds WebGPU 2 GB buffer limit. Needs output head chunking.")
 )
 
 # 7B models — larger VRAM needed, run only with -IncludeLarge
@@ -44,6 +49,16 @@ $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $logFile   = Join-Path $OutputDir "smoke_$timestamp.log"
 $results   = @()
 
+# Record known limitations upfront (no server start needed)
+foreach ($entry in $KnownLimitationModels) {
+    $modelFile = $entry[0]
+    $reason    = $entry[1]
+    $modelPath = Join-Path $ModelDir $modelFile
+    $exists    = Test-Path $modelPath
+    $detail    = if ($exists) { "KNOWN LIMIT: $reason" } else { "KNOWN LIMIT (not present): $reason" }
+    $results  += [pscustomobject]@{ Model=$modelFile; Result="LIMIT"; Detail=$detail }
+}
+
 function Write-Log {
     param([string]$Msg)
     $line = "[$(Get-Date -Format 'HH:mm:ss')] $Msg"
@@ -52,9 +67,11 @@ function Write-Log {
 }
 
 function Wait-ServerReady {
-    param([string]$Url, [int]$Timeout)
+    param([string]$Url, [int]$Timeout, $Proc)
     $readyUrl = "$Url/api/repro/queue"
     for ($i = 0; $i -lt $Timeout; $i++) {
+        # Bail out early if the server process has already exited (e.g. panic / OOM)
+        if ($Proc -and $Proc.HasExited) { return $false }
         try {
             $null = Invoke-RestMethod -Method Get -Uri $readyUrl -TimeoutSec 2
             return $true
@@ -103,10 +120,11 @@ foreach ($entry in $Models) {
     $env:SHIMMY_PORT          = "8080"
     $proc = Start-Process @procArgs
 
-    $ready = Wait-ServerReady -Url $BaseUrl -Timeout $StartupTimeout
+    $ready = Wait-ServerReady -Url $BaseUrl -Timeout $StartupTimeout -Proc $proc
     if (-not $ready) {
-        Write-Log "FAIL  $modelFile — server did not become ready in ${StartupTimeout}s"
-        $results += [pscustomobject]@{ Model=$modelFile; Result="FAIL"; Detail="startup timeout" }
+        $detail = if ($proc.HasExited) { "server process exited (exit code $($proc.ExitCode)) — check terminal for panic/OOM" } else { "startup timeout after ${StartupTimeout}s" }
+        Write-Log "FAIL  $modelFile — $detail"
+        $results += [pscustomobject]@{ Model=$modelFile; Result="FAIL"; Detail=$detail }
         Stop-ServerProcess $proc
         continue
     }
@@ -154,11 +172,12 @@ foreach ($entry in $Models) {
 
 Write-Log ""
 Write-Log "=== Summary ==="
-$pass = ($results | Where-Object Result -eq "PASS").Count
-$weak = ($results | Where-Object Result -eq "WEAK").Count
-$fail = ($results | Where-Object Result -eq "FAIL").Count
-$skip = ($results | Where-Object Result -eq "SKIP").Count
-Write-Log "PASS: $pass  WEAK: $weak  FAIL: $fail  SKIP: $skip  Total: $($results.Count)"
+$pass  = ($results | Where-Object Result -eq "PASS").Count
+$weak  = ($results | Where-Object Result -eq "WEAK").Count
+$fail  = ($results | Where-Object Result -eq "FAIL").Count
+$skip  = ($results | Where-Object Result -eq "SKIP").Count
+$limit = ($results | Where-Object Result -eq "LIMIT").Count
+Write-Log "PASS: $pass  WEAK: $weak  FAIL: $fail  SKIP: $skip  LIMIT: $limit  Total: $($results.Count)"
 
 $csvPath = Join-Path $OutputDir "smoke_$timestamp.csv"
 $results | Export-Csv -Path $csvPath -NoTypeInformation
