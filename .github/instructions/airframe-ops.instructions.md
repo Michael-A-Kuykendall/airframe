@@ -179,6 +179,15 @@ Use these tasks rather than hand-rolling the flows:
 
 ---
 
+## Verbose Output Rule
+
+Never redirect server or script output to files during local dev or smoke testing.
+All stdout/stderr must flow to the terminal. Silent failures are unacceptable —
+if a process crashes, panics, or OOMs, that output must be visible immediately.
+File redirection is only appropriate in fully verified CI pipelines, never during bring-up or debugging.
+
+---
+
 ## No-Duplicate-Server Rule
 
 Before starting a server, always verify port 8080 is free:
