@@ -582,11 +582,13 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let pipeline = BindlessPipeline::new(&device);
 
     eprintln!("[GPU Server] Model loaded to VRAM");
+    // Flush any pending staging work from GGUF upload before allocating output head buffer
+    device.poll(wgpu::MaintainBase::Wait);
 
     // === Q6_K Output Head Workaround (Phase 4E) ===
     // TinyLlama Q4_0 uses Q6_K for output.weight (not Q4_0!)
     // GPU doesn't have Q6_K shader yet, so dequant to F32 on CPU
-    let output_head_f32 = load_output_head_f32(&model_path, &gpu_model, &device, &spec)?;
+    let output_head_f32 = load_output_head_f32(&model_path, &gpu_model, &device, &queue, &spec)?;
     eprintln!("[GPU Server] Output head dequantized to F32 (262 MB)");
 
     // === Token Embedding CPU Table ===
@@ -1168,6 +1170,7 @@ fn load_output_head_f32(
     model_path: &str,
     gpu_model: &BindlessModel,
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     spec: &ModelSpec,
 ) -> Result<wgpu::Buffer, Box<dyn std::error::Error>> {
     // Resolve tensor name: prefer output.weight, fall back to tied token_embd.weight
@@ -1240,12 +1243,15 @@ fn load_output_head_f32(
     );
 
     // Upload to GPU (STORAGE usage for matmul shader)
-    use wgpu::util::DeviceExt;
-    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    // Use create_buffer + queue.write_buffer to avoid mapped_at_creation staging path
+    // which can fail on Vulkan (Linux) after large prior VRAM uploads.
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Output Head F32"),
-        contents: bytemuck::cast_slice(&tensor_f32.data),
-        usage: wgpu::BufferUsages::STORAGE,
+        size: (tensor_f32.data.len() * 4) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
     });
+    queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&tensor_f32.data));
 
     eprintln!(
         "[GPU Server] Output head F32 buffer: {} MB",
