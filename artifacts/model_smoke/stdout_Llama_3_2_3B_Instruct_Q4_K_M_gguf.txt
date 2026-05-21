@@ -1,0 +1,548 @@
+[Metadata] Scanning 35 KV pairs...
+[Metadata] general.architecture = llama
+[Metadata] general.name = Llama 3.2 3B Instruct
+[Metadata] general.basename = Llama-3.2
+[Metadata] llama.block_count = 28
+[Metadata] llama.context_length = 131072
+[Metadata] llama.embedding_length = 3072
+[Metadata] llama.feed_forward_length = 8192
+[Metadata] llama.attention.head_count = 24
+[Metadata] llama.attention.head_count_kv = 8
+[Metadata] llama.rope.freq_base = 500000
+[Metadata] llama.attention.layer_norm_rms_epsilon = 0.00001
+[Metadata] general.file_type = 15
+[Metadata] tokenizer.ggml.model = gpt2
+[Metadata] Found rope_freqs.weight: Type=0 Dims=[64] Offset=0
+[Metadata] Found token_embd.weight: Type=14 Dims=[3072, 128256] Offset=256
+[Metadata] Found blk.0.attn_norm.weight: Type=0 Dims=[3072] Offset=323205376
+[Metadata] Found blk.0.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=323217664
+[Metadata] Found blk.0.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=343861504
+[Metadata] Found blk.0.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=358017280
+[Metadata] Found blk.0.ffn_norm.weight: Type=0 Dims=[3072] Offset=372173056
+[Metadata] Found blk.0.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=372185344
+[Metadata] Found blk.0.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=373954816
+[Metadata] Found blk.0.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=379263232
+[Metadata] Found blk.0.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=384571648
+[Metadata] Found blk.1.attn_norm.weight: Type=0 Dims=[3072] Offset=387152128
+[Metadata] Found blk.1.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=387164416
+[Metadata] Found blk.1.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=407808256
+[Metadata] Found blk.1.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=421964032
+[Metadata] Found blk.1.ffn_norm.weight: Type=0 Dims=[3072] Offset=436119808
+[Metadata] Found blk.1.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=436132096
+[Metadata] Found blk.1.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=437901568
+[Metadata] Found blk.1.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=443209984
+[Metadata] Found blk.1.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=448518400
+[Metadata] Found blk.10.attn_norm.weight: Type=0 Dims=[3072] Offset=451098880
+[Metadata] Found blk.10.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=451111168
+[Metadata] Found blk.10.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=471755008
+[Metadata] Found blk.10.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=485910784
+[Metadata] Found blk.10.ffn_norm.weight: Type=0 Dims=[3072] Offset=500066560
+[Metadata] Found blk.10.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=500078848
+[Metadata] Found blk.10.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=501848320
+[Metadata] Found blk.10.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=507156736
+[Metadata] Found blk.10.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=512465152
+[Metadata] Found blk.11.attn_norm.weight: Type=0 Dims=[3072] Offset=515045632
+[Metadata] Found blk.11.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=515057920
+[Metadata] Found blk.11.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=529213696
+[Metadata] Found blk.11.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=543369472
+[Metadata] Found blk.11.ffn_norm.weight: Type=0 Dims=[3072] Offset=557525248
+[Metadata] Found blk.11.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=557537536
+[Metadata] Found blk.11.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=559307008
+[Metadata] Found blk.11.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=564615424
+[Metadata] Found blk.11.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=569923840
+[Metadata] Found blk.12.attn_norm.weight: Type=0 Dims=[3072] Offset=571693312
+[Metadata] Found blk.12.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=571705600
+[Metadata] Found blk.12.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=585861376
+[Metadata] Found blk.12.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=600017152
+[Metadata] Found blk.12.ffn_norm.weight: Type=0 Dims=[3072] Offset=614172928
+[Metadata] Found blk.12.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=614185216
+[Metadata] Found blk.12.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=615954688
+[Metadata] Found blk.12.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=621263104
+[Metadata] Found blk.12.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=626571520
+[Metadata] Found blk.13.attn_norm.weight: Type=0 Dims=[3072] Offset=628340992
+[Metadata] Found blk.13.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=628353280
+[Metadata] Found blk.13.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=648997120
+[Metadata] Found blk.13.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=663152896
+[Metadata] Found blk.13.ffn_norm.weight: Type=0 Dims=[3072] Offset=677308672
+[Metadata] Found blk.13.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=677320960
+[Metadata] Found blk.13.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=679090432
+[Metadata] Found blk.13.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=684398848
+[Metadata] Found blk.13.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=689707264
+[Metadata] Found blk.14.attn_norm.weight: Type=0 Dims=[3072] Offset=692287744
+[Metadata] Found blk.14.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=692300032
+[Metadata] Found blk.14.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=706455808
+[Metadata] Found blk.14.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=720611584
+[Metadata] Found blk.14.ffn_norm.weight: Type=0 Dims=[3072] Offset=734767360
+[Metadata] Found blk.14.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=734779648
+[Metadata] Found blk.14.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=736549120
+[Metadata] Found blk.14.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=741857536
+[Metadata] Found blk.14.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=747165952
+[Metadata] Found blk.15.attn_norm.weight: Type=0 Dims=[3072] Offset=748935424
+[Metadata] Found blk.15.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=748947712
+[Metadata] Found blk.15.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=763103488
+[Metadata] Found blk.15.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=777259264
+[Metadata] Found blk.15.ffn_norm.weight: Type=0 Dims=[3072] Offset=791415040
+[Metadata] Found blk.15.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=791427328
+[Metadata] Found blk.15.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=793196800
+[Metadata] Found blk.15.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=798505216
+[Metadata] Found blk.15.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=803813632
+[Metadata] Found blk.16.attn_norm.weight: Type=0 Dims=[3072] Offset=805583104
+[Metadata] Found blk.16.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=805595392
+[Metadata] Found blk.16.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=826239232
+[Metadata] Found blk.16.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=840395008
+[Metadata] Found blk.16.ffn_norm.weight: Type=0 Dims=[3072] Offset=854550784
+[Metadata] Found blk.16.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=854563072
+[Metadata] Found blk.16.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=856332544
+[Metadata] Found blk.16.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=861640960
+[Metadata] Found blk.16.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=866949376
+[Metadata] Found blk.17.attn_norm.weight: Type=0 Dims=[3072] Offset=869529856
+[Metadata] Found blk.17.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=869542144
+[Metadata] Found blk.17.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=883697920
+[Metadata] Found blk.17.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=897853696
+[Metadata] Found blk.17.ffn_norm.weight: Type=0 Dims=[3072] Offset=912009472
+[Metadata] Found blk.17.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=912021760
+[Metadata] Found blk.17.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=913791232
+[Metadata] Found blk.17.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=919099648
+[Metadata] Found blk.17.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=924408064
+[Metadata] Found blk.18.attn_norm.weight: Type=0 Dims=[3072] Offset=926177536
+[Metadata] Found blk.18.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=926189824
+[Metadata] Found blk.18.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=940345600
+[Metadata] Found blk.18.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=954501376
+[Metadata] Found blk.18.ffn_norm.weight: Type=0 Dims=[3072] Offset=968657152
+[Metadata] Found blk.18.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=968669440
+[Metadata] Found blk.18.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=970438912
+[Metadata] Found blk.18.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=975747328
+[Metadata] Found blk.18.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=981055744
+[Metadata] Found blk.19.attn_norm.weight: Type=0 Dims=[3072] Offset=982825216
+[Metadata] Found blk.19.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=982837504
+[Metadata] Found blk.19.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1003481344
+[Metadata] Found blk.19.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1017637120
+[Metadata] Found blk.19.ffn_norm.weight: Type=0 Dims=[3072] Offset=1031792896
+[Metadata] Found blk.19.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1031805184
+[Metadata] Found blk.19.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1033574656
+[Metadata] Found blk.19.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1038883072
+[Metadata] Found blk.19.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1044191488
+[Metadata] Found blk.2.attn_norm.weight: Type=0 Dims=[3072] Offset=1046771968
+[Metadata] Found blk.2.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1046784256
+[Metadata] Found blk.2.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1060940032
+[Metadata] Found blk.2.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1075095808
+[Metadata] Found blk.2.ffn_norm.weight: Type=0 Dims=[3072] Offset=1089251584
+[Metadata] Found blk.2.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1089263872
+[Metadata] Found blk.2.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1091033344
+[Metadata] Found blk.2.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1096341760
+[Metadata] Found blk.2.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1101650176
+[Metadata] Found blk.20.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1103419648
+[Metadata] Found blk.20.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1117575424
+[Metadata] Found blk.20.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1131731200
+[Metadata] Found blk.20.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1133500672
+[Metadata] Found blk.20.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1138809088
+[Metadata] Found blk.20.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1144117504
+[Metadata] Found blk.3.attn_norm.weight: Type=0 Dims=[3072] Offset=1145886976
+[Metadata] Found blk.3.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1145899264
+[Metadata] Found blk.3.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1160055040
+[Metadata] Found blk.3.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1174210816
+[Metadata] Found blk.3.ffn_norm.weight: Type=0 Dims=[3072] Offset=1188366592
+[Metadata] Found blk.3.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1188378880
+[Metadata] Found blk.3.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1190148352
+[Metadata] Found blk.3.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1195456768
+[Metadata] Found blk.3.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1200765184
+[Metadata] Found blk.4.attn_norm.weight: Type=0 Dims=[3072] Offset=1203345664
+[Metadata] Found blk.4.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1203357952
+[Metadata] Found blk.4.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1224001792
+[Metadata] Found blk.4.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1238157568
+[Metadata] Found blk.4.ffn_norm.weight: Type=0 Dims=[3072] Offset=1252313344
+[Metadata] Found blk.4.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1252325632
+[Metadata] Found blk.4.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1254095104
+[Metadata] Found blk.4.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1259403520
+[Metadata] Found blk.4.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1264711936
+[Metadata] Found blk.5.attn_norm.weight: Type=0 Dims=[3072] Offset=1266481408
+[Metadata] Found blk.5.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1266493696
+[Metadata] Found blk.5.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1280649472
+[Metadata] Found blk.5.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1294805248
+[Metadata] Found blk.5.ffn_norm.weight: Type=0 Dims=[3072] Offset=1308961024
+[Metadata] Found blk.5.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1308973312
+[Metadata] Found blk.5.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1310742784
+[Metadata] Found blk.5.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1316051200
+[Metadata] Found blk.5.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1321359616
+[Metadata] Found blk.6.attn_norm.weight: Type=0 Dims=[3072] Offset=1323129088
+[Metadata] Found blk.6.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1323141376
+[Metadata] Found blk.6.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1337297152
+[Metadata] Found blk.6.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1351452928
+[Metadata] Found blk.6.ffn_norm.weight: Type=0 Dims=[3072] Offset=1365608704
+[Metadata] Found blk.6.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1365620992
+[Metadata] Found blk.6.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1367390464
+[Metadata] Found blk.6.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1372698880
+[Metadata] Found blk.6.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1378007296
+[Metadata] Found blk.7.attn_norm.weight: Type=0 Dims=[3072] Offset=1380587776
+[Metadata] Found blk.7.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1380600064
+[Metadata] Found blk.7.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1401243904
+[Metadata] Found blk.7.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1415399680
+[Metadata] Found blk.7.ffn_norm.weight: Type=0 Dims=[3072] Offset=1429555456
+[Metadata] Found blk.7.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1429567744
+[Metadata] Found blk.7.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1431337216
+[Metadata] Found blk.7.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1436645632
+[Metadata] Found blk.7.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1441954048
+[Metadata] Found blk.8.attn_norm.weight: Type=0 Dims=[3072] Offset=1443723520
+[Metadata] Found blk.8.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1443735808
+[Metadata] Found blk.8.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1457891584
+[Metadata] Found blk.8.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1472047360
+[Metadata] Found blk.8.ffn_norm.weight: Type=0 Dims=[3072] Offset=1486203136
+[Metadata] Found blk.8.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1486215424
+[Metadata] Found blk.8.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1487984896
+[Metadata] Found blk.8.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1493293312
+[Metadata] Found blk.8.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1498601728
+[Metadata] Found blk.9.attn_norm.weight: Type=0 Dims=[3072] Offset=1500371200
+[Metadata] Found blk.9.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1500383488
+[Metadata] Found blk.9.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1514539264
+[Metadata] Found blk.9.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1528695040
+[Metadata] Found blk.9.ffn_norm.weight: Type=0 Dims=[3072] Offset=1542850816
+[Metadata] Found blk.9.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1542863104
+[Metadata] Found blk.9.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1544632576
+[Metadata] Found blk.9.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1549940992
+[Metadata] Found blk.9.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1555249408
+[Metadata] Found blk.20.attn_norm.weight: Type=0 Dims=[3072] Offset=1557829888
+[Metadata] Found blk.20.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1557842176
+[Metadata] Found blk.20.ffn_norm.weight: Type=0 Dims=[3072] Offset=1578486016
+[Metadata] Found blk.21.attn_norm.weight: Type=0 Dims=[3072] Offset=1578498304
+[Metadata] Found blk.21.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1578510592
+[Metadata] Found blk.21.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1592666368
+[Metadata] Found blk.21.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1606822144
+[Metadata] Found blk.21.ffn_norm.weight: Type=0 Dims=[3072] Offset=1620977920
+[Metadata] Found blk.21.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1620990208
+[Metadata] Found blk.21.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1622759680
+[Metadata] Found blk.21.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1628068096
+[Metadata] Found blk.21.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1633376512
+[Metadata] Found blk.22.attn_norm.weight: Type=0 Dims=[3072] Offset=1635145984
+[Metadata] Found blk.22.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1635158272
+[Metadata] Found blk.22.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1649314048
+[Metadata] Found blk.22.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1663469824
+[Metadata] Found blk.22.ffn_norm.weight: Type=0 Dims=[3072] Offset=1677625600
+[Metadata] Found blk.22.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1677637888
+[Metadata] Found blk.22.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1679407360
+[Metadata] Found blk.22.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1684715776
+[Metadata] Found blk.22.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1690024192
+[Metadata] Found blk.23.attn_norm.weight: Type=0 Dims=[3072] Offset=1691793664
+[Metadata] Found blk.23.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1691805952
+[Metadata] Found blk.23.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1712449792
+[Metadata] Found blk.23.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1726605568
+[Metadata] Found blk.23.ffn_norm.weight: Type=0 Dims=[3072] Offset=1740761344
+[Metadata] Found blk.23.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1740773632
+[Metadata] Found blk.23.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1742543104
+[Metadata] Found blk.23.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1747851520
+[Metadata] Found blk.23.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1753159936
+[Metadata] Found blk.24.attn_norm.weight: Type=0 Dims=[3072] Offset=1755740416
+[Metadata] Found blk.24.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1755752704
+[Metadata] Found blk.24.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1776396544
+[Metadata] Found blk.24.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1790552320
+[Metadata] Found blk.24.ffn_norm.weight: Type=0 Dims=[3072] Offset=1804708096
+[Metadata] Found blk.24.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1804720384
+[Metadata] Found blk.24.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1806489856
+[Metadata] Found blk.24.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1811798272
+[Metadata] Found blk.24.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1817106688
+[Metadata] Found blk.25.attn_norm.weight: Type=0 Dims=[3072] Offset=1819687168
+[Metadata] Found blk.25.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1819699456
+[Metadata] Found blk.25.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1840343296
+[Metadata] Found blk.25.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1854499072
+[Metadata] Found blk.25.ffn_norm.weight: Type=0 Dims=[3072] Offset=1868654848
+[Metadata] Found blk.25.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1868667136
+[Metadata] Found blk.25.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1870436608
+[Metadata] Found blk.25.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1875745024
+[Metadata] Found blk.25.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1881053440
+[Metadata] Found blk.26.attn_norm.weight: Type=0 Dims=[3072] Offset=1883633920
+[Metadata] Found blk.26.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1883646208
+[Metadata] Found blk.26.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1904290048
+[Metadata] Found blk.26.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1918445824
+[Metadata] Found blk.26.ffn_norm.weight: Type=0 Dims=[3072] Offset=1932601600
+[Metadata] Found blk.26.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1932613888
+[Metadata] Found blk.26.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1934383360
+[Metadata] Found blk.26.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1939691776
+[Metadata] Found blk.26.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1945000192
+[Metadata] Found blk.27.attn_norm.weight: Type=0 Dims=[3072] Offset=1947580672
+[Metadata] Found blk.27.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1947592960
+[Metadata] Found blk.27.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1968236800
+[Metadata] Found blk.27.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1982392576
+[Metadata] Found blk.27.ffn_norm.weight: Type=0 Dims=[3072] Offset=1996548352
+[Metadata] Found blk.27.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1996560640
+[Metadata] Found blk.27.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1998330112
+[Metadata] Found blk.27.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=2003638528
+[Metadata] Found blk.27.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=2008946944
+[Metadata] Found output_norm.weight: Type=0 Dims=[3072] Offset=2011527424
+[BindlessLoader] Opening GGUF: "D:\\shimmy-test-models\\gguf_collection\\Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+[BindlessLoader] File size: 2019377696 bytes (1925.83 MB)
+[BindlessLoader] Scanning Metadata...
+[Metadata] Scanning 35 KV pairs...
+[Metadata] general.architecture = llama
+[Metadata] general.name = Llama 3.2 3B Instruct
+[Metadata] general.basename = Llama-3.2
+[Metadata] llama.block_count = 28
+[Metadata] llama.context_length = 131072
+[Metadata] llama.embedding_length = 3072
+[Metadata] llama.feed_forward_length = 8192
+[Metadata] llama.attention.head_count = 24
+[Metadata] llama.attention.head_count_kv = 8
+[Metadata] llama.rope.freq_base = 500000
+[Metadata] llama.attention.layer_norm_rms_epsilon = 0.00001
+[Metadata] general.file_type = 15
+[Metadata] tokenizer.ggml.model = gpt2
+[Metadata] Found rope_freqs.weight: Type=0 Dims=[64] Offset=0
+[Metadata] Found token_embd.weight: Type=14 Dims=[3072, 128256] Offset=256
+[Metadata] Found blk.0.attn_norm.weight: Type=0 Dims=[3072] Offset=323205376
+[Metadata] Found blk.0.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=323217664
+[Metadata] Found blk.0.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=343861504
+[Metadata] Found blk.0.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=358017280
+[Metadata] Found blk.0.ffn_norm.weight: Type=0 Dims=[3072] Offset=372173056
+[Metadata] Found blk.0.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=372185344
+[Metadata] Found blk.0.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=373954816
+[Metadata] Found blk.0.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=379263232
+[Metadata] Found blk.0.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=384571648
+[Metadata] Found blk.1.attn_norm.weight: Type=0 Dims=[3072] Offset=387152128
+[Metadata] Found blk.1.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=387164416
+[Metadata] Found blk.1.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=407808256
+[Metadata] Found blk.1.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=421964032
+[Metadata] Found blk.1.ffn_norm.weight: Type=0 Dims=[3072] Offset=436119808
+[Metadata] Found blk.1.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=436132096
+[Metadata] Found blk.1.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=437901568
+[Metadata] Found blk.1.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=443209984
+[Metadata] Found blk.1.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=448518400
+[Metadata] Found blk.10.attn_norm.weight: Type=0 Dims=[3072] Offset=451098880
+[Metadata] Found blk.10.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=451111168
+[Metadata] Found blk.10.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=471755008
+[Metadata] Found blk.10.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=485910784
+[Metadata] Found blk.10.ffn_norm.weight: Type=0 Dims=[3072] Offset=500066560
+[Metadata] Found blk.10.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=500078848
+[Metadata] Found blk.10.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=501848320
+[Metadata] Found blk.10.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=507156736
+[Metadata] Found blk.10.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=512465152
+[Metadata] Found blk.11.attn_norm.weight: Type=0 Dims=[3072] Offset=515045632
+[Metadata] Found blk.11.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=515057920
+[Metadata] Found blk.11.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=529213696
+[Metadata] Found blk.11.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=543369472
+[Metadata] Found blk.11.ffn_norm.weight: Type=0 Dims=[3072] Offset=557525248
+[Metadata] Found blk.11.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=557537536
+[Metadata] Found blk.11.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=559307008
+[Metadata] Found blk.11.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=564615424
+[Metadata] Found blk.11.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=569923840
+[Metadata] Found blk.12.attn_norm.weight: Type=0 Dims=[3072] Offset=571693312
+[Metadata] Found blk.12.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=571705600
+[Metadata] Found blk.12.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=585861376
+[Metadata] Found blk.12.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=600017152
+[Metadata] Found blk.12.ffn_norm.weight: Type=0 Dims=[3072] Offset=614172928
+[Metadata] Found blk.12.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=614185216
+[Metadata] Found blk.12.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=615954688
+[Metadata] Found blk.12.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=621263104
+[Metadata] Found blk.12.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=626571520
+[Metadata] Found blk.13.attn_norm.weight: Type=0 Dims=[3072] Offset=628340992
+[Metadata] Found blk.13.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=628353280
+[Metadata] Found blk.13.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=648997120
+[Metadata] Found blk.13.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=663152896
+[Metadata] Found blk.13.ffn_norm.weight: Type=0 Dims=[3072] Offset=677308672
+[Metadata] Found blk.13.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=677320960
+[Metadata] Found blk.13.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=679090432
+[Metadata] Found blk.13.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=684398848
+[Metadata] Found blk.13.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=689707264
+[Metadata] Found blk.14.attn_norm.weight: Type=0 Dims=[3072] Offset=692287744
+[Metadata] Found blk.14.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=692300032
+[Metadata] Found blk.14.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=706455808
+[Metadata] Found blk.14.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=720611584
+[Metadata] Found blk.14.ffn_norm.weight: Type=0 Dims=[3072] Offset=734767360
+[Metadata] Found blk.14.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=734779648
+[Metadata] Found blk.14.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=736549120
+[Metadata] Found blk.14.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=741857536
+[Metadata] Found blk.14.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=747165952
+[Metadata] Found blk.15.attn_norm.weight: Type=0 Dims=[3072] Offset=748935424
+[Metadata] Found blk.15.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=748947712
+[Metadata] Found blk.15.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=763103488
+[Metadata] Found blk.15.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=777259264
+[Metadata] Found blk.15.ffn_norm.weight: Type=0 Dims=[3072] Offset=791415040
+[Metadata] Found blk.15.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=791427328
+[Metadata] Found blk.15.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=793196800
+[Metadata] Found blk.15.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=798505216
+[Metadata] Found blk.15.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=803813632
+[Metadata] Found blk.16.attn_norm.weight: Type=0 Dims=[3072] Offset=805583104
+[Metadata] Found blk.16.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=805595392
+[Metadata] Found blk.16.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=826239232
+[Metadata] Found blk.16.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=840395008
+[Metadata] Found blk.16.ffn_norm.weight: Type=0 Dims=[3072] Offset=854550784
+[Metadata] Found blk.16.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=854563072
+[Metadata] Found blk.16.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=856332544
+[Metadata] Found blk.16.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=861640960
+[Metadata] Found blk.16.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=866949376
+[Metadata] Found blk.17.attn_norm.weight: Type=0 Dims=[3072] Offset=869529856
+[Metadata] Found blk.17.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=869542144
+[Metadata] Found blk.17.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=883697920
+[Metadata] Found blk.17.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=897853696
+[Metadata] Found blk.17.ffn_norm.weight: Type=0 Dims=[3072] Offset=912009472
+[Metadata] Found blk.17.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=912021760
+[Metadata] Found blk.17.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=913791232
+[Metadata] Found blk.17.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=919099648
+[Metadata] Found blk.17.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=924408064
+[Metadata] Found blk.18.attn_norm.weight: Type=0 Dims=[3072] Offset=926177536
+[Metadata] Found blk.18.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=926189824
+[Metadata] Found blk.18.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=940345600
+[Metadata] Found blk.18.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=954501376
+[Metadata] Found blk.18.ffn_norm.weight: Type=0 Dims=[3072] Offset=968657152
+[Metadata] Found blk.18.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=968669440
+[Metadata] Found blk.18.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=970438912
+[Metadata] Found blk.18.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=975747328
+[Metadata] Found blk.18.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=981055744
+[Metadata] Found blk.19.attn_norm.weight: Type=0 Dims=[3072] Offset=982825216
+[Metadata] Found blk.19.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=982837504
+[Metadata] Found blk.19.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1003481344
+[Metadata] Found blk.19.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1017637120
+[Metadata] Found blk.19.ffn_norm.weight: Type=0 Dims=[3072] Offset=1031792896
+[Metadata] Found blk.19.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1031805184
+[Metadata] Found blk.19.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1033574656
+[Metadata] Found blk.19.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1038883072
+[Metadata] Found blk.19.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1044191488
+[Metadata] Found blk.2.attn_norm.weight: Type=0 Dims=[3072] Offset=1046771968
+[Metadata] Found blk.2.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1046784256
+[Metadata] Found blk.2.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1060940032
+[Metadata] Found blk.2.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1075095808
+[Metadata] Found blk.2.ffn_norm.weight: Type=0 Dims=[3072] Offset=1089251584
+[Metadata] Found blk.2.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1089263872
+[Metadata] Found blk.2.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1091033344
+[Metadata] Found blk.2.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1096341760
+[Metadata] Found blk.2.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1101650176
+[Metadata] Found blk.20.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1103419648
+[Metadata] Found blk.20.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1117575424
+[Metadata] Found blk.20.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1131731200
+[Metadata] Found blk.20.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1133500672
+[Metadata] Found blk.20.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1138809088
+[Metadata] Found blk.20.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1144117504
+[Metadata] Found blk.3.attn_norm.weight: Type=0 Dims=[3072] Offset=1145886976
+[Metadata] Found blk.3.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1145899264
+[Metadata] Found blk.3.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1160055040
+[Metadata] Found blk.3.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1174210816
+[Metadata] Found blk.3.ffn_norm.weight: Type=0 Dims=[3072] Offset=1188366592
+[Metadata] Found blk.3.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1188378880
+[Metadata] Found blk.3.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1190148352
+[Metadata] Found blk.3.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1195456768
+[Metadata] Found blk.3.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1200765184
+[Metadata] Found blk.4.attn_norm.weight: Type=0 Dims=[3072] Offset=1203345664
+[Metadata] Found blk.4.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1203357952
+[Metadata] Found blk.4.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1224001792
+[Metadata] Found blk.4.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1238157568
+[Metadata] Found blk.4.ffn_norm.weight: Type=0 Dims=[3072] Offset=1252313344
+[Metadata] Found blk.4.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1252325632
+[Metadata] Found blk.4.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1254095104
+[Metadata] Found blk.4.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1259403520
+[Metadata] Found blk.4.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1264711936
+[Metadata] Found blk.5.attn_norm.weight: Type=0 Dims=[3072] Offset=1266481408
+[Metadata] Found blk.5.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1266493696
+[Metadata] Found blk.5.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1280649472
+[Metadata] Found blk.5.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1294805248
+[Metadata] Found blk.5.ffn_norm.weight: Type=0 Dims=[3072] Offset=1308961024
+[Metadata] Found blk.5.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1308973312
+[Metadata] Found blk.5.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1310742784
+[Metadata] Found blk.5.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1316051200
+[Metadata] Found blk.5.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1321359616
+[Metadata] Found blk.6.attn_norm.weight: Type=0 Dims=[3072] Offset=1323129088
+[Metadata] Found blk.6.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1323141376
+[Metadata] Found blk.6.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1337297152
+[Metadata] Found blk.6.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1351452928
+[Metadata] Found blk.6.ffn_norm.weight: Type=0 Dims=[3072] Offset=1365608704
+[Metadata] Found blk.6.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1365620992
+[Metadata] Found blk.6.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1367390464
+[Metadata] Found blk.6.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1372698880
+[Metadata] Found blk.6.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1378007296
+[Metadata] Found blk.7.attn_norm.weight: Type=0 Dims=[3072] Offset=1380587776
+[Metadata] Found blk.7.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1380600064
+[Metadata] Found blk.7.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1401243904
+[Metadata] Found blk.7.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1415399680
+[Metadata] Found blk.7.ffn_norm.weight: Type=0 Dims=[3072] Offset=1429555456
+[Metadata] Found blk.7.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1429567744
+[Metadata] Found blk.7.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1431337216
+[Metadata] Found blk.7.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1436645632
+[Metadata] Found blk.7.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1441954048
+[Metadata] Found blk.8.attn_norm.weight: Type=0 Dims=[3072] Offset=1443723520
+[Metadata] Found blk.8.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1443735808
+[Metadata] Found blk.8.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1457891584
+[Metadata] Found blk.8.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1472047360
+[Metadata] Found blk.8.ffn_norm.weight: Type=0 Dims=[3072] Offset=1486203136
+[Metadata] Found blk.8.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1486215424
+[Metadata] Found blk.8.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1487984896
+[Metadata] Found blk.8.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1493293312
+[Metadata] Found blk.8.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1498601728
+[Metadata] Found blk.9.attn_norm.weight: Type=0 Dims=[3072] Offset=1500371200
+[Metadata] Found blk.9.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1500383488
+[Metadata] Found blk.9.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1514539264
+[Metadata] Found blk.9.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1528695040
+[Metadata] Found blk.9.ffn_norm.weight: Type=0 Dims=[3072] Offset=1542850816
+[Metadata] Found blk.9.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1542863104
+[Metadata] Found blk.9.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1544632576
+[Metadata] Found blk.9.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1549940992
+[Metadata] Found blk.9.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1555249408
+[Metadata] Found blk.20.attn_norm.weight: Type=0 Dims=[3072] Offset=1557829888
+[Metadata] Found blk.20.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1557842176
+[Metadata] Found blk.20.ffn_norm.weight: Type=0 Dims=[3072] Offset=1578486016
+[Metadata] Found blk.21.attn_norm.weight: Type=0 Dims=[3072] Offset=1578498304
+[Metadata] Found blk.21.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1578510592
+[Metadata] Found blk.21.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1592666368
+[Metadata] Found blk.21.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1606822144
+[Metadata] Found blk.21.ffn_norm.weight: Type=0 Dims=[3072] Offset=1620977920
+[Metadata] Found blk.21.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1620990208
+[Metadata] Found blk.21.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1622759680
+[Metadata] Found blk.21.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1628068096
+[Metadata] Found blk.21.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1633376512
+[Metadata] Found blk.22.attn_norm.weight: Type=0 Dims=[3072] Offset=1635145984
+[Metadata] Found blk.22.ffn_down.weight: Type=12 Dims=[8192, 3072] Offset=1635158272
+[Metadata] Found blk.22.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1649314048
+[Metadata] Found blk.22.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1663469824
+[Metadata] Found blk.22.ffn_norm.weight: Type=0 Dims=[3072] Offset=1677625600
+[Metadata] Found blk.22.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1677637888
+[Metadata] Found blk.22.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1679407360
+[Metadata] Found blk.22.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1684715776
+[Metadata] Found blk.22.attn_v.weight: Type=12 Dims=[3072, 1024] Offset=1690024192
+[Metadata] Found blk.23.attn_norm.weight: Type=0 Dims=[3072] Offset=1691793664
+[Metadata] Found blk.23.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1691805952
+[Metadata] Found blk.23.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1712449792
+[Metadata] Found blk.23.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1726605568
+[Metadata] Found blk.23.ffn_norm.weight: Type=0 Dims=[3072] Offset=1740761344
+[Metadata] Found blk.23.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1740773632
+[Metadata] Found blk.23.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1742543104
+[Metadata] Found blk.23.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1747851520
+[Metadata] Found blk.23.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1753159936
+[Metadata] Found blk.24.attn_norm.weight: Type=0 Dims=[3072] Offset=1755740416
+[Metadata] Found blk.24.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1755752704
+[Metadata] Found blk.24.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1776396544
+[Metadata] Found blk.24.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1790552320
+[Metadata] Found blk.24.ffn_norm.weight: Type=0 Dims=[3072] Offset=1804708096
+[Metadata] Found blk.24.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1804720384
+[Metadata] Found blk.24.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1806489856
+[Metadata] Found blk.24.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1811798272
+[Metadata] Found blk.24.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1817106688
+[Metadata] Found blk.25.attn_norm.weight: Type=0 Dims=[3072] Offset=1819687168
+[Metadata] Found blk.25.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1819699456
+[Metadata] Found blk.25.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1840343296
+[Metadata] Found blk.25.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1854499072
+[Metadata] Found blk.25.ffn_norm.weight: Type=0 Dims=[3072] Offset=1868654848
+[Metadata] Found blk.25.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1868667136
+[Metadata] Found blk.25.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1870436608
+[Metadata] Found blk.25.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1875745024
+[Metadata] Found blk.25.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1881053440
+[Metadata] Found blk.26.attn_norm.weight: Type=0 Dims=[3072] Offset=1883633920
+[Metadata] Found blk.26.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1883646208
+[Metadata] Found blk.26.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1904290048
+[Metadata] Found blk.26.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1918445824
+[Metadata] Found blk.26.ffn_norm.weight: Type=0 Dims=[3072] Offset=1932601600
+[Metadata] Found blk.26.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1932613888
+[Metadata] Found blk.26.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1934383360
+[Metadata] Found blk.26.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=1939691776
+[Metadata] Found blk.26.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=1945000192
+[Metadata] Found blk.27.attn_norm.weight: Type=0 Dims=[3072] Offset=1947580672
+[Metadata] Found blk.27.ffn_down.weight: Type=14 Dims=[8192, 3072] Offset=1947592960
+[Metadata] Found blk.27.ffn_gate.weight: Type=12 Dims=[3072, 8192] Offset=1968236800
+[Metadata] Found blk.27.ffn_up.weight: Type=12 Dims=[3072, 8192] Offset=1982392576
+[Metadata] Found blk.27.ffn_norm.weight: Type=0 Dims=[3072] Offset=1996548352
+[Metadata] Found blk.27.attn_k.weight: Type=12 Dims=[3072, 1024] Offset=1996560640
+[Metadata] Found blk.27.attn_output.weight: Type=12 Dims=[3072, 3072] Offset=1998330112
+[Metadata] Found blk.27.attn_q.weight: Type=12 Dims=[3072, 3072] Offset=2003638528
+[Metadata] Found blk.27.attn_v.weight: Type=14 Dims=[3072, 1024] Offset=2008946944
+[Metadata] Found output_norm.weight: Type=0 Dims=[3072] Offset=2011527424
+[BindlessLoader] Found 255 tensors. Data starts at 7837984.
+[BindlessLoader] Uploading to VRAM...
+[BindlessLoader] Launching Preflight Fusion...
+[Preflight] Spinning off Math Tables & Tensor Banks (From RAM)...
+[Preflight] RoPE Lookup Table: 131072×64 = 16777216 entries (65536.0 KB, Base=500000, Dim=128, Scale=1, Mode=native)
+[Preflight] Extracting Norms: 28 layers, Total Size 0.67 MB
+[BindlessLoader] Upload Complete.

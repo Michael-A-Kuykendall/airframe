@@ -1,0 +1,13 @@
+[
+  {
+    "label": "16384-linear",
+    "max_ctx": 16384,
+    "rope_scale": "0.125000",
+    "filler_target": 15000,
+    "approx_prompt_tokens": 15064,
+    "pass": true,
+    "found_keyword": true,
+    "response_text": "\r\nThe secret code mentioned earlier in this document is: XYLOPHONE-7743.",
+    "error": ""
+  }
+]

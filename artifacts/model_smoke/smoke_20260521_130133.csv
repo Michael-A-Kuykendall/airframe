@@ -1,0 +1,8 @@
+"Model","Result","Detail"
+"gemma-2-2b-it-Q4_K_M.gguf","LIMIT","KNOWN LIMIT: Output head = 2.19 GB exceeds WebGPU 2 GB buffer limit. Needs output head chunking."
+"TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf","FAIL","empty response"
+"Llama-3.2-1B-Instruct-Q4_K_M.gguf","FAIL","empty response"
+"Llama-3.2-3B-Instruct-Q4_K_M.gguf","FAIL","empty response"
+"phi-2.Q4_K_M.gguf","FAIL","empty response"
+"starcoder2-3b-Q4_K_M.gguf","FAIL","empty response"
+"gpt2.Q4_K_M.gguf","FAIL","empty response"
