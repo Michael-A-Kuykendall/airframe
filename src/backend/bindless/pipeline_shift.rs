@@ -201,9 +201,8 @@ impl RopeShiftPipeline {
             cpass.set_pipeline(&self.pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
 
-            // Pure copy kernel: each thread copies one (seq, head, dim) element.
-            // Workgroup size in shader: (64, 4, 1)
-            // x = dimension index (0..head_dim), y = kv_head, z = seq offset
+            // Pure copy kernel — one thread per element, indexed by dim x kv_head x seq offset.
+            // Shader workgroup is 64x4x1; dispatch covers head_dim x n_head_kv x elements_to_shift.
             let elements_to_shift = if old_seq_len > keep_sink + shift_amt {
                 old_seq_len - (keep_sink + shift_amt)
             } else {

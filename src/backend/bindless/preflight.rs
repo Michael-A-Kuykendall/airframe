@@ -87,10 +87,9 @@ impl PreflightResources {
                     return theta * scale; // plain linear or native
                 }
                 let lambda = std::f32::consts::TAU / theta; // wavelength = 2*pi / theta
-                // ramp: 1.0 when lambda is short (high-freq), 0.0 when lambda is long (low-freq).
-                // Per YaRN paper: high-freq dims need NO scaling (already fine at short distances);
-                // low-freq dims need full linear scaling to cover extended distances.
-                // Use (1-ramp) to drive the scaling: low-freq (ramp→0) gets full scale, high-freq (ramp→1) gets none.
+                // ramp: 1.0 at short wavelengths, 0.0 at long wavelengths.
+                // Per YaRN: high-freq dims skip scaling; low-freq dims get full linear scaling.
+                // Lerp: ramp drives theta toward 1.0 for high-freq, toward scale for low-freq.
                 let ramp = ((l_train as f32 / lambda - alpha) / (beta - alpha)).clamp(0.0, 1.0);
                 theta * ((1.0 - ramp) * scale + ramp)
             })
@@ -108,7 +107,7 @@ impl PreflightResources {
         table
     }
 
-    fn upload_rope_table(device: &wgpu::Device, data: &[f32], scale: f32, spec: &ModelSpec) -> wgpu::Buffer {
+    fn upload_rope_table(device: &wgpu::Device, rope_floats: &[f32], scale: f32, spec: &ModelSpec) -> wgpu::Buffer {
         let n_pairs = spec.rope_dim / 2;
         let max_dist = spec.n_ctx;
         let table_len = max_dist * n_pairs * 2;
@@ -122,7 +121,7 @@ impl PreflightResources {
         );
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("RoPE Cos/Sin Lookup Table"),
-            contents: bytemuck::cast_slice(data),
+            contents: bytemuck::cast_slice(rope_floats),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         })
     }
@@ -134,9 +133,9 @@ impl PreflightResources {
         spec: &ModelSpec,
     ) -> wgpu::Buffer {
         // We need to extract:
-        // 1. attn_norm (per layer)
-        // 2. ffn_norm (per layer)
-        // 3. output_norm (final)
+        // 1. attn_norm — one per layer
+        // 2. ffn_norm — one per layer
+        // 3. output_norm — final layer
 
         let dim = spec.n_embd;
         let n_layers = spec.n_layer;
