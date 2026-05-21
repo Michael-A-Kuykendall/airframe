@@ -41,9 +41,6 @@ $LargeModels = @(
 
 $Models = if ($IncludeLarge) { $VerifiedModels + $LargeModels } else { $VerifiedModels }
 
-$Prompt = "The capital of France is"
-$CodePrompt = "def hello_world():"
-
 $null = New-Item -ItemType Directory -Force -Path $OutputDir
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $logFile   = Join-Path $OutputDir "smoke_$timestamp.log"
