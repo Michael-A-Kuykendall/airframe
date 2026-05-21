@@ -33,6 +33,7 @@ dependencies = [
 name = "airframe"
 version = "0.0.1"
 dependencies = [
+ "aho-corasick",
  "bytemuck",
  "byteorder",
  "chrono",
