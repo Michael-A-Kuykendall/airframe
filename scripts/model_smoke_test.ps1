@@ -60,7 +60,7 @@ function Write-Log {
     param([string]$Msg)
     $line = "[$(Get-Date -Format 'HH:mm:ss')] $Msg"
     Write-Host $line
-    Add-Content -Path $logFile -Value $line
+    [System.IO.File]::AppendAllText($logFile, $line + [System.Environment]::NewLine)
 }
 
 function Wait-ServerReady {
