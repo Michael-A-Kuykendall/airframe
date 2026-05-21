@@ -13,6 +13,15 @@ pub struct DequantParams {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct DequantAnyParams {
+    pub offset_bytes: u32,
+    pub count: u32,
+    pub quant_type: u32,
+    pub pad: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MatMulParams {
     pub n: u32,
     pub k: u32,
@@ -56,7 +65,7 @@ pub struct LayerParams {
     pub rms_eps: f32,
     pub ffn_dim: u32, // Feed-forward intermediate dimension (e.g. 5632 for TinyLlama)
     pub temp_stride: u32, // Per-token temp buffer stride in floats (e.g. 16384)
-    pub padding: u32,
+    pub quant_type: u32, // GGML type: 2=Q4_0, 12=Q4_K
 }
 
 #[repr(C)]
@@ -893,6 +902,154 @@ impl BindlessPipeline {
         result
     }
 
+    /// Dequantize any supported GGML quant type to f32 via GPU.
+    ///
+    /// Uses `sh_dequant_any.wgsl` which supports:
+    /// 0=F32, 1=F16, 2=Q4_0, 8=Q8_0, 12=Q4_K, 13=Q5_K, 14=Q6_K
+    ///
+    /// The pipeline is created on each call — intended for validation/testing,
+    /// not for hot-path inference.
+    pub fn run_dequant_any_request(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        model: &BindlessModel,
+        offset_bytes: u32,
+        count: u32,
+        quant_type: u32,
+    ) -> Vec<f32> {
+        let params = DequantAnyParams {
+            offset_bytes,
+            count,
+            quant_type,
+            pad: 0,
+        };
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("DequantAny Params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let output_size = (count as usize * 4) as u64;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("DequantAny Output"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        // Build a one-shot pipeline for the multi-type dequant shader.
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("DequantAny Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let shader_src = include_str!("sh_dequant_any.wgsl");
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("DequantAny Shader"),
+            source: wgpu::ShaderSource::Wgsl(shader_src.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("DequantAny Pipeline Layout"),
+            bind_group_layouts: &[&layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("DequantAny Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("DequantAny BindGroup"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model.gpu_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = (count + 63) / 64;
+            cpass.dispatch_workgroups(workgroups, 1, 1);
+        }
+
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("DequantAny Staging"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_size);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+        loop {
+            device.poll(wgpu::PollType::Poll).unwrap();
+            if let Ok(res) = rx.try_recv() {
+                res.unwrap();
+                break;
+            }
+        }
+
+        let data = slice.get_mapped_range();
+        bytemuck::cast_slice(&data).to_vec()
+    }
+
     /// Run MatMul Test (GEMV)
     pub fn run_matmul_test(
         &self,
@@ -1350,16 +1507,21 @@ impl BindlessPipeline {
         let ffn_dim = spec.ff_dim as u32;
         let temp_stride = spec.temp_buffer_size as u32;
 
-        let params_base = LayerParams {
-            dim,
-            head_count: spec.n_head as u32,
-            head_count_kv: spec.n_head_kv as u32,
-            head_dim: spec.head_dim as u32,
-            rms_eps: spec.rms_eps,
-            ffn_dim,
-            temp_stride,
-            padding: 0,
-        };
+        let weight_quant_type = model
+            .metadata
+            .get_tensor_type("blk.0.attn_q.weight")
+            .unwrap_or(2);
+        let qt_v = model
+            .metadata
+            .get_tensor_type("blk.0.attn_v.weight")
+            .unwrap_or(weight_quant_type);
+        let qt_ffn_down = model
+            .metadata
+            .get_tensor_type("blk.0.ffn_down.weight")
+            .unwrap_or(weight_quant_type);
+        let packed_quant_type =
+            weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
+        let _ = packed_quant_type; // per-layer quant is computed in the loop below
 
         // 1. Buffers
         let batch_size = (input_embd.len() as u32) / dim;
@@ -1382,12 +1544,19 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
 
-        // C. Layer Params (Constant)
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Layer Params"),
-            contents: bytemuck::bytes_of(&params_base),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        // C. Layer Params (computed per-layer below; placeholder base for struct copy)
+        // NOTE: quant_type varies per layer in mixed-quant models (e.g. Q4_K_M).
+        //       Per-layer params buffers are created inside the layer loop.
+        let params_base = LayerParams {
+            dim,
+            head_count: spec.n_head as u32,
+            head_count_kv: spec.n_head_kv as u32,
+            head_dim: spec.head_dim as u32,
+            rms_eps: spec.rms_eps,
+            ffn_dim,
+            temp_stride,
+            quant_type: 0, // overridden per-layer below
+        };
 
         // D. Output Logits
         // Only computed for the LAST token in the sequence (usually).
@@ -1463,12 +1632,27 @@ impl BindlessPipeline {
         // 2. Prepare Layers (Offsets & BindGroups)
         let mut layer_bind_groups = Vec::new();
         let mut _offset_buffers = Vec::new(); // Keep alive
+        let mut _params_buffers: Vec<wgpu::Buffer> = Vec::new(); // Keep alive
 
         for i in 0..layer_count {
             let offsets = model
                 .metadata
                 .get_layer_offsets(i, spec.arch_string())
                 .expect(&format!("Missing offsets for layer {}", i));
+
+            // Per-layer quant types (mixed-quant models vary by layer)
+            let lqt_main = model.metadata.get_tensor_type(&format!("blk.{}.attn_q.weight", i)).unwrap_or(2);
+            let lqt_v    = model.metadata.get_tensor_type(&format!("blk.{}.attn_v.weight", i)).unwrap_or(lqt_main);
+            let lqt_down = model.metadata.get_tensor_type(&format!("blk.{}.ffn_down.weight", i)).unwrap_or(lqt_main);
+            let layer_params_i = LayerParams {
+                quant_type: lqt_main | (lqt_v << 8) | (lqt_down << 16),
+                ..params_base
+            };
+            let params_buffer_i = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Layer {} Params", i)),
+                contents: bytemuck::bytes_of(&layer_params_i),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
             let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
                 if let Some((kv_k_layers, kv_v_layers)) = kv_state {
@@ -1508,7 +1692,7 @@ impl BindlessPipeline {
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
-                        resource: params_buffer.as_entire_binding(),
+                        resource: params_buffer_i.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 5,
@@ -1544,6 +1728,7 @@ impl BindlessPipeline {
             });
 
             _offset_buffers.push(buf);
+            _params_buffers.push(params_buffer_i);
             layer_bind_groups.push(bg);
         }
 
@@ -1605,7 +1790,8 @@ impl BindlessPipeline {
         let head_weight = model
             .metadata
             .get_tensor_offset("output.weight")
-            .expect("output.weight missing");
+            .or_else(|| model.metadata.get_tensor_offset("token_embd.weight"))
+            .unwrap_or(0);
 
         let head_params = MatMulParams {
             n: vocab_size,
