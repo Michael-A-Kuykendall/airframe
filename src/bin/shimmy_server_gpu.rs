@@ -425,6 +425,7 @@ pub struct InferenceRequest {
     /// - "creative-chatml": wrap in ChatML with creative-writer system prompt
     prompt_mode: Option<String>,
     max_tokens: Option<usize>,
+    // min_tokens reserved for future request throttling — not yet consumed by the engine
     #[allow(dead_code)]
     pub min_tokens: Option<usize>,
     ignore_eos: Option<bool>,
@@ -495,7 +496,7 @@ pub struct JobRequest {
 }
 
 #[derive(Serialize)]
-#[allow(dead_code)]
+// Streaming event types — defined for future SSE streaming support, not yet active
 #[allow(dead_code)]
 struct StreamTokenEvent {
     token: String,
@@ -503,7 +504,7 @@ struct StreamTokenEvent {
 }
 
 #[derive(Serialize)]
-#[allow(dead_code)]
+// Streaming done event — counterpart to StreamTokenEvent, not yet active
 #[allow(dead_code)]
 struct StreamDoneEvent {
     done: bool,
@@ -1287,6 +1288,7 @@ fn build_templated_prompt(
     }
 }
 
+// run_inference_completion takes many args by design — GPU pipeline requires all context inline
 #[allow(clippy::too_many_arguments)]
 fn run_inference_completion(
     job_id: Option<&str>,
@@ -1434,11 +1436,10 @@ fn run_inference_completion(
         cache.reset();
     }
 
-    // Dynamic RoPE selection: use native-scale frequencies for requests that fit
-    // within the model's training context; switch to extended (YaRN) only when the
-    // total sequence would exceed it.  This prevents degraded outputs on short
-    // prompts served by an 8192-context server (rope_scale=0.25 would otherwise
-    // distort all positions, including those well within the training range).
+    // Dynamic RoPE selection: use native frequencies when the prompt fits the
+    // model training window; switch to YaRN-extended only when the total
+    // sequence exceeds the training context. Prevents rope_scale distortion
+    // on short prompts from an 8192-context server.
     if spec.rope_scale < 1.0 {
         if let Some(preflight) = model.preflight.as_ref() {
             let l_train = (spec.n_ctx as f32 * spec.rope_scale).round() as usize;
@@ -2029,7 +2030,7 @@ async fn process_inference_job(
     Ok(resp)
 }
 
-#[allow(dead_code)]
+// HTTP error helper for future streaming error path — not yet called from active code
 #[allow(dead_code)]
 fn send_error(mut stream: TcpStream, msg: &str) {
     let body = format!("{{\"error\": \"{}\"}}", msg);
@@ -2040,7 +2041,7 @@ fn send_error(mut stream: TcpStream, msg: &str) {
     let _ = stream.write_all(resp.as_bytes());
 }
 
-#[allow(dead_code)]
+// Convenience wrapper — developer mode sanitization via reason-bearing variant
 #[allow(dead_code)]
 fn sanitize_developer_output(text: &str) -> String {
     sanitize_developer_output_with_reason(text).0
