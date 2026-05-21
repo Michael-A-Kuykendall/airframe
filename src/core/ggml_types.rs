@@ -1,7 +1,7 @@
 //! GGML quantization type definitions and byte-size calculations.
 //!
 //! Implements the subset of GGML types supported by libshimmy:
-//! F32 (0), Q4_0 (2), Q4_K (12), Q6_K (14).
+//! F32 (0), F16 (1), Q4_0 (2), Q5_0 (6), Q8_0 (8), Q4_K (12), Q5_K (13), Q6_K (14).
 //!
 //! Reference: ggerganov/ggml ggml.h commit 3fd62a6a
 
@@ -12,9 +12,13 @@ use crate::core::error::{LibshimmyError, Result};
 #[repr(u32)]
 #[allow(non_camel_case_types)]
 pub enum GgmlType {
-    F32 = 0,
+    F32  = 0,
+    F16  = 1,
     Q4_0 = 2,
+    Q5_0 = 6,
+    Q8_0 = 8,
     Q4_K = 12,
+    Q5_K = 13,
     Q6_K = 14,
 }
 
@@ -22,9 +26,13 @@ impl GgmlType {
     /// Convert from raw GGML type ID to enum
     pub fn from_u32(type_id: u32) -> Result<Self> {
         match type_id {
-            0 => Ok(GgmlType::F32),
-            2 => Ok(GgmlType::Q4_0),
+            0  => Ok(GgmlType::F32),
+            1  => Ok(GgmlType::F16),
+            2  => Ok(GgmlType::Q4_0),
+            6  => Ok(GgmlType::Q5_0),
+            8  => Ok(GgmlType::Q8_0),
             12 => Ok(GgmlType::Q4_K),
+            13 => Ok(GgmlType::Q5_K),
             14 => Ok(GgmlType::Q6_K),
             _ => Err(LibshimmyError::QuantUnsupported {
                 tensor_name: "unknown".to_string(),
@@ -37,9 +45,13 @@ impl GgmlType {
     /// Get the canonical name for this GGML type
     pub fn name(&self) -> &'static str {
         match self {
-            GgmlType::F32 => "F32",
+            GgmlType::F32  => "F32",
+            GgmlType::F16  => "F16",
             GgmlType::Q4_0 => "Q4_0",
+            GgmlType::Q5_0 => "Q5_0",
+            GgmlType::Q8_0 => "Q8_0",
             GgmlType::Q4_K => "Q4_K",
+            GgmlType::Q5_K => "Q5_K",
             GgmlType::Q6_K => "Q6_K",
         }
     }
@@ -75,11 +87,31 @@ pub fn ggml_type_bytes_per_tensor(type_id: u32, element_count: usize) -> Result<
             // F32: Direct 4 bytes per element
             Ok(element_count * 4)
         }
+        GgmlType::F16 => {
+            // F16: Direct 2 bytes per element
+            Ok(element_count * 2)
+        }
         GgmlType::Q4_0 => {
             // Q4_0: 32 elements per block, 18 bytes per block
             // Block structure: 2 bytes (fp16 scale) + 16 bytes (4-bit data)
             let block_size = 32;
             let bytes_per_block = 18;
+            let num_blocks = element_count.div_ceil(block_size);
+            Ok(num_blocks * bytes_per_block)
+        }
+        GgmlType::Q5_0 => {
+            // Q5_0: 32 elements per block, 22 bytes per block
+            // Block structure: 2 bytes (fp16 scale) + 4 bytes (qh high bits) + 16 bytes (qs nibbles)
+            let block_size = 32;
+            let bytes_per_block = 22;
+            let num_blocks = element_count.div_ceil(block_size);
+            Ok(num_blocks * bytes_per_block)
+        }
+        GgmlType::Q8_0 => {
+            // Q8_0: 32 elements per block, 34 bytes per block
+            // Block structure: 2 bytes (fp16 scale) + 32 bytes (i8 values)
+            let block_size = 32;
+            let bytes_per_block = 34;
             let num_blocks = element_count.div_ceil(block_size);
             Ok(num_blocks * bytes_per_block)
         }
@@ -89,6 +121,15 @@ pub fn ggml_type_bytes_per_tensor(type_id: u32, element_count: usize) -> Result<
             // Layout: d (2B fp16) + dmin (2B fp16) + scales (12B) + qs (128B) = 144 bytes
             let superblock_size = 256;
             let bytes_per_superblock = calculate_q4_k_superblock_size();
+            let num_superblocks = element_count.div_ceil(superblock_size);
+            Ok(num_superblocks * bytes_per_superblock)
+        }
+        GgmlType::Q5_K => {
+            // Q5_K: 5-bit K-quant
+            // Block structure: 256 elements per superblock, 176 bytes per superblock
+            // Layout: d (2B fp16) + dmin (2B fp16) + scales (12B) + qh (32B) + qs (128B) = 176 bytes
+            let superblock_size = 256;
+            let bytes_per_superblock = 176;
             let num_superblocks = element_count.div_ceil(superblock_size);
             Ok(num_superblocks * bytes_per_superblock)
         }
