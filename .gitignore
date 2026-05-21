@@ -1,4 +1,5 @@
 /target
+.mcp/
 /*.py
 /*.sh
 /*.txt
