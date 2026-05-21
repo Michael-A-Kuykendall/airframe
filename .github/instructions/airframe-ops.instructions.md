@@ -199,6 +199,29 @@ Do NOT start a second server instance — the second one will crash silently and
 
 ---
 
+## Model Acceptance Protocol
+
+A model is only "supported" once all applicable gates pass. Use `.github/prompts/model-onboarding.prompt.md` as the step-by-step execution guide.
+
+**Five gates — run in order:**
+
+| Gate | Name | Requirement | Skip condition |
+|------|------|-------------|---------------|
+| 1 | `quant_verify` | All tensor types print `OK`, no `MISMATCH` | Model > 2.0 GB (buffer binding limit on RTX 3060) |
+| 2 | Smoke entry | Entry added to `$VerifiedModels` in `model_smoke_test.ps1` | None |
+| 3 | Smoke test | Model prints `PASS` or `WEAK` in `model_smoke_test.ps1` | None |
+| 4 | API schema | `id`, `choices[0].message.content`, `usage.prompt_tokens`, `usage.completion_tokens` all present | None |
+| 5 | Reasoning mode | Both `/no_think` and `/think` return coherent responses | Non-reasoning models |
+
+After all gates: update model inventory in this file, `MODEL_EXPANSION.md`, and `RELEASE_STATUS.md`.
+
+**Known non-starters (do not attempt without prior code fixes):**
+- `gemma-2-2b-it-Q4_K_M.gguf` — output head 2.19 GB > WebGPU 2 GB limit (needs output head chunking)
+- `Phi-3.5-mini-instruct.Q4_K_M.gguf` / `phi3-mini-4k-instruct-q4.gguf` — fused QKV tensors, server panics
+- Any Qwen3 model — missing QK norm shader + output head buffer limit
+
+---
+
 ## Build
 
 Server binary must be up to date before smoke testing:
