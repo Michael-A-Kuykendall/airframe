@@ -1,0 +1,612 @@
+[Metadata] Scanning 39 KV pairs...
+[Metadata] general.architecture = gemma2
+[Metadata] general.name = Gemma 2 2b It
+[Metadata] general.basename = gemma-2
+[Metadata] gemma2.context_length = 8192
+[Metadata] gemma2.embedding_length = 2304
+[Metadata] gemma2.block_count = 26
+[Metadata] gemma2.feed_forward_length = 9216
+[Metadata] gemma2.attention.head_count = 8
+[Metadata] gemma2.attention.head_count_kv = 4
+[Metadata] gemma2.attention.layer_norm_rms_epsilon = 0.000001
+[Metadata] general.file_type = 15
+[Metadata] tokenizer.ggml.model = llama
+[Metadata] Found token_embd.weight: Type=14 Dims=[2304, 256000] Offset=0
+[Metadata] Found blk.0.attn_norm.weight: Type=0 Dims=[2304] Offset=483840000
+[Metadata] Found blk.0.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=483849216
+[Metadata] Found blk.0.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=501267456
+[Metadata] Found blk.0.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=513211392
+[Metadata] Found blk.0.post_attention_norm.weight: Type=0 Dims=[2304] Offset=525155328
+[Metadata] Found blk.0.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=525164544
+[Metadata] Found blk.0.ffn_norm.weight: Type=0 Dims=[2304] Offset=525173760
+[Metadata] Found blk.0.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=525182976
+[Metadata] Found blk.0.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=526510080
+[Metadata] Found blk.0.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=529164288
+[Metadata] Found blk.0.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=531818496
+[Metadata] Found blk.1.attn_norm.weight: Type=0 Dims=[2304] Offset=533753856
+[Metadata] Found blk.1.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=533763072
+[Metadata] Found blk.1.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=551181312
+[Metadata] Found blk.1.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=563125248
+[Metadata] Found blk.1.post_attention_norm.weight: Type=0 Dims=[2304] Offset=575069184
+[Metadata] Found blk.1.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=575078400
+[Metadata] Found blk.1.ffn_norm.weight: Type=0 Dims=[2304] Offset=575087616
+[Metadata] Found blk.1.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=575096832
+[Metadata] Found blk.1.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=576423936
+[Metadata] Found blk.1.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=579078144
+[Metadata] Found blk.1.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=581732352
+[Metadata] Found blk.10.attn_norm.weight: Type=0 Dims=[2304] Offset=583667712
+[Metadata] Found blk.10.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=583676928
+[Metadata] Found blk.10.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=601095168
+[Metadata] Found blk.10.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=613039104
+[Metadata] Found blk.10.post_attention_norm.weight: Type=0 Dims=[2304] Offset=624983040
+[Metadata] Found blk.10.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=624992256
+[Metadata] Found blk.10.ffn_norm.weight: Type=0 Dims=[2304] Offset=625001472
+[Metadata] Found blk.10.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=625010688
+[Metadata] Found blk.10.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=626337792
+[Metadata] Found blk.10.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=628992000
+[Metadata] Found blk.10.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=631646208
+[Metadata] Found blk.11.attn_norm.weight: Type=0 Dims=[2304] Offset=633581568
+[Metadata] Found blk.11.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=633590784
+[Metadata] Found blk.11.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=645534720
+[Metadata] Found blk.11.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=657478656
+[Metadata] Found blk.11.post_attention_norm.weight: Type=0 Dims=[2304] Offset=669422592
+[Metadata] Found blk.11.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=669431808
+[Metadata] Found blk.11.ffn_norm.weight: Type=0 Dims=[2304] Offset=669441024
+[Metadata] Found blk.11.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=669450240
+[Metadata] Found blk.11.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=670777344
+[Metadata] Found blk.11.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=673431552
+[Metadata] Found blk.11.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=676085760
+[Metadata] Found blk.12.attn_norm.weight: Type=0 Dims=[2304] Offset=677412864
+[Metadata] Found blk.12.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=677422080
+[Metadata] Found blk.12.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=689366016
+[Metadata] Found blk.12.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=701309952
+[Metadata] Found blk.12.post_attention_norm.weight: Type=0 Dims=[2304] Offset=713253888
+[Metadata] Found blk.12.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=713263104
+[Metadata] Found blk.12.ffn_norm.weight: Type=0 Dims=[2304] Offset=713272320
+[Metadata] Found blk.12.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=713281536
+[Metadata] Found blk.12.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=714608640
+[Metadata] Found blk.12.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=717262848
+[Metadata] Found blk.12.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=719917056
+[Metadata] Found blk.13.attn_norm.weight: Type=0 Dims=[2304] Offset=721244160
+[Metadata] Found blk.13.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=721253376
+[Metadata] Found blk.13.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=738671616
+[Metadata] Found blk.13.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=750615552
+[Metadata] Found blk.13.post_attention_norm.weight: Type=0 Dims=[2304] Offset=762559488
+[Metadata] Found blk.13.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=762568704
+[Metadata] Found blk.13.ffn_norm.weight: Type=0 Dims=[2304] Offset=762577920
+[Metadata] Found blk.13.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=762587136
+[Metadata] Found blk.13.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=763914240
+[Metadata] Found blk.13.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=766568448
+[Metadata] Found blk.13.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=769222656
+[Metadata] Found blk.14.attn_norm.weight: Type=0 Dims=[2304] Offset=771158016
+[Metadata] Found blk.14.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=771167232
+[Metadata] Found blk.14.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=783111168
+[Metadata] Found blk.14.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=795055104
+[Metadata] Found blk.14.post_attention_norm.weight: Type=0 Dims=[2304] Offset=806999040
+[Metadata] Found blk.14.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=807008256
+[Metadata] Found blk.14.ffn_norm.weight: Type=0 Dims=[2304] Offset=807017472
+[Metadata] Found blk.14.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=807026688
+[Metadata] Found blk.14.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=808353792
+[Metadata] Found blk.14.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=811008000
+[Metadata] Found blk.14.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=813662208
+[Metadata] Found blk.15.attn_norm.weight: Type=0 Dims=[2304] Offset=814989312
+[Metadata] Found blk.15.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=814998528
+[Metadata] Found blk.15.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=826942464
+[Metadata] Found blk.15.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=838886400
+[Metadata] Found blk.15.post_attention_norm.weight: Type=0 Dims=[2304] Offset=850830336
+[Metadata] Found blk.15.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=850839552
+[Metadata] Found blk.15.ffn_norm.weight: Type=0 Dims=[2304] Offset=850848768
+[Metadata] Found blk.15.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=850857984
+[Metadata] Found blk.15.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=852185088
+[Metadata] Found blk.15.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=854839296
+[Metadata] Found blk.15.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=857493504
+[Metadata] Found blk.16.attn_norm.weight: Type=0 Dims=[2304] Offset=858820608
+[Metadata] Found blk.16.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=858829824
+[Metadata] Found blk.16.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=876248064
+[Metadata] Found blk.16.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=888192000
+[Metadata] Found blk.16.post_attention_norm.weight: Type=0 Dims=[2304] Offset=900135936
+[Metadata] Found blk.16.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=900145152
+[Metadata] Found blk.16.ffn_norm.weight: Type=0 Dims=[2304] Offset=900154368
+[Metadata] Found blk.16.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=900163584
+[Metadata] Found blk.16.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=901490688
+[Metadata] Found blk.16.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=904144896
+[Metadata] Found blk.16.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=906799104
+[Metadata] Found blk.17.attn_norm.weight: Type=0 Dims=[2304] Offset=908734464
+[Metadata] Found blk.17.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=908743680
+[Metadata] Found blk.17.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=920687616
+[Metadata] Found blk.17.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=932631552
+[Metadata] Found blk.17.post_attention_norm.weight: Type=0 Dims=[2304] Offset=944575488
+[Metadata] Found blk.17.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=944584704
+[Metadata] Found blk.17.ffn_norm.weight: Type=0 Dims=[2304] Offset=944593920
+[Metadata] Found blk.17.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=944603136
+[Metadata] Found blk.17.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=945930240
+[Metadata] Found blk.17.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=948584448
+[Metadata] Found blk.17.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=951238656
+[Metadata] Found blk.18.attn_norm.weight: Type=0 Dims=[2304] Offset=952565760
+[Metadata] Found blk.18.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=952574976
+[Metadata] Found blk.18.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=964518912
+[Metadata] Found blk.18.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=976462848
+[Metadata] Found blk.18.post_attention_norm.weight: Type=0 Dims=[2304] Offset=988406784
+[Metadata] Found blk.18.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=988416000
+[Metadata] Found blk.18.ffn_norm.weight: Type=0 Dims=[2304] Offset=988425216
+[Metadata] Found blk.18.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=988434432
+[Metadata] Found blk.18.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=989761536
+[Metadata] Found blk.18.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=992415744
+[Metadata] Found blk.18.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=995069952
+[Metadata] Found blk.19.attn_norm.weight: Type=0 Dims=[2304] Offset=996397056
+[Metadata] Found blk.19.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=996406272
+[Metadata] Found blk.19.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1013824512
+[Metadata] Found blk.19.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1025768448
+[Metadata] Found blk.19.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1037712384
+[Metadata] Found blk.19.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1037721600
+[Metadata] Found blk.19.ffn_norm.weight: Type=0 Dims=[2304] Offset=1037730816
+[Metadata] Found blk.19.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1037740032
+[Metadata] Found blk.19.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1039067136
+[Metadata] Found blk.19.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1041721344
+[Metadata] Found blk.19.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1044375552
+[Metadata] Found blk.2.attn_norm.weight: Type=0 Dims=[2304] Offset=1046310912
+[Metadata] Found blk.2.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1046320128
+[Metadata] Found blk.2.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1058264064
+[Metadata] Found blk.2.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1070208000
+[Metadata] Found blk.2.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1082151936
+[Metadata] Found blk.2.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1082161152
+[Metadata] Found blk.2.ffn_norm.weight: Type=0 Dims=[2304] Offset=1082170368
+[Metadata] Found blk.2.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1082179584
+[Metadata] Found blk.2.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1083506688
+[Metadata] Found blk.2.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1086160896
+[Metadata] Found blk.2.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1088815104
+[Metadata] Found blk.20.attn_norm.weight: Type=0 Dims=[2304] Offset=1090142208
+[Metadata] Found blk.20.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1090151424
+[Metadata] Found blk.20.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1102095360
+[Metadata] Found blk.20.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1114039296
+[Metadata] Found blk.20.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1125983232
+[Metadata] Found blk.20.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1125992448
+[Metadata] Found blk.20.ffn_norm.weight: Type=0 Dims=[2304] Offset=1126001664
+[Metadata] Found blk.20.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1126010880
+[Metadata] Found blk.20.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1127337984
+[Metadata] Found blk.20.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1129992192
+[Metadata] Found blk.20.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1132646400
+[Metadata] Found blk.21.attn_norm.weight: Type=0 Dims=[2304] Offset=1133973504
+[Metadata] Found blk.21.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1133982720
+[Metadata] Found blk.21.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1151400960
+[Metadata] Found blk.21.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1163344896
+[Metadata] Found blk.21.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1175288832
+[Metadata] Found blk.21.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1175298048
+[Metadata] Found blk.21.ffn_norm.weight: Type=0 Dims=[2304] Offset=1175307264
+[Metadata] Found blk.21.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1175316480
+[Metadata] Found blk.21.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1176643584
+[Metadata] Found blk.21.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1179297792
+[Metadata] Found blk.21.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1181952000
+[Metadata] Found blk.22.attn_norm.weight: Type=0 Dims=[2304] Offset=1183887360
+[Metadata] Found blk.22.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1183896576
+[Metadata] Found blk.22.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1195840512
+[Metadata] Found blk.22.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1207784448
+[Metadata] Found blk.22.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1219728384
+[Metadata] Found blk.22.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1219737600
+[Metadata] Found blk.22.ffn_norm.weight: Type=0 Dims=[2304] Offset=1219746816
+[Metadata] Found blk.22.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1219756032
+[Metadata] Found blk.22.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1221083136
+[Metadata] Found blk.22.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1223737344
+[Metadata] Found blk.22.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1226391552
+[Metadata] Found blk.23.attn_norm.weight: Type=0 Dims=[2304] Offset=1227718656
+[Metadata] Found blk.23.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1227727872
+[Metadata] Found blk.23.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1239671808
+[Metadata] Found blk.23.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1251615744
+[Metadata] Found blk.23.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1263559680
+[Metadata] Found blk.23.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1263568896
+[Metadata] Found blk.23.ffn_norm.weight: Type=0 Dims=[2304] Offset=1263578112
+[Metadata] Found blk.23.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1263587328
+[Metadata] Found blk.23.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1264914432
+[Metadata] Found blk.23.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1267568640
+[Metadata] Found blk.23.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1270222848
+[Metadata] Found blk.24.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1271549952
+[Metadata] Found blk.24.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1283493888
+[Metadata] Found blk.24.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1284820992
+[Metadata] Found blk.24.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1287475200
+[Metadata] Found blk.24.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1290129408
+[Metadata] Found blk.3.attn_norm.weight: Type=0 Dims=[2304] Offset=1292064768
+[Metadata] Found blk.3.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1292073984
+[Metadata] Found blk.3.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1309492224
+[Metadata] Found blk.3.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1321436160
+[Metadata] Found blk.3.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1333380096
+[Metadata] Found blk.3.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1333389312
+[Metadata] Found blk.3.ffn_norm.weight: Type=0 Dims=[2304] Offset=1333398528
+[Metadata] Found blk.3.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1333407744
+[Metadata] Found blk.3.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1334734848
+[Metadata] Found blk.3.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1337389056
+[Metadata] Found blk.3.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1340043264
+[Metadata] Found blk.4.attn_norm.weight: Type=0 Dims=[2304] Offset=1341370368
+[Metadata] Found blk.4.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1341379584
+[Metadata] Found blk.4.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1353323520
+[Metadata] Found blk.4.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1365267456
+[Metadata] Found blk.4.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1377211392
+[Metadata] Found blk.4.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1377220608
+[Metadata] Found blk.4.ffn_norm.weight: Type=0 Dims=[2304] Offset=1377229824
+[Metadata] Found blk.4.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1377239040
+[Metadata] Found blk.4.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1378566144
+[Metadata] Found blk.4.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1381220352
+[Metadata] Found blk.4.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1383874560
+[Metadata] Found blk.5.attn_norm.weight: Type=0 Dims=[2304] Offset=1385201664
+[Metadata] Found blk.5.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1385210880
+[Metadata] Found blk.5.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1397154816
+[Metadata] Found blk.5.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1409098752
+[Metadata] Found blk.5.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1421042688
+[Metadata] Found blk.5.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1421051904
+[Metadata] Found blk.5.ffn_norm.weight: Type=0 Dims=[2304] Offset=1421061120
+[Metadata] Found blk.5.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1421070336
+[Metadata] Found blk.5.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1422397440
+[Metadata] Found blk.5.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1425051648
+[Metadata] Found blk.5.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1427705856
+[Metadata] Found blk.6.attn_norm.weight: Type=0 Dims=[2304] Offset=1429641216
+[Metadata] Found blk.6.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1429650432
+[Metadata] Found blk.6.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1447068672
+[Metadata] Found blk.6.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1459012608
+[Metadata] Found blk.6.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1470956544
+[Metadata] Found blk.6.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1470965760
+[Metadata] Found blk.6.ffn_norm.weight: Type=0 Dims=[2304] Offset=1470974976
+[Metadata] Found blk.6.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1470984192
+[Metadata] Found blk.6.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1472311296
+[Metadata] Found blk.6.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1474965504
+[Metadata] Found blk.6.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1477619712
+[Metadata] Found blk.7.attn_norm.weight: Type=0 Dims=[2304] Offset=1478946816
+[Metadata] Found blk.7.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1478956032
+[Metadata] Found blk.7.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1490899968
+[Metadata] Found blk.7.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1502843904
+[Metadata] Found blk.7.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1514787840
+[Metadata] Found blk.7.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1514797056
+[Metadata] Found blk.7.ffn_norm.weight: Type=0 Dims=[2304] Offset=1514806272
+[Metadata] Found blk.7.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1514815488
+[Metadata] Found blk.7.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1516142592
+[Metadata] Found blk.7.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1518796800
+[Metadata] Found blk.7.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1521451008
+[Metadata] Found blk.8.attn_norm.weight: Type=0 Dims=[2304] Offset=1523386368
+[Metadata] Found blk.8.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1523395584
+[Metadata] Found blk.8.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1540813824
+[Metadata] Found blk.8.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1552757760
+[Metadata] Found blk.8.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1564701696
+[Metadata] Found blk.8.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1564710912
+[Metadata] Found blk.8.ffn_norm.weight: Type=0 Dims=[2304] Offset=1564720128
+[Metadata] Found blk.8.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1564729344
+[Metadata] Found blk.8.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1566056448
+[Metadata] Found blk.8.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1568710656
+[Metadata] Found blk.8.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1571364864
+[Metadata] Found blk.9.attn_norm.weight: Type=0 Dims=[2304] Offset=1573300224
+[Metadata] Found blk.9.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1573309440
+[Metadata] Found blk.9.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1590727680
+[Metadata] Found blk.9.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1602671616
+[Metadata] Found blk.9.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1614615552
+[Metadata] Found blk.9.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1614624768
+[Metadata] Found blk.9.ffn_norm.weight: Type=0 Dims=[2304] Offset=1614633984
+[Metadata] Found blk.9.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1614643200
+[Metadata] Found blk.9.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1615970304
+[Metadata] Found blk.9.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1618624512
+[Metadata] Found blk.9.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1621278720
+[Metadata] Found blk.24.attn_norm.weight: Type=0 Dims=[2304] Offset=1623214080
+[Metadata] Found blk.24.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1623223296
+[Metadata] Found blk.24.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1640641536
+[Metadata] Found blk.24.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1652585472
+[Metadata] Found blk.24.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1652594688
+[Metadata] Found blk.24.ffn_norm.weight: Type=0 Dims=[2304] Offset=1652603904
+[Metadata] Found blk.25.attn_norm.weight: Type=0 Dims=[2304] Offset=1652613120
+[Metadata] Found blk.25.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1652622336
+[Metadata] Found blk.25.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1670040576
+[Metadata] Found blk.25.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1681984512
+[Metadata] Found blk.25.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1693928448
+[Metadata] Found blk.25.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1693937664
+[Metadata] Found blk.25.ffn_norm.weight: Type=0 Dims=[2304] Offset=1693946880
+[Metadata] Found blk.25.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1693956096
+[Metadata] Found blk.25.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1695283200
+[Metadata] Found blk.25.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1697937408
+[Metadata] Found blk.25.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1700591616
+[Metadata] Found output_norm.weight: Type=0 Dims=[2304] Offset=1702526976
+[BindlessLoader] Opening GGUF: "D:\\shimmy-test-models\\gguf_collection\\gemma-2-2b-it-Q4_K_M.gguf"
+[BindlessLoader] File size: 1708582752 bytes (1629.43 MB)
+[BindlessLoader] Scanning Metadata...
+[Metadata] Scanning 39 KV pairs...
+[Metadata] general.architecture = gemma2
+[Metadata] general.name = Gemma 2 2b It
+[Metadata] general.basename = gemma-2
+[Metadata] gemma2.context_length = 8192
+[Metadata] gemma2.embedding_length = 2304
+[Metadata] gemma2.block_count = 26
+[Metadata] gemma2.feed_forward_length = 9216
+[Metadata] gemma2.attention.head_count = 8
+[Metadata] gemma2.attention.head_count_kv = 4
+[Metadata] gemma2.attention.layer_norm_rms_epsilon = 0.000001
+[Metadata] general.file_type = 15
+[Metadata] tokenizer.ggml.model = llama
+[Metadata] Found token_embd.weight: Type=14 Dims=[2304, 256000] Offset=0
+[Metadata] Found blk.0.attn_norm.weight: Type=0 Dims=[2304] Offset=483840000
+[Metadata] Found blk.0.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=483849216
+[Metadata] Found blk.0.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=501267456
+[Metadata] Found blk.0.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=513211392
+[Metadata] Found blk.0.post_attention_norm.weight: Type=0 Dims=[2304] Offset=525155328
+[Metadata] Found blk.0.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=525164544
+[Metadata] Found blk.0.ffn_norm.weight: Type=0 Dims=[2304] Offset=525173760
+[Metadata] Found blk.0.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=525182976
+[Metadata] Found blk.0.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=526510080
+[Metadata] Found blk.0.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=529164288
+[Metadata] Found blk.0.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=531818496
+[Metadata] Found blk.1.attn_norm.weight: Type=0 Dims=[2304] Offset=533753856
+[Metadata] Found blk.1.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=533763072
+[Metadata] Found blk.1.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=551181312
+[Metadata] Found blk.1.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=563125248
+[Metadata] Found blk.1.post_attention_norm.weight: Type=0 Dims=[2304] Offset=575069184
+[Metadata] Found blk.1.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=575078400
+[Metadata] Found blk.1.ffn_norm.weight: Type=0 Dims=[2304] Offset=575087616
+[Metadata] Found blk.1.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=575096832
+[Metadata] Found blk.1.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=576423936
+[Metadata] Found blk.1.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=579078144
+[Metadata] Found blk.1.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=581732352
+[Metadata] Found blk.10.attn_norm.weight: Type=0 Dims=[2304] Offset=583667712
+[Metadata] Found blk.10.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=583676928
+[Metadata] Found blk.10.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=601095168
+[Metadata] Found blk.10.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=613039104
+[Metadata] Found blk.10.post_attention_norm.weight: Type=0 Dims=[2304] Offset=624983040
+[Metadata] Found blk.10.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=624992256
+[Metadata] Found blk.10.ffn_norm.weight: Type=0 Dims=[2304] Offset=625001472
+[Metadata] Found blk.10.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=625010688
+[Metadata] Found blk.10.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=626337792
+[Metadata] Found blk.10.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=628992000
+[Metadata] Found blk.10.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=631646208
+[Metadata] Found blk.11.attn_norm.weight: Type=0 Dims=[2304] Offset=633581568
+[Metadata] Found blk.11.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=633590784
+[Metadata] Found blk.11.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=645534720
+[Metadata] Found blk.11.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=657478656
+[Metadata] Found blk.11.post_attention_norm.weight: Type=0 Dims=[2304] Offset=669422592
+[Metadata] Found blk.11.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=669431808
+[Metadata] Found blk.11.ffn_norm.weight: Type=0 Dims=[2304] Offset=669441024
+[Metadata] Found blk.11.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=669450240
+[Metadata] Found blk.11.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=670777344
+[Metadata] Found blk.11.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=673431552
+[Metadata] Found blk.11.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=676085760
+[Metadata] Found blk.12.attn_norm.weight: Type=0 Dims=[2304] Offset=677412864
+[Metadata] Found blk.12.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=677422080
+[Metadata] Found blk.12.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=689366016
+[Metadata] Found blk.12.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=701309952
+[Metadata] Found blk.12.post_attention_norm.weight: Type=0 Dims=[2304] Offset=713253888
+[Metadata] Found blk.12.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=713263104
+[Metadata] Found blk.12.ffn_norm.weight: Type=0 Dims=[2304] Offset=713272320
+[Metadata] Found blk.12.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=713281536
+[Metadata] Found blk.12.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=714608640
+[Metadata] Found blk.12.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=717262848
+[Metadata] Found blk.12.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=719917056
+[Metadata] Found blk.13.attn_norm.weight: Type=0 Dims=[2304] Offset=721244160
+[Metadata] Found blk.13.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=721253376
+[Metadata] Found blk.13.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=738671616
+[Metadata] Found blk.13.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=750615552
+[Metadata] Found blk.13.post_attention_norm.weight: Type=0 Dims=[2304] Offset=762559488
+[Metadata] Found blk.13.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=762568704
+[Metadata] Found blk.13.ffn_norm.weight: Type=0 Dims=[2304] Offset=762577920
+[Metadata] Found blk.13.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=762587136
+[Metadata] Found blk.13.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=763914240
+[Metadata] Found blk.13.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=766568448
+[Metadata] Found blk.13.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=769222656
+[Metadata] Found blk.14.attn_norm.weight: Type=0 Dims=[2304] Offset=771158016
+[Metadata] Found blk.14.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=771167232
+[Metadata] Found blk.14.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=783111168
+[Metadata] Found blk.14.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=795055104
+[Metadata] Found blk.14.post_attention_norm.weight: Type=0 Dims=[2304] Offset=806999040
+[Metadata] Found blk.14.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=807008256
+[Metadata] Found blk.14.ffn_norm.weight: Type=0 Dims=[2304] Offset=807017472
+[Metadata] Found blk.14.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=807026688
+[Metadata] Found blk.14.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=808353792
+[Metadata] Found blk.14.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=811008000
+[Metadata] Found blk.14.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=813662208
+[Metadata] Found blk.15.attn_norm.weight: Type=0 Dims=[2304] Offset=814989312
+[Metadata] Found blk.15.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=814998528
+[Metadata] Found blk.15.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=826942464
+[Metadata] Found blk.15.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=838886400
+[Metadata] Found blk.15.post_attention_norm.weight: Type=0 Dims=[2304] Offset=850830336
+[Metadata] Found blk.15.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=850839552
+[Metadata] Found blk.15.ffn_norm.weight: Type=0 Dims=[2304] Offset=850848768
+[Metadata] Found blk.15.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=850857984
+[Metadata] Found blk.15.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=852185088
+[Metadata] Found blk.15.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=854839296
+[Metadata] Found blk.15.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=857493504
+[Metadata] Found blk.16.attn_norm.weight: Type=0 Dims=[2304] Offset=858820608
+[Metadata] Found blk.16.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=858829824
+[Metadata] Found blk.16.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=876248064
+[Metadata] Found blk.16.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=888192000
+[Metadata] Found blk.16.post_attention_norm.weight: Type=0 Dims=[2304] Offset=900135936
+[Metadata] Found blk.16.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=900145152
+[Metadata] Found blk.16.ffn_norm.weight: Type=0 Dims=[2304] Offset=900154368
+[Metadata] Found blk.16.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=900163584
+[Metadata] Found blk.16.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=901490688
+[Metadata] Found blk.16.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=904144896
+[Metadata] Found blk.16.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=906799104
+[Metadata] Found blk.17.attn_norm.weight: Type=0 Dims=[2304] Offset=908734464
+[Metadata] Found blk.17.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=908743680
+[Metadata] Found blk.17.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=920687616
+[Metadata] Found blk.17.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=932631552
+[Metadata] Found blk.17.post_attention_norm.weight: Type=0 Dims=[2304] Offset=944575488
+[Metadata] Found blk.17.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=944584704
+[Metadata] Found blk.17.ffn_norm.weight: Type=0 Dims=[2304] Offset=944593920
+[Metadata] Found blk.17.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=944603136
+[Metadata] Found blk.17.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=945930240
+[Metadata] Found blk.17.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=948584448
+[Metadata] Found blk.17.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=951238656
+[Metadata] Found blk.18.attn_norm.weight: Type=0 Dims=[2304] Offset=952565760
+[Metadata] Found blk.18.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=952574976
+[Metadata] Found blk.18.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=964518912
+[Metadata] Found blk.18.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=976462848
+[Metadata] Found blk.18.post_attention_norm.weight: Type=0 Dims=[2304] Offset=988406784
+[Metadata] Found blk.18.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=988416000
+[Metadata] Found blk.18.ffn_norm.weight: Type=0 Dims=[2304] Offset=988425216
+[Metadata] Found blk.18.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=988434432
+[Metadata] Found blk.18.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=989761536
+[Metadata] Found blk.18.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=992415744
+[Metadata] Found blk.18.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=995069952
+[Metadata] Found blk.19.attn_norm.weight: Type=0 Dims=[2304] Offset=996397056
+[Metadata] Found blk.19.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=996406272
+[Metadata] Found blk.19.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1013824512
+[Metadata] Found blk.19.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1025768448
+[Metadata] Found blk.19.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1037712384
+[Metadata] Found blk.19.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1037721600
+[Metadata] Found blk.19.ffn_norm.weight: Type=0 Dims=[2304] Offset=1037730816
+[Metadata] Found blk.19.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1037740032
+[Metadata] Found blk.19.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1039067136
+[Metadata] Found blk.19.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1041721344
+[Metadata] Found blk.19.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1044375552
+[Metadata] Found blk.2.attn_norm.weight: Type=0 Dims=[2304] Offset=1046310912
+[Metadata] Found blk.2.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1046320128
+[Metadata] Found blk.2.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1058264064
+[Metadata] Found blk.2.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1070208000
+[Metadata] Found blk.2.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1082151936
+[Metadata] Found blk.2.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1082161152
+[Metadata] Found blk.2.ffn_norm.weight: Type=0 Dims=[2304] Offset=1082170368
+[Metadata] Found blk.2.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1082179584
+[Metadata] Found blk.2.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1083506688
+[Metadata] Found blk.2.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1086160896
+[Metadata] Found blk.2.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1088815104
+[Metadata] Found blk.20.attn_norm.weight: Type=0 Dims=[2304] Offset=1090142208
+[Metadata] Found blk.20.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1090151424
+[Metadata] Found blk.20.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1102095360
+[Metadata] Found blk.20.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1114039296
+[Metadata] Found blk.20.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1125983232
+[Metadata] Found blk.20.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1125992448
+[Metadata] Found blk.20.ffn_norm.weight: Type=0 Dims=[2304] Offset=1126001664
+[Metadata] Found blk.20.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1126010880
+[Metadata] Found blk.20.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1127337984
+[Metadata] Found blk.20.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1129992192
+[Metadata] Found blk.20.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1132646400
+[Metadata] Found blk.21.attn_norm.weight: Type=0 Dims=[2304] Offset=1133973504
+[Metadata] Found blk.21.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1133982720
+[Metadata] Found blk.21.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1151400960
+[Metadata] Found blk.21.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1163344896
+[Metadata] Found blk.21.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1175288832
+[Metadata] Found blk.21.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1175298048
+[Metadata] Found blk.21.ffn_norm.weight: Type=0 Dims=[2304] Offset=1175307264
+[Metadata] Found blk.21.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1175316480
+[Metadata] Found blk.21.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1176643584
+[Metadata] Found blk.21.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1179297792
+[Metadata] Found blk.21.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1181952000
+[Metadata] Found blk.22.attn_norm.weight: Type=0 Dims=[2304] Offset=1183887360
+[Metadata] Found blk.22.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1183896576
+[Metadata] Found blk.22.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1195840512
+[Metadata] Found blk.22.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1207784448
+[Metadata] Found blk.22.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1219728384
+[Metadata] Found blk.22.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1219737600
+[Metadata] Found blk.22.ffn_norm.weight: Type=0 Dims=[2304] Offset=1219746816
+[Metadata] Found blk.22.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1219756032
+[Metadata] Found blk.22.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1221083136
+[Metadata] Found blk.22.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1223737344
+[Metadata] Found blk.22.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1226391552
+[Metadata] Found blk.23.attn_norm.weight: Type=0 Dims=[2304] Offset=1227718656
+[Metadata] Found blk.23.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1227727872
+[Metadata] Found blk.23.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1239671808
+[Metadata] Found blk.23.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1251615744
+[Metadata] Found blk.23.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1263559680
+[Metadata] Found blk.23.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1263568896
+[Metadata] Found blk.23.ffn_norm.weight: Type=0 Dims=[2304] Offset=1263578112
+[Metadata] Found blk.23.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1263587328
+[Metadata] Found blk.23.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1264914432
+[Metadata] Found blk.23.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1267568640
+[Metadata] Found blk.23.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1270222848
+[Metadata] Found blk.24.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1271549952
+[Metadata] Found blk.24.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1283493888
+[Metadata] Found blk.24.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1284820992
+[Metadata] Found blk.24.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1287475200
+[Metadata] Found blk.24.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1290129408
+[Metadata] Found blk.3.attn_norm.weight: Type=0 Dims=[2304] Offset=1292064768
+[Metadata] Found blk.3.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1292073984
+[Metadata] Found blk.3.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1309492224
+[Metadata] Found blk.3.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1321436160
+[Metadata] Found blk.3.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1333380096
+[Metadata] Found blk.3.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1333389312
+[Metadata] Found blk.3.ffn_norm.weight: Type=0 Dims=[2304] Offset=1333398528
+[Metadata] Found blk.3.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1333407744
+[Metadata] Found blk.3.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1334734848
+[Metadata] Found blk.3.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1337389056
+[Metadata] Found blk.3.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1340043264
+[Metadata] Found blk.4.attn_norm.weight: Type=0 Dims=[2304] Offset=1341370368
+[Metadata] Found blk.4.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1341379584
+[Metadata] Found blk.4.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1353323520
+[Metadata] Found blk.4.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1365267456
+[Metadata] Found blk.4.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1377211392
+[Metadata] Found blk.4.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1377220608
+[Metadata] Found blk.4.ffn_norm.weight: Type=0 Dims=[2304] Offset=1377229824
+[Metadata] Found blk.4.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1377239040
+[Metadata] Found blk.4.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1378566144
+[Metadata] Found blk.4.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1381220352
+[Metadata] Found blk.4.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1383874560
+[Metadata] Found blk.5.attn_norm.weight: Type=0 Dims=[2304] Offset=1385201664
+[Metadata] Found blk.5.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1385210880
+[Metadata] Found blk.5.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1397154816
+[Metadata] Found blk.5.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1409098752
+[Metadata] Found blk.5.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1421042688
+[Metadata] Found blk.5.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1421051904
+[Metadata] Found blk.5.ffn_norm.weight: Type=0 Dims=[2304] Offset=1421061120
+[Metadata] Found blk.5.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1421070336
+[Metadata] Found blk.5.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1422397440
+[Metadata] Found blk.5.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1425051648
+[Metadata] Found blk.5.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1427705856
+[Metadata] Found blk.6.attn_norm.weight: Type=0 Dims=[2304] Offset=1429641216
+[Metadata] Found blk.6.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1429650432
+[Metadata] Found blk.6.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1447068672
+[Metadata] Found blk.6.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1459012608
+[Metadata] Found blk.6.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1470956544
+[Metadata] Found blk.6.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1470965760
+[Metadata] Found blk.6.ffn_norm.weight: Type=0 Dims=[2304] Offset=1470974976
+[Metadata] Found blk.6.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1470984192
+[Metadata] Found blk.6.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1472311296
+[Metadata] Found blk.6.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1474965504
+[Metadata] Found blk.6.attn_v.weight: Type=12 Dims=[2304, 1024] Offset=1477619712
+[Metadata] Found blk.7.attn_norm.weight: Type=0 Dims=[2304] Offset=1478946816
+[Metadata] Found blk.7.ffn_down.weight: Type=12 Dims=[9216, 2304] Offset=1478956032
+[Metadata] Found blk.7.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1490899968
+[Metadata] Found blk.7.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1502843904
+[Metadata] Found blk.7.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1514787840
+[Metadata] Found blk.7.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1514797056
+[Metadata] Found blk.7.ffn_norm.weight: Type=0 Dims=[2304] Offset=1514806272
+[Metadata] Found blk.7.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1514815488
+[Metadata] Found blk.7.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1516142592
+[Metadata] Found blk.7.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1518796800
+[Metadata] Found blk.7.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1521451008
+[Metadata] Found blk.8.attn_norm.weight: Type=0 Dims=[2304] Offset=1523386368
+[Metadata] Found blk.8.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1523395584
+[Metadata] Found blk.8.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1540813824
+[Metadata] Found blk.8.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1552757760
+[Metadata] Found blk.8.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1564701696
+[Metadata] Found blk.8.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1564710912
+[Metadata] Found blk.8.ffn_norm.weight: Type=0 Dims=[2304] Offset=1564720128
+[Metadata] Found blk.8.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1564729344
+[Metadata] Found blk.8.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1566056448
+[Metadata] Found blk.8.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1568710656
+[Metadata] Found blk.8.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1571364864
+[Metadata] Found blk.9.attn_norm.weight: Type=0 Dims=[2304] Offset=1573300224
+[Metadata] Found blk.9.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1573309440
+[Metadata] Found blk.9.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1590727680
+[Metadata] Found blk.9.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1602671616
+[Metadata] Found blk.9.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1614615552
+[Metadata] Found blk.9.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1614624768
+[Metadata] Found blk.9.ffn_norm.weight: Type=0 Dims=[2304] Offset=1614633984
+[Metadata] Found blk.9.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1614643200
+[Metadata] Found blk.9.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1615970304
+[Metadata] Found blk.9.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1618624512
+[Metadata] Found blk.9.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1621278720
+[Metadata] Found blk.24.attn_norm.weight: Type=0 Dims=[2304] Offset=1623214080
+[Metadata] Found blk.24.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1623223296
+[Metadata] Found blk.24.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1640641536
+[Metadata] Found blk.24.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1652585472
+[Metadata] Found blk.24.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1652594688
+[Metadata] Found blk.24.ffn_norm.weight: Type=0 Dims=[2304] Offset=1652603904
+[Metadata] Found blk.25.attn_norm.weight: Type=0 Dims=[2304] Offset=1652613120
+[Metadata] Found blk.25.ffn_down.weight: Type=14 Dims=[9216, 2304] Offset=1652622336
+[Metadata] Found blk.25.ffn_gate.weight: Type=12 Dims=[2304, 9216] Offset=1670040576
+[Metadata] Found blk.25.ffn_up.weight: Type=12 Dims=[2304, 9216] Offset=1681984512
+[Metadata] Found blk.25.post_attention_norm.weight: Type=0 Dims=[2304] Offset=1693928448
+[Metadata] Found blk.25.post_ffw_norm.weight: Type=0 Dims=[2304] Offset=1693937664
+[Metadata] Found blk.25.ffn_norm.weight: Type=0 Dims=[2304] Offset=1693946880
+[Metadata] Found blk.25.attn_k.weight: Type=12 Dims=[2304, 1024] Offset=1693956096
+[Metadata] Found blk.25.attn_output.weight: Type=12 Dims=[2048, 2304] Offset=1695283200
+[Metadata] Found blk.25.attn_q.weight: Type=12 Dims=[2304, 2048] Offset=1697937408
+[Metadata] Found blk.25.attn_v.weight: Type=14 Dims=[2304, 1024] Offset=1700591616
+[Metadata] Found output_norm.weight: Type=0 Dims=[2304] Offset=1702526976
+[BindlessLoader] Found 288 tensors. Data starts at 6046560.
+[BindlessLoader] Uploading to VRAM...
+[BindlessLoader] Launching Preflight Fusion...
+[Preflight] Spinning off Math Tables & Tensor Banks (From RAM)...
+[Preflight] RoPE Lookup Table: 8192×144 = 2359296 entries (9216.0 KB, Base=10000, Dim=288, Scale=1, Mode=native)
+[Preflight] Extracting Norms: 26 layers, Total Size 0.47 MB
+[BindlessLoader] Upload Complete.

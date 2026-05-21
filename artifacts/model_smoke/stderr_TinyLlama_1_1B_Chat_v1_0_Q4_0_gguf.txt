@@ -1,0 +1,4 @@
+[GPU Server] Loading model: D:\shimmy-test-models\gguf_collection\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf
+[GPU Server] GPU initialized: "NVIDIA GeForce RTX 3060"
+[GPU Server] Model loaded to VRAM
+[GPU Server] Loading output head: output.weight (type=14, dims=[2048, 32000])

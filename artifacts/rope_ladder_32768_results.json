@@ -1,0 +1,13 @@
+[
+  {
+    "label": "32768-linear",
+    "max_ctx": 32768,
+    "rope_scale": "0.062500",
+    "filler_target": 30000,
+    "approx_prompt_tokens": 30064,
+    "pass": false,
+    "found_keyword": false,
+    "response_text": "",
+    "error": "job_failed:Tokenization failed: SentencePiece merge iteration limit exceeded: 100000 iterations (max: 100000)"
+  }
+]
