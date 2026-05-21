@@ -6,9 +6,9 @@ use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{
     BindlessPipeline, LayerParams, RMSNormParams,
 };
-use airframe::core::dequant::dequantize_q6_k;
+use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0};
 use airframe::core::model::GgufTensorInfo;
-use airframe::core::spec::ModelSpec;
+use airframe::core::spec::{GgufValue, ModelSpec};
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace,
     TokenTrace,
@@ -69,7 +69,7 @@ fn sample_token(
         return logits
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.total_cmp(b.1))
             .unwrap()
             .0 as u32;
     }
@@ -90,7 +90,7 @@ fn sample_token(
 
     // 5. Top-p (nucleus) filtering
     let mut indexed: Vec<(usize, f32)> = probs.iter().cloned().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    indexed.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
 
     let mut cumsum = 0.0f32;
     let mut cutoff = indexed.len();
@@ -278,6 +278,140 @@ fn rust_compile_check(source: &str) -> Result<(), String> {
     }
 }
 
+/// OpenAI-compatible chat completions request body.
+#[derive(Clone, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Clone, Deserialize)]
+struct ChatCompletionRequest {
+    messages: Vec<ChatMessage>,
+    max_tokens: Option<usize>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    seed: Option<u64>,
+    stream: Option<bool>,
+}
+
+#[derive(Clone, Copy)]
+enum ChatTemplateFamily {
+    TinyLlama,
+    ChatML,
+    Llama3,
+}
+
+impl ChatTemplateFamily {
+    fn render_messages(self, messages: &[ChatMessage]) -> String {
+        match self {
+            ChatTemplateFamily::TinyLlama => {
+                let mut prompt = String::new();
+                for msg in messages {
+                    let role = match msg.role.as_str() {
+                        "assistant" => "assistant",
+                        "system" => "system",
+                        _ => "user",
+                    };
+                    prompt.push_str(&format!("<|{}|>\n{}</s>\n", role, msg.content));
+                }
+                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                    prompt.push_str("<|assistant|>\n");
+                }
+                prompt
+            }
+            ChatTemplateFamily::ChatML => {
+                let mut prompt = String::new();
+                for msg in messages {
+                    prompt.push_str(&format!(
+                        "<|im_start|>{}\n{}<|im_end|>\n",
+                        msg.role, msg.content
+                    ));
+                }
+                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                    prompt.push_str("<|im_start|>assistant\n");
+                }
+                prompt
+            }
+            ChatTemplateFamily::Llama3 => {
+                let mut prompt = String::new();
+                if !messages.is_empty() {
+                    prompt.push_str("<|begin_of_text|>");
+                }
+                for msg in messages {
+                    prompt.push_str(&format!(
+                        "<|start_header_id|>{}<|end_header_id|>\n{}<|eot_id|>",
+                        msg.role, msg.content
+                    ));
+                }
+                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                    prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n");
+                }
+                prompt
+            }
+        }
+    }
+}
+
+fn chat_template_family_for_model(spec: &ModelSpec) -> ChatTemplateFamily {
+    let model_name = spec.model_name.to_ascii_lowercase();
+    if model_name.contains("llama 3") || model_name.contains("llama-3") {
+        ChatTemplateFamily::Llama3
+    } else if model_name.contains("tinyllama") {
+        ChatTemplateFamily::TinyLlama
+    } else {
+        ChatTemplateFamily::ChatML
+    }
+}
+
+fn chat_template_family_from_metadata(
+    metadata: &std::collections::HashMap<String, GgufValue>,
+    spec: &ModelSpec,
+) -> ChatTemplateFamily {
+    if let Some(GgufValue::String(chat_template)) = metadata.get("tokenizer.chat_template") {
+        if chat_template.contains("<|start_header_id|>") && chat_template.contains("<|eot_id|>") {
+            return ChatTemplateFamily::Llama3;
+        }
+        if chat_template.contains("<|im_start|>") && chat_template.contains("<|im_end|>") {
+            return ChatTemplateFamily::ChatML;
+        }
+        if chat_template.contains("<|user|>") && chat_template.contains("<|assistant|>") {
+            return ChatTemplateFamily::TinyLlama;
+        }
+    }
+
+    chat_template_family_for_model(spec)
+}
+
+impl ChatCompletionRequest {
+    /// Convert messages into a model-appropriate prompt and return an
+    /// `InferenceRequest` with `prompt_mode = "raw"` so the assembled text is
+    /// passed verbatim to the inference engine.
+    fn into_inference_request(self, template_family: ChatTemplateFamily) -> InferenceRequest {
+        let prompt = template_family.render_messages(&self.messages);
+        InferenceRequest {
+            task: Some("chat".to_string()),
+            prompt: Some(prompt),
+            prompt_mode: Some("raw".to_string()),
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            seed: self.seed,
+            stream: self.stream,
+            session_id: None,
+            min_tokens: None,
+            ignore_eos: None,
+            repetition_penalty: None,
+            expose_candidate: None,
+            debug_trace_path: None,
+            debug_trace_full: None,
+            debug_trace_start_step: None,
+            debug_trace_max_steps: None,
+            debug_trace_include_prefill: None,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub struct InferenceRequest {
     pub task: Option<String>,
@@ -455,6 +589,13 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let output_head_f32 = load_output_head_f32(&model_path, &gpu_model, &device, &spec)?;
     eprintln!("[GPU Server] Output head dequantized to F32 (262 MB)");
 
+    // === Token Embedding CPU Table ===
+    // The dequant pipeline uses a hardcoded Q4_0 shader, which is wrong for
+    // Q4_K_M models where token_embd.weight is Q6_K (type 14).  Pre-compute
+    // the full embedding table on CPU so the generation loop can do direct
+    // indexed lookups regardless of quantization type.
+    let embd_table_cpu = Arc::new(load_token_embd_cpu(&model_path, &gpu_model, &spec)?);
+
     // === Initialize KV Cache (Phase 4D) ===
     let kv_cache = Arc::new(Mutex::new(KVCache::new(
         &device,
@@ -495,6 +636,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let http_bind_addr = shimmy_bind_addr.clone();
     let listener = tokio::net::TcpListener::bind(&http_bind_addr).await?;
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
+    let chat_template_family = chat_template_family_from_metadata(&gpu_model.metadata.gguf_metadata, &spec);
     tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
@@ -502,8 +644,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 let states = Arc::clone(&states_for_http);
                 let sessions = Arc::clone(&sessions_for_http);
                 let streams = Arc::clone(&streams_for_http);
+                let chat_template_family = chat_template_family;
                 tokio::spawn(async move {
-                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams).await {
+                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, chat_template_family).await {
                         eprintln!("[HTTP] Connection error: {}", e);
                     }
                 });
@@ -586,7 +729,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             }
         } else {
             let mut inference_req = job.req;
-            if inference_req.prompt.is_none() {
+            // Only substitute the story seed when no prompt was provided AND
+            // this is not a chat-completion job (which always sets a prompt).
+            if inference_req.prompt.is_none() && inference_req.task.as_deref() != Some("chat") {
                 inference_req.prompt = Some("Once upon a time".to_string());
             }
             process_inference_job(
@@ -603,6 +748,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 &spec,
                 cache_clone,
                 &output_head_f32,
+                &embd_table_cpu,
             )
             .await
         };
@@ -647,6 +793,7 @@ async fn handle_http_connection(
     states: Arc<Mutex<std::collections::HashMap<String, JobState>>>,
     _session_states: Arc<Mutex<std::collections::HashMap<String, SessionState>>>,
     stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
+    chat_template_family: ChatTemplateFamily,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::AsyncWriteExt;
     let request_bytes = read_http_request(&mut stream).await?;
@@ -778,7 +925,21 @@ async fn handle_http_connection(
         let body = &request_str[body_start..];
         let body_clean = body.trim_matches(char::from(0));
 
-        let req: InferenceRequest = match serde_json::from_str(body_clean) {
+        // Route /v1/chat/completions through the OpenAI-compatible parser so
+        // that `messages` are honoured.  Every other POST path goes through the
+        // native InferenceRequest parser unchanged.
+        let req: InferenceRequest = if path == "/v1/chat/completions" {
+            match serde_json::from_str::<ChatCompletionRequest>(body_clean) {
+                Ok(cc) => cc.into_inference_request(chat_template_family),
+                Err(_) => {
+                    let _ = stream
+                        .write_all(b"HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: *\r\n\r\nInvalid JSON for /v1/chat/completions")
+                        .await;
+                    return Ok(());
+                }
+            }
+        } else {
+            match serde_json::from_str(body_clean) {
             Ok(r) => r,
             Err(_) => {
                 if let Some(start) = body_clean.find('{') {
@@ -797,7 +958,8 @@ async fn handle_http_connection(
                     return Ok(());
                 }
             }
-        };
+        }
+        }; // end if/else path routing
 
         let job_id = format!(
             "job_{}",
@@ -930,50 +1092,145 @@ async fn read_http_request(
     Ok(buffer)
 }
 
-/// Load and dequantize output.weight to F32 (workaround for Q6_K on GPU)
+/// Dequantize `token_embd.weight` to a CPU Vec<f32> for embedding lookup.
+/// Handles all quantization types including Q6_K (common in Q4_K_M models).
+fn load_token_embd_cpu(
+    model_path: &str,
+    gpu_model: &BindlessModel,
+    spec: &ModelSpec,
+) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+    let tensor_name = "token_embd.weight";
+    let ggml_type = gpu_model
+        .metadata
+        .get_tensor_type(tensor_name)
+        .ok_or("token_embd.weight not found in metadata")?;
+    let abs_offset = gpu_model.metadata.get_tensor_offset(tensor_name).unwrap();
+    let data_start = gpu_model.metadata.data_start_offset;
+    let relative_offset = abs_offset - data_start;
+
+    let dimensions = gpu_model
+        .metadata
+        .tensor_dims
+        .get(tensor_name)
+        .map(|d| d.iter().map(|&x| x as usize).collect::<Vec<_>>())
+        .unwrap_or_else(|| vec![spec.n_vocab, spec.n_embd]);
+
+    eprintln!(
+        "[GPU Server] Loading token_embd for CPU table: type={}, dims={:?}",
+        ggml_type, dimensions
+    );
+
+    let tensor_info = GgufTensorInfo {
+        name: tensor_name.to_string(),
+        dimensions,
+        ggml_type,
+        offset: relative_offset,
+    };
+
+    let file = std::fs::File::open(model_path)?;
+    let mmap = unsafe { Mmap::map(&file)? };
+
+    let tensor_f32 = match ggml_type {
+        0 => {
+            let start = (data_start + relative_offset) as usize;
+            let n = tensor_info.dimensions.iter().product::<usize>();
+            let bytes = &mmap[start..start + n * 4];
+            let data: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            airframe::core::tensor::Tensor::new(data, tensor_info.dimensions.clone())?
+        }
+        2 => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
+        6 => dequantize_q5_0(&tensor_info, &mmap, data_start)?,
+        8 => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
+        12 => dequantize_q4_k(&tensor_info, &mmap, data_start)?,
+        14 => dequantize_q6_k(&tensor_info, &mmap, data_start)?,
+        other => {
+            return Err(format!("Unsupported token_embd quant type: {}", other).into());
+        }
+    };
+
+    eprintln!(
+        "[GPU Server] Token embd CPU table: {} elements ({} MB)",
+        tensor_f32.data.len(),
+        (tensor_f32.data.len() * 4) as f32 / 1024.0 / 1024.0
+    );
+    Ok(tensor_f32.data)
+}
+
+/// Load and dequantize the output projection (lm_head) to F32.
+///
+/// Tries `output.weight` first; falls back to `token_embd.weight` for models
+/// that use tied embeddings (e.g. Llama 3.2 1B, many compact models).
+/// Handles F32, Q4_0, Q5_0, Q8_0, Q4_K, and Q6_K tensor types.
 fn load_output_head_f32(
     model_path: &str,
     gpu_model: &BindlessModel,
     device: &wgpu::Device,
     spec: &ModelSpec,
 ) -> Result<wgpu::Buffer, Box<dyn std::error::Error>> {
-    let output_weight_type = gpu_model
+    // Resolve tensor name: prefer output.weight, fall back to tied token_embd.weight
+    let tensor_name = if gpu_model.metadata.get_tensor_type("output.weight").is_some() {
+        "output.weight"
+    } else if gpu_model.metadata.get_tensor_type("token_embd.weight").is_some() {
+        eprintln!("[GPU Server] No output.weight found — using tied token_embd.weight");
+        "token_embd.weight"
+    } else {
+        return Err("Neither output.weight nor token_embd.weight found in model".into());
+    };
+
+    let ggml_type = gpu_model.metadata.get_tensor_type(tensor_name).unwrap();
+    let abs_offset = gpu_model.metadata.get_tensor_offset(tensor_name).unwrap();
+    let data_start = gpu_model.metadata.data_start_offset;
+    let relative_offset = abs_offset - data_start;
+
+    // Use dims from metadata; fall back to spec-derived shape if not stored
+    let dimensions = gpu_model
         .metadata
-        .get_tensor_type("output.weight")
-        .expect("output.weight type not found");
+        .tensor_dims
+        .get(tensor_name)
+        .map(|d| d.iter().map(|&x| x as usize).collect::<Vec<_>>())
+        .unwrap_or_else(|| vec![spec.n_vocab, spec.n_embd]);
 
-    eprintln!("[DEBUG] output.weight metadata check:");
-    eprintln!("  Type: {} (Q6_K)", output_weight_type);
+    eprintln!(
+        "[GPU Server] Loading output head: {} (type={}, dims={:?})",
+        tensor_name, ggml_type, dimensions
+    );
 
-    if output_weight_type != 14 {
-        // Not Q6_K, can use bindless path directly (panic for now)
-        panic!(
-            "Expected Q6_K (type 14) for output.weight, got type {}",
-            output_weight_type
-        );
-    }
-
-    eprintln!("[GPU Server] Dequantizing Q6_K output.weight to F32...");
+    let tensor_info = GgufTensorInfo {
+        name: tensor_name.to_string(),
+        dimensions,
+        ggml_type,
+        offset: relative_offset,
+    };
 
     // Re-mmap the file for CPU dequant
     let file = std::fs::File::open(model_path)?;
     let mmap = unsafe { Mmap::map(&file)? };
 
-    // Construct tensor info from spec
-    // **CRITICAL**: GGUF stores weight matrices as [out_features, in_features]
-    // For output projection: out=vocab, in=hidden_dim
-    let tensor_info = GgufTensorInfo {
-        name: "output.weight".to_string(),
-        dimensions: vec![spec.n_vocab as usize, spec.n_embd as usize], // GGUF order: [N_vocab, N_embd]
-        ggml_type: 14,                                                 // Q6_K
-        offset: 0, // Tensor data starts at offset 0 (relative to data_start)
+    // Dequantize to F32 based on actual tensor type
+    let tensor_f32 = match ggml_type {
+        0 => {
+            // F32 — direct copy
+            let start = (data_start + relative_offset) as usize;
+            let n = tensor_info.dimensions.iter().product::<usize>();
+            let bytes = &mmap[start..start + n * 4];
+            let data: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            airframe::core::tensor::Tensor::new(data, tensor_info.dimensions.clone())?
+        }
+        2 => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
+        6 => dequantize_q5_0(&tensor_info, &mmap, data_start)?,
+        8 => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
+        12 => dequantize_q4_k(&tensor_info, &mmap, data_start)?,
+        14 => dequantize_q6_k(&tensor_info, &mmap, data_start)?,
+        other => {
+            return Err(format!("Unsupported output head quant type: {}", other).into());
+        }
     };
-
-    // Get data_start offset from metadata
-    let data_start = gpu_model.metadata.data_start_offset;
-
-    // Dequantize Q6_K → F32 on CPU
-    let tensor_f32 = dequantize_q6_k(&tensor_info, &mmap, data_start)?;
 
     eprintln!("[DEBUG] Dequantized tensor shape: {:?}", tensor_f32.shape);
     eprintln!("[DEBUG] Total elements: {}", tensor_f32.data.len());
@@ -1039,6 +1296,7 @@ fn run_inference_completion(
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
     output_head_f32: &wgpu::Buffer,
+    embd_table_cpu: &[f32], // Pre-dequantized CPU embedding table
 ) -> Result<(InferenceResponse, String), Box<dyn std::error::Error>> {
     let max_new_tokens = req.max_tokens.unwrap_or(64);
     let temperature = req.temperature.unwrap_or(0.8);
@@ -1112,12 +1370,24 @@ fn run_inference_completion(
     );
 
     let dim = spec.n_embd as u32;
-    let embd_weight_offset = model
+    // Detect per-tensor quantization types.  Q4_K_M models use Q6_K for attn_v and
+    // ffn_down while everything else is Q4_K.  Pack into one u32:
+    //   bits  0-7  = main qt (Q/K/attn_out/gate/up)
+    //   bits  8-15 = V qt
+    //   bits 16-23 = ffn_down qt
+    let qt_main = model
         .metadata
-        .get_tensor_offset("token_embd.weight")
-        .expect("token_embd.weight not found");
-    let row_bytes = (dim / 32) * 18;
-
+        .get_tensor_type("blk.0.attn_q.weight")
+        .unwrap_or(2);
+    let qt_v = model
+        .metadata
+        .get_tensor_type("blk.0.attn_v.weight")
+        .unwrap_or(qt_main);
+    let qt_ffn_down = model
+        .metadata
+        .get_tensor_type("blk.0.ffn_down.weight")
+        .unwrap_or(qt_main);
+    let packed_quant_type = qt_main | (qt_v << 8) | (qt_ffn_down << 16);
     let layer_params = LayerParams {
         dim,
         head_count: spec.n_head as u32,
@@ -1126,7 +1396,7 @@ fn run_inference_completion(
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
-        padding: 0,
+        quant_type: packed_quant_type,
     };
 
     let mut generated_text = String::new();
@@ -1200,9 +1470,9 @@ fn run_inference_completion(
         if cfg.include_prefill {
             let mut last_logits = vec![0.0; spec.n_vocab];
             for (prefill_step, &token_id) in prompt_tokens.iter().enumerate() {
-                let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
+                let emb_start = token_id as usize * dim as usize;
                 let mut layer_output =
-                    pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
+                    embd_table_cpu[emb_start..emb_start + dim as usize].to_vec();
                 let (cache_len_before, window_base_before) = {
                     let cache = kv_cache.lock().unwrap();
                     (cache.get_seq_len(), cache.get_window_base())
@@ -1286,9 +1556,8 @@ fn run_inference_completion(
         } else {
             let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
             for &token_id in &prompt_tokens {
-                let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
-                let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
-                batched_embd.extend_from_slice(&embd);
+                let emb_start = token_id as usize * dim as usize;
+                batched_embd.extend_from_slice(&embd_table_cpu[emb_start..emb_start + dim as usize]);
             }
 
             let (_final_act, _l21, logits) = {
@@ -1317,9 +1586,8 @@ fn run_inference_completion(
     } else {
         let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
         for &token_id in &prompt_tokens {
-            let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
-            let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
-            batched_embd.extend_from_slice(&embd);
+            let emb_start = token_id as usize * dim as usize;
+            batched_embd.extend_from_slice(&embd_table_cpu[emb_start..emb_start + dim as usize]);
         }
 
         let (_final_act, _l21, logits) = {
@@ -1468,9 +1736,9 @@ fn run_inference_completion(
             }
         }
 
-        let row_offset = embd_weight_offset + (next_token as u64 * row_bytes as u64);
+        let emb_start = next_token as usize * dim as usize;
         let mut layer_output =
-            pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
+            embd_table_cpu[emb_start..emb_start + dim as usize].to_vec();
 
         let mut step_layer_traces = Vec::new();
         if capture_trace_step {
@@ -1485,6 +1753,11 @@ fn run_inference_completion(
                     .get_layer_offsets(layer_idx, spec.arch_string())
                     .expect(&format!("Missing offsets for layer {}", layer_idx));
 
+                let lqt_main = model.metadata.get_tensor_type(&format!("blk.{}.attn_q.weight", layer_idx)).unwrap_or(2);
+                let lqt_v    = model.metadata.get_tensor_type(&format!("blk.{}.attn_v.weight", layer_idx)).unwrap_or(lqt_main);
+                let lqt_down = model.metadata.get_tensor_type(&format!("blk.{}.ffn_down.weight", layer_idx)).unwrap_or(lqt_main);
+                let layer_params_l = LayerParams { quant_type: lqt_main | (lqt_v << 8) | (lqt_down << 16), ..layer_params };
+
                 let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = {
                     let mut cache = kv_cache.lock().unwrap();
                     pipeline.run_layer_with_cache_debug(
@@ -1495,7 +1768,7 @@ fn run_inference_completion(
                         layer_idx,
                         &layer_output,
                         layer_offsets,
-                        layer_params,
+                        layer_params_l,
                     )
                 };
 
@@ -1522,6 +1795,12 @@ fn run_inference_completion(
                     .get_layer_offsets(layer_idx, spec.arch_string())
                     .expect(&format!("Missing offsets for layer {}", layer_idx));
 
+                // Per-layer quant types (Q4_K_M uses Q6_K for first layers, Q4_K for later layers)
+                let lqt_main = model.metadata.get_tensor_type(&format!("blk.{}.attn_q.weight", layer_idx)).unwrap_or(2);
+                let lqt_v    = model.metadata.get_tensor_type(&format!("blk.{}.attn_v.weight", layer_idx)).unwrap_or(lqt_main);
+                let lqt_down = model.metadata.get_tensor_type(&format!("blk.{}.ffn_down.weight", layer_idx)).unwrap_or(lqt_main);
+                let layer_params_l = LayerParams { quant_type: lqt_main | (lqt_v << 8) | (lqt_down << 16), ..layer_params };
+
                 let mut cache = kv_cache.lock().unwrap();
                 layer_output = pipeline.run_layer_with_cache(
                     device,
@@ -1531,7 +1810,7 @@ fn run_inference_completion(
                     layer_idx,
                     &layer_output,
                     layer_offsets,
-                    layer_params,
+                    layer_params_l,
                 );
             }
         }
@@ -1666,6 +1945,7 @@ async fn process_inference_job(
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
     output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
+    embd_table_cpu: &[f32],         // Pre-dequantized F32 token embeddings (CPU)
 ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
     let session_window_tokens = spec.n_ctx;
     let disable_session_window = env_flag("SHIMMY_DISABLE_SESSION_WINDOW");
@@ -1709,6 +1989,7 @@ async fn process_inference_job(
         spec,
         Arc::clone(&kv_cache),
         output_head_f32,
+        embd_table_cpu,
     )?;
 
     if !disable_session_window {

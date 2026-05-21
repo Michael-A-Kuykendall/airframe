@@ -1124,6 +1124,8 @@ fn load_tensor_by_type(
             Tensor::new(out, tensor_info.dimensions.clone())
         }
         2 => dequantize_q4_0(tensor_info, mmap, tensor_data_base_offset),
+        6 => crate::core::dequant::dequantize_q5_0(tensor_info, mmap, tensor_data_base_offset),
+        8 => crate::core::dequant::dequantize_q8_0(tensor_info, mmap, tensor_data_base_offset),
         12 => dequantize_q4_k(tensor_info, mmap, tensor_data_base_offset),
         14 => dequantize_q6_k(tensor_info, mmap, tensor_data_base_offset),
         other => Err(LibshimmyError::QuantUnsupported {

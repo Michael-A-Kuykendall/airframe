@@ -154,6 +154,20 @@ impl GpuRuntime {
             .expect("token_embd.weight not found");
         let row_bytes = (dim as u64 / 32) * 18; // Q4_0 quantization
 
+        let weight_quant_type = gpu_model
+            .metadata
+            .get_tensor_type("blk.0.attn_q.weight")
+            .unwrap_or(2);
+        let qt_v = gpu_model
+            .metadata
+            .get_tensor_type("blk.0.attn_v.weight")
+            .unwrap_or(weight_quant_type);
+        let qt_ffn_down = gpu_model
+            .metadata
+            .get_tensor_type("blk.0.ffn_down.weight")
+            .unwrap_or(weight_quant_type);
+        let packed_quant_type = weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
+
         let layer_params = LayerParams {
             dim,
             head_count: spec.n_head as u32,
@@ -162,7 +176,7 @@ impl GpuRuntime {
             rms_eps: spec.rms_eps,
             ffn_dim: spec.ff_dim as u32,
             temp_stride: spec.temp_buffer_size as u32,
-            padding: 0,
+            quant_type: packed_quant_type,
         };
 
         let norm_weight_offset = gpu_model
