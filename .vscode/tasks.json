@@ -146,16 +146,6 @@
 		},
 
 		{
-			"label": "U: Smoke Shimmy Provider Path",
-			"dependsOrder": "sequence",
-			"dependsOn": [
-				"Run Airframe GPU Server",
-				"Run Shimmy OpenClaw Provider",
-				"Smoke Test Shimmy OpenClaw Provider"
-			],
-			"group": "build"
-		},
-		{
 			"label": "U: Validate Card Shadow Path",
 			"dependsOrder": "sequence",
 			"dependsOn": [
@@ -171,74 +161,6 @@
 				"Run Airframe GPU Server",
 				"Validate Card Smoke (On)"
 			],
-			"group": "build"
-		},
-		{
-			"label": "Run Shimmy OpenClaw Provider",
-			"type": "process",
-			"command": "cargo",
-			"args": [
-				"run",
-				"--release",
-				"--manifest-path",
-				"shimmy_integration/Cargo.toml",
-				"--bin",
-				"shimmy",
-				"--",
-				"--gpu-backend",
-				"auto",
-				"serve",
-				"--bind",
-				"${input:shimmyProviderBindAddress}",
-				"--model-path",
-				"${input:shimmyProviderModelPath}"
-			],
-			"options": {
-				"env": {
-					"SHIMMY_ENGINE_BACKEND": "airframe",
-					"SHIMMY_AIRFRAME_BASE_URL": "http://127.0.0.1:8080"
-				}
-			},
-			"isBackground": true,
-			"problemMatcher": [
-				{
-					"owner": "custom",
-					"pattern": {
-						"regexp": "^(.*)$",
-						"message": 1
-					},
-					"background": {
-						"activeOnStart": true,
-						"beginsPattern": ".",
-						"endsPattern": "listening|Listening|serve"
-					}
-				}
-			],
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "always",
-				"clear": false
-			},
-			"group": "build"
-		},
-		{
-			"label": "Smoke Test Shimmy OpenClaw Provider",
-			"type": "process",
-			"command": "powershell",
-			"args": [
-				"-ExecutionPolicy",
-				"Bypass",
-				"-File",
-				"${workspaceFolder}\\scripts\\openclaw_provider_smoke_test.ps1",
-				"-BaseUrl",
-				"${input:shimmyProviderBaseUrl}"
-			],
-			"isBackground": false,
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "always",
-				"clear": false
-			},
 			"group": "build"
 		},
 		{
@@ -368,24 +290,6 @@
 			"type": "promptString",
 			"description": "Absolute GGUF path for shimmy_server_gpu (LIBSHIMMY_MODEL_PATH)",
 			"default": "D:\\shimmy-test-models\\gguf_collection\\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"
-		},
-		{
-			"id": "shimmyProviderModelPath",
-			"type": "promptString",
-			"description": "Absolute GGUF path for the Shimmy/OpenClaw provider",
-			"default": "C:\\Users\\micha\\repos\\llama.cpp\\models\\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"
-		},
-		{
-			"id": "shimmyProviderBindAddress",
-			"type": "promptString",
-			"description": "Bind address. Use 127.0.0.1:11435 locally or 0.0.0.0:11435 for LAN access",
-			"default": "127.0.0.1:11435"
-		},
-		{
-			"id": "shimmyProviderBaseUrl",
-			"type": "promptString",
-			"description": "Base URL used by the smoke test",
-			"default": "http://127.0.0.1:11435"
 		}
 	]
 }
