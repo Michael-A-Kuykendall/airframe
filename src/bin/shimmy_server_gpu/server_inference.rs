@@ -520,7 +520,7 @@ fn run_inference_completion(
 
                 let (cache_len_after, window_base_after) = {
                     let mut cache = kv_cache.lock().unwrap();
-                    cache.increment();
+                    cache.increment().map_err(|e| e)?;
                     (cache.get_seq_len(), cache.get_window_base())
                 };
 
@@ -567,7 +567,7 @@ fn run_inference_completion(
             {
                 let mut cache = kv_cache.lock().unwrap();
                 for _ in 0..prompt_tokens.len() {
-                    cache.increment();
+                    cache.increment().map_err(|e| e)?;
                 }
             }
             logits
@@ -597,7 +597,7 @@ fn run_inference_completion(
         {
             let mut cache = kv_cache.lock().unwrap();
             for _ in 0..prompt_tokens.len() {
-                cache.increment();
+                cache.increment().map_err(|e| e)?;
             }
         }
         logits
@@ -806,7 +806,7 @@ fn run_inference_completion(
 
         {
             let mut cache = kv_cache.lock().unwrap();
-            cache.increment();
+            cache.increment().map_err(|e| e)?;
         }
 
         let normed_output =

@@ -157,6 +157,7 @@ impl KVCache {
     /// Explicitly override sequence length (used during helical cache compaction)
     pub fn set_seq_len(&mut self, new_len: u32) {
         if new_len > self.max_seq_len {
+            // Invariant: helical compaction must never produce a length larger than the window.
             panic!(
                 "KV cache override overflow: {} > {}",
                 new_len, self.max_seq_len
@@ -172,16 +173,16 @@ impl KVCache {
 
     /// Increment sequence length after appending new K/V pair
     ///
-    /// # Panics
-    /// Panics if sequence exceeds max_seq_len (context overflow)
-    pub fn increment(&mut self) {
+    /// Returns `Err` if the sequence exceeds max_seq_len (context overflow).
+    pub fn increment(&mut self) -> Result<(), String> {
         self.seq_len += 1;
         if self.seq_len > self.max_seq_len {
-            panic!(
+            return Err(format!(
                 "KV cache overflow: {} > {} (context window exceeded)",
                 self.seq_len, self.max_seq_len
-            );
+            ));
         }
+        Ok(())
     }
 
     /// Get K buffer for a specific layer
