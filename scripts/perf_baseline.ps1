@@ -73,36 +73,60 @@ foreach ($model in $Models) {
 
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         try {
-            $resp = Invoke-RestMethod `
+            # Step 1: submit
+            $queued = Invoke-RestMethod `
                 -Method Post `
                 -Uri "$BaseUrl/v1/chat/completions" `
                 -ContentType "application/json" `
                 -Body $body `
-                -TimeoutSec 120
+                -TimeoutSec 10
+            $jobId = $queued.job_id
+
+            # Step 2: poll until completed
+            $resp = $null
+            for ($p = 0; $p -lt 300; $p++) {
+                Start-Sleep -Milliseconds 200
+                $status = Invoke-RestMethod -Method Get `
+                    -Uri "$BaseUrl/api/repro/job-status?job_id=$jobId" `
+                    -TimeoutSec 5
+                if ($status.status -eq "completed") {
+                    $resp = $status
+                    break
+                }
+            }
             $sw.Stop()
 
-            $completionTokens = $resp.usage.completion_tokens
-            $elapsedMs        = $sw.ElapsedMilliseconds
-            $tokPerSec        = if ($elapsedMs -gt 0) { [math]::Round($completionTokens / ($elapsedMs / 1000.0), 2) } else { 0 }
+            if ($null -eq $resp) { throw "Timed out waiting for job $jobId" }
 
-            Write-Host ("  Run {0}: {1} tokens in {2}ms = {3} tok/s" -f $r, $completionTokens, $elapsedMs, $tokPerSec)
+            $completionTokens = $resp.result.tokens_generated
+            $elapsedMs        = $sw.ElapsedMilliseconds
+            $inferenceMs      = if ($resp.completed_at -and $resp.started_at) {
+                $resp.completed_at - $resp.started_at
+            } else { $elapsedMs }
+            $tokPerSec        = if ($inferenceMs -gt 0 -and $completionTokens -gt 0) {
+                [math]::Round($completionTokens / ($inferenceMs / 1000.0), 2)
+            } else { 0 }
+
+            Write-Host ("  Run {0}: {1} tokens in {2}ms (infer {3}ms) = {4} tok/s" -f $r, $completionTokens, $elapsedMs, $inferenceMs, $tokPerSec)
             $runResults += @{
-                run             = $r
+                run               = $r
                 completion_tokens = $completionTokens
-                elapsed_ms      = $elapsedMs
-                tokens_per_sec  = $tokPerSec
+                elapsed_ms        = $elapsedMs
+                inference_ms      = $inferenceMs
+                tokens_per_sec    = $tokPerSec
             }
         } catch {
             $sw.Stop()
-            Write-Host ("  Run {0}: FAILED — {1}" -f $r, $_.Exception.Message) -ForegroundColor Red
+            Write-Host ("  Run {0}: FAILED - {1}" -f $r, $_.Exception.Message) -ForegroundColor Red
         }
     }
 
     # Aggregate
     if ($runResults.Count -gt 0) {
-        $avgTps  = [math]::Round(($runResults | Measure-Object -Property tokens_per_sec -Average).Average, 2)
-        $maxTps  = [math]::Round(($runResults | Measure-Object -Property tokens_per_sec -Maximum).Maximum, 2)
-        $minTps  = [math]::Round(($runResults | Measure-Object -Property tokens_per_sec -Minimum).Minimum, 2)
+        $tpsValues = $runResults | ForEach-Object { $_["tokens_per_sec"] }
+        $avgTps = [math]::Round(($tpsValues | Measure-Object -Average).Average, 2)
+        $maxTps = [math]::Round(($tpsValues | Measure-Object -Maximum).Maximum, 2)
+        $minTps = [math]::Round(($tpsValues | Measure-Object -Minimum).Minimum, 2)
         Write-Host ("  -> avg={0}  min={1}  max={2} tok/s" -f $avgTps, $minTps, $maxTps) -ForegroundColor Yellow
     } else {
         $avgTps = $maxTps = $minTps = 0

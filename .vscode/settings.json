@@ -9,18 +9,5 @@
         "statusBar.background": "#2A5329",
         "statusBar.foreground": "#FFFFFF"
     },
-    "window.title": "${rootName}",
-    "chat.mcp.autostart": ["airframe-brain"],
-    "chat.mcp.servers": {
-        "airframe-brain": {
-            "command": "C:/Users/micha/AppData/Local/Programs/Python/Python313/python.exe",
-            "args": ["C:/Users/micha/repos/airframe/.mcp/airframe-brain-mcp.py"]
-        }
-    },
-    "mcp.servers": {
-        "airframe-brain": {
-            "command": "C:/Users/micha/AppData/Local/Programs/Python/Python313/python.exe",
-            "args": ["C:/Users/micha/repos/airframe/.mcp/airframe-brain-mcp.py"]
-        }
-    }
+    "window.title": "${rootName}"
 }
