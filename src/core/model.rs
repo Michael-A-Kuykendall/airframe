@@ -1342,6 +1342,8 @@ mod tests {
             model_name: String::new(),
             temp_buffer_size: 0,
             kv_cache_size_per_layer: 0,
+            attn_logit_softcap: 0.0,
+            final_logit_softcap: 0.0,
         }
         .compute_derived();
 

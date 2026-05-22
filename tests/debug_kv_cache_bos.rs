@@ -58,7 +58,9 @@ async fn test_kv_cache_after_bos() -> Result<(), Box<dyn std::error::Error>> {
         rms_eps: spec.rms_eps,
         ffn_dim: 5632,
         temp_stride: 16384,
-        padding: 0,
+        quant_type: 0,
+        attn_logit_softcap: 0.0,
+        post_norm_enabled: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);

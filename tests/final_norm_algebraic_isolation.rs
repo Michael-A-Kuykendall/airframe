@@ -79,6 +79,7 @@ async fn verify_final_norm_algebraic_isolation() -> Result<(), Box<dyn std::erro
             data_start_offset: 0,
             gguf_metadata: HashMap::new(),
             tensor_dims: HashMap::new(),
+            compiled_layers: Vec::new(),
         },
         preflight: None,
     };

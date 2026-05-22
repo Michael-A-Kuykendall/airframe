@@ -167,6 +167,8 @@ mod parity_tests {
             ffn_dim: 5632,
             temp_stride: 16384,
             quant_type: 0,
+            attn_logit_softcap: 0.0,
+            post_norm_enabled: 0,
         };
 
         let (mid_vec, gpu_output) = pipeline.run_layer_stepwise_test(

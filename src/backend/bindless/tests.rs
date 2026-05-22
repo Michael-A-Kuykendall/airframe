@@ -20,6 +20,7 @@ mod tests {
             data_start_offset: 0,
             gguf_metadata: std::collections::HashMap::new(),
             tensor_dims: std::collections::HashMap::new(),
+            compiled_layers: Vec::new(),
         }
     }
 
