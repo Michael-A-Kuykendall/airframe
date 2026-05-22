@@ -90,6 +90,8 @@ pub struct ModelSpec {
     pub n_ctx: usize,
     /// Attention logit soft-cap (Gemma-2: 50.0, others: 0.0 = disabled)
     pub attn_logit_softcap: f32,
+    /// Final logit soft-cap applied after lm_head (Gemma-2: 30.0, others: 0.0 = disabled)
+    pub final_logit_softcap: f32,
 
     // Derived dimensions (computed once, used everywhere)
     pub head_dim: usize,  // n_embd / n_head
@@ -196,8 +198,11 @@ impl ModelSpec {
         let rope_dim =
             get_u32(&format!("{}.rope.dimension_count", prefix)).unwrap_or(n_embd / n_head); // default: head_dim
         let n_ctx = get_u32(&format!("{}.context_length", prefix)).unwrap_or(2048);
-        let attn_logit_softcap =
-            get_f32(&format!("{}.attention.logit_softcapping", prefix)).unwrap_or(0.0);
+        // Gemma-2 uses non-standard GGUF key names for softcapping params
+        let attn_logit_softcap = get_f32(&format!("{}.attn_logit_softcapping", prefix))
+            .or_else(|| get_f32(&format!("{}.attention.logit_softcapping", prefix)))
+            .unwrap_or(0.0);
+        let final_logit_softcap = get_f32(&format!("{}.final_logit_softcapping", prefix)).unwrap_or(0.0);
         // Explicit head dimension (Gemma-2: key_length=256, not n_embd/n_head=288)
         let head_dim_explicit = get_u32(&format!("{}.attention.key_length", prefix)).unwrap_or(0);
 
@@ -216,6 +221,7 @@ impl ModelSpec {
             yarn_beta: 32.0,
             n_ctx,
             attn_logit_softcap,
+            final_logit_softcap,
             head_dim: head_dim_explicit,
             gqa_ratio: 0,
             kv_dim: 0,
@@ -245,6 +251,7 @@ impl ModelSpec {
             yarn_beta: 32.0,
             n_ctx: 2048,
             attn_logit_softcap: 0.0,
+            final_logit_softcap: 0.0,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
