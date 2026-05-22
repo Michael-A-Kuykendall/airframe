@@ -10,7 +10,7 @@ use std::path::PathBuf;
 #[test]
 fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error>> {
     let model_path =
-        PathBuf::from("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+        PathBuf::from("/home/ubuntu/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf");
     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
 
     // 1. Load metadata to get tensor offsets
@@ -18,7 +18,8 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
     let metadata = BindlessMetadata::new(&mut file);
 
     println!("\n=== ALGEBRAIC FORMULA VERIFICATION ===");
-    println!("Testing: norm_bank[layer * 2 * dim] == file_bytes[blk.layer.attn_norm.weight]");
+    println!("Testing: norm_bank[layer * 4 * dim] == file_bytes[blk.layer.attn_norm.weight]");
+    println!("Note: slots 2 & 3 (post_attention_norm, post_ffw_norm) are zero-filled for non-Gemma2 models");
     println!();
 
     // 2. Get Layer 0 and Layer 1 attn_norm offsets from file
@@ -65,7 +66,7 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
     let n_layers = spec.n_layer;
     let block_size = dim * 4; // F32 = 4 bytes
 
-    let total_size = (n_layers * 2 + 1) * block_size;
+    let total_size = (n_layers * 4 + 1) * block_size;
     let mut norm_bank = vec![0u8; total_size];
 
     println!("Norm Bank Extraction:");
@@ -74,11 +75,11 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
     println!("  total_size: {} bytes", total_size);
     println!();
 
-    // Extract Layer 0 and Layer 1 attn norms
+    // Extract Layer 0 and Layer 1 attn norms (slot 0 of each 4-slot group)
     for layer_idx in 0..=1 {
         let tensor_name = format!("blk.{}.attn_norm.weight", layer_idx);
         let file_offset = metadata.get_tensor_offset(&tensor_name).unwrap() as usize;
-        let bank_offset = layer_idx * 2 * block_size;
+        let bank_offset = layer_idx * 4 * block_size;
 
         println!("Layer {} attn_norm extraction:", layer_idx);
         println!("  file_offset: {} bytes", file_offset);
@@ -106,7 +107,7 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect();
 
-    let l1_bank_offset = 1 * 2 * block_size;
+    let l1_bank_offset = 1 * 4 * block_size;
     let l1_bank_floats: Vec<f32> = norm_bank[l1_bank_offset..l1_bank_offset + 40]
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
@@ -171,9 +172,10 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
     println!();
     println!("=== FORMULA VERIFICATION ===");
     println!("CPU Formula: norm_weight = tensor from WeightId::AttnNorm {{ layer: 1 }}");
-    println!("GPU Formula: norm_bank[layer_idx * 2 * dim + col]");
-    println!("           = norm_bank[1 * 2 * 2048 + col]");
-    println!("           = norm_bank[4096 + col]");
+    println!("GPU Formula: norm_bank[layer_idx * 4 * dim + col]");
+    println!("           = norm_bank[1 * 4 * 2048 + col]");
+    println!("           = norm_bank[8192 + col]");
+    println!("           (slots 1/2/3 per layer hold ffn_norm, post_attn_norm, post_ffw_norm)");
     println!();
 
     if l0_match && l1_match {
