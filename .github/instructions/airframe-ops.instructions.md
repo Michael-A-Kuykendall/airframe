@@ -9,6 +9,29 @@ for Airframe server and smoke test operations. Do not invent bespoke approaches.
 
 ---
 
+## Repo Architecture — Obfuscation Boundary
+
+```
+airframe/                     ← PRIVATE repo (GPU engine, WGSL shaders, inference)
+└── shimmy_integration/       ← submodule → shimmy-private repo
+      Cargo.toml              ← airframe = { path = "../" }
+```
+
+**Rules — never violate these:**
+- `airframe` is PRIVATE. It must never appear as a public repo, public branch, or public submodule.
+- `shimmy_integration` (`shimmy-private`) is the public-facing product repo.
+- Airframe is wired in as a **path dep pointing to `../`** — the parent directory.
+  This means airframe source never lives inside the shimmy repo tree.
+- **Do NOT add a nested `airframe/` submodule inside `shimmy_integration`.** This was done
+  by a previous AI session as an OpenClaw artifact and has been removed. Do not recreate it.
+- For CI on a clean machine: `git clone <private airframe> ../airframe` before
+  `cargo build --features airframe`. The path dep resolves to that checkout.
+- For local dev: `../` already resolves to the airframe workspace. No extra steps needed.
+- `shimmy_integration` has only ONE remote: `private` → `shimmy-private`. Never push to `origin`.
+  `shimmy_integration` has NO `origin` remote. Do not add one.
+
+---
+
 ## Terminal Names
 
 | Purpose | Terminal name | Shell |
