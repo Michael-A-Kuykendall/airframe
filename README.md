@@ -6,7 +6,7 @@ Airframe is the private inference engine/runtime currently being prepared as the
 
 - No substantive blocker is currently confirmed for the exact TinyLlama story repro path.
 - Long-run exact-story parity is currently being revalidated; the short-prefix `7777` check remains the stable confirmed proof point.
-- The truthful launch envelope for the current preview remains a 2048-token public context claim.
+- Context window is model-native: the server reads `n_ctx` directly from the GGUF header (`spec.n_ctx`). No hardcoded limit — it is whatever the loaded model reports.
 - Shimmy remains the intended public product surface; Airframe remains the internal engine.
 
 ## Right Now
