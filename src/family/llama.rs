@@ -118,6 +118,7 @@ fn emit_l0_checkpoint(id: &str, layer_idx: usize, name: &str, tensor: &Tensor) {
 /// Diagnostic: Dump tensor statistics for debugging NaN issues
 /// Returns (non_finite_count, min, max, mean, rms)
 /// ONLY runs if SHIMMY_VERBOSE=1 is set
+// dead_code: diagnostic helper gated on SHIMMY_VERBOSE; retained for NaN debugging sessions
 #[allow(dead_code)]
 fn dump_tensor_stats(name: &str, tensor: &Tensor) -> (usize, f32, f32, f32, f32) {
     if !is_verbose() {

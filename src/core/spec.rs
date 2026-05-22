@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 /// GGUF file type IDs (general.file_type)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// non_camel_case_types: GGUF spec uses Q4_0 etc. naming convention
 #[allow(non_camel_case_types)]
 pub enum GgufFileType {
     F32 = 0,
