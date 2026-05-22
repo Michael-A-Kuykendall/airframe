@@ -506,22 +506,13 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        // DIAGNOSTIC: Verify offsets are correct for first 2 layers
-        if layer_idx <= 1 {
-            eprintln!("[💾 GPU UPLOAD] Layer {} offsets:", layer_idx);
-            eprintln!(
-                "    attn_q: {} | attn_norm: {} | layer_idx (padding[0]): {}",
-                offsets.attn_q, offsets.attn_norm, offsets.padding[0]
-            );
-        }
-
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Layer Params"),
             contents: bytemuck::bytes_of(&params),
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        // 4. Cache params uniform
+        // Cache params uniform
         let cache_params = CacheParams {
             current_pos: kv_cache.get_seq_len(), // Position to write new K/V
             seq_len: kv_cache.get_seq_len() + 1, // After write, this many positions cached
@@ -532,14 +523,6 @@ impl BindlessPipeline {
             pad2: 0,
             pad3: 0,
         };
-
-        // DIAGNOSTIC: Print cache params for first 2 layers
-        if layer_idx <= 1 {
-            eprintln!(
-                "    [CACHE] Layer {}: current_pos={}, seq_len={}, max={}",
-                layer_idx, cache_params.current_pos, cache_params.seq_len, cache_params.max_seq_len
-            );
-        }
 
         let cache_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cache Params"),
@@ -664,6 +647,17 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         } // ← GPU waits for AttnProj to finish
 
+        // Kernel 4.5: Post-attention norm correction (Gemma-2; no-op otherwise)
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - PostAttnNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_post_attn_norm);
+            cpass.dispatch_workgroups(wg_dim, 1, 1);
+        } // ← GPU waits for PostAttnNorm to finish
+
         // Kernel 5: FFN gate/up + SiLU
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -685,6 +679,17 @@ impl BindlessPipeline {
             cpass.set_pipeline(&self.layer_pipeline_ffn_down);
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         } // ← GPU waits for FFNDown to finish
+
+        // Kernel 6.5: Post-FFW norm correction (Gemma-2; no-op otherwise)
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - PostFfwNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_post_ffw_norm);
+            cpass.dispatch_workgroups(wg_dim, 1, 1);
+        } // ← GPU waits for PostFfwNorm to finish
 
         // 8. Readback result
         let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -926,6 +931,17 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 
+        // Kernel 4.5: Post-attention norm correction (Gemma-2; no-op otherwise)
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - PostAttnNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_post_attn_norm);
+            cpass.dispatch_workgroups(wg_dim, 1, 1);
+        }
+
         // CAPTURE post-attention state after AttnProj (before FFN)
         let post_attn_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Post-Attn Staging"),
@@ -952,6 +968,17 @@ impl BindlessPipeline {
             });
             cpass.set_bind_group(0, &bind_group, &[]);
             cpass.set_pipeline(&self.layer_pipeline_ffn_down);
+            cpass.dispatch_workgroups(wg_dim, 1, 1);
+        }
+
+        // Kernel 6.5: Post-FFW norm correction (Gemma-2; no-op otherwise)
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - PostFfwNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_post_ffw_norm);
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 

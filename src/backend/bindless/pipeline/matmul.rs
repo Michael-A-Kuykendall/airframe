@@ -222,11 +222,6 @@ impl BindlessPipeline {
         input: &[f32],
         params: RMSNormParams,
     ) -> Vec<f32> {
-        println!(
-            "[BindlessPipeline] Running RMSNorm Test (Size={}, Eps={:e})",
-            params.count, params.eps
-        );
-
         // Upload Input Vector
         let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Input X"),

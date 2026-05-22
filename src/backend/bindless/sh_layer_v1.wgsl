@@ -29,6 +29,8 @@ struct LayerParams {
     ffn_dim: u32,       // Feed-forward intermediate dim (e.g. 5632)
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
     quant_type: u32,    // GGML type: 0=F32, 1=F16, 2=Q4_0, 8=Q8_0, 12=Q4_K, 13=Q5_K, 14=Q6_K
+    attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
+    post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
 };
 
 struct CacheParams {
@@ -48,7 +50,7 @@ struct CacheParams {
 @group(0) @binding(2) var<storage, read_write> temp_state: array<f32>;    // Scratchpad
 @group(0) @binding(3) var<uniform> offsets: LayerOffsets;
 @group(0) @binding(4) var<uniform> params: LayerParams;
-@group(0) @binding(5) var<storage, read> norm_bank: array<f32>;           // [n_layer * dim * 2 + dim]
+@group(0) @binding(5) var<storage, read> norm_bank: array<f32>;           // [n_layer * dim * 4 + dim]
 @group(0) @binding(6) var<storage, read> rope_table: array<f32>;           // [2048 × head_dim/2 × 2] pre-computed (cos, sin)
 @group(0) @binding(7) var<storage, read_write> kv_cache_k: array<f32>;    // K cache [max_seq * n_head_kv * head_dim]
 @group(0) @binding(8) var<storage, read_write> kv_cache_v: array<f32>;    // V cache [max_seq * n_head_kv * head_dim]
@@ -270,7 +272,7 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
 
-    let norm_offset_base = offsets.layer_idx * 2u * params.dim;
+    let norm_offset_base = offsets.layer_idx * 4u * params.dim;
     let norm_w = norm_bank[norm_offset_base + idx];
     temp_state[temp_base + idx] = activation_in[act_base + idx] * rms * norm_w;
 }
@@ -449,11 +451,13 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 //   - Works for batched prefill (batch_size > 1) and decode (batch_size == 1)
 @compute @workgroup_size(256, 1, 1)
 fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;       // Output dimension index (0..dim-1)
+    let idx = global_id.x;       // Output dimension index (0..attn_dim-1)
     let token_idx = global_id.y; // Batch token index
 
     if (token_idx >= cache_params.batch_size) { return; }
-    if (idx >= params.dim) { return; }
+    // Guard against models where dim > n_head * head_dim (e.g. Gemma-2: 2304 vs 2048)
+    let attn_dim = params.head_count * params.head_dim;
+    if (idx >= attn_dim) { return; }
 
     let temp_base  = token_idx * params.temp_stride;
     let gqa_ratio  = params.head_count / params.head_count_kv;
@@ -504,7 +508,11 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
             dot_qk += (q_re * k_re + q_im * k_im) * cos_a
                     + (q_re * k_im - q_im * k_re) * sin_a;
         }
-        let score = dot_qk * scale;
+        let score_raw = dot_qk * scale;
+        // Gemma-2 attention logit soft-cap: tanh(score / cap) * cap
+        let score = select(score_raw,
+                           tanh(score_raw / params.attn_logit_softcap) * params.attn_logit_softcap,
+                           params.attn_logit_softcap > 0.0);
 
         // V value for this position / kv-head / output element
         let v_val = kv_cache_v[
@@ -534,21 +542,26 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // Kernel 2.5: Output Projection (NEW - Split from attention)
 // -------------------------------------------------------------------------
 // Apply output projection matrix to attention context
+// NOTE: attn_dim = head_count * head_dim may differ from params.dim (e.g. Gemma-2:
+// n_head=8, head_dim=256 → attn_dim=2048 but params.dim=2304). The W_o matrix has
+// attn_dim columns (input) and params.dim rows (output). Use attn_dim for inner loops.
 @compute @workgroup_size(256, 1, 1)
 fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x; // Output dimension (0..2047)
+    let idx = global_id.x; // Output dimension (0..params.dim-1)
     let token_idx = global_id.y;
     
     if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
     
     let act_base = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;
+    // Attention output dimension: may be < params.dim for GQA models like Gemma-2
+    let attn_dim = params.head_count * params.head_dim;
     
     var dot = 0.0;
     let weight_byte_offset = offsets.attn_out;
 
     if ((params.quant_type & 0xFFu) == 14u) { // Q6_K
-        let bpr = params.dim / 256u;
+        let bpr = attn_dim / 256u;
         let row_start = weight_byte_offset + idx * bpr * 210u;
         for (var b = 0u; b < bpr; b++) {
             let bb = row_start + b * 210u;
@@ -558,7 +571,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
     } else if ((params.quant_type & 0xFFu) == 13u) { // Q5_K
-        let bpr = params.dim / 256u;
+        let bpr = attn_dim / 256u;
         let row_start = weight_byte_offset + idx * bpr * 176u;
         for (var b = 0u; b < bpr; b++) {
             let bb = row_start + b * 176u;
@@ -568,7 +581,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
     } else if ((params.quant_type & 0xFFu) == 12u) { // Q4_K
-        let blocks_per_row_k = params.dim / 256u;
+        let blocks_per_row_k = attn_dim / 256u;
         let row_start_byte_k = weight_byte_offset + (idx * blocks_per_row_k * 144u);
         for (var b = 0u; b < blocks_per_row_k; b++) {
             let block_base_k = row_start_byte_k + (b * 144u);
@@ -579,7 +592,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
     } else if ((params.quant_type & 0xFFu) == 8u) { // Q8_0
-        let bpr = params.dim / 32u;
+        let bpr = attn_dim / 32u;
         let row_start = weight_byte_offset + idx * bpr * 34u;
         for (var b = 0u; b < bpr; b++) {
             let bb = row_start + b * 34u;
@@ -589,17 +602,17 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
     } else if ((params.quant_type & 0xFFu) == 1u) { // F16
-        for (var col = 0u; col < params.dim; col++) {
-            let w_byte = weight_byte_offset + (idx * params.dim + col) * 2u;
+        for (var col = 0u; col < attn_dim; col++) {
+            let w_byte = weight_byte_offset + (idx * attn_dim + col) * 2u;
             dot += temp_state[temp_base + col] * dequant_f16_at(w_byte);
         }
     } else if ((params.quant_type & 0xFFu) == 0u) { // F32
-        for (var col = 0u; col < params.dim; col++) {
-            let w_idx = weight_byte_offset / 4u + idx * params.dim + col;
+        for (var col = 0u; col < attn_dim; col++) {
+            let w_idx = weight_byte_offset / 4u + idx * attn_dim + col;
             dot += temp_state[temp_base + col] * bitcast<f32>(gguf_blob[w_idx]);
         }
     } else { // Q4_0
-        let blocks_per_row = params.dim / 32u;
+        let blocks_per_row = attn_dim / 32u;
         let row_start_byte = weight_byte_offset + (idx * blocks_per_row * 18u);
         for (var b = 0u; b < blocks_per_row; b++) {
             let block_base = row_start_byte + (b * 18u);
@@ -621,9 +634,85 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
+    // Stash raw attn_proj dot for post-attn norm correction (Gemma-2)
+    // Uses Q-area + head_count*head_dim offset which is free after Kernel 2
+    let attn_stash_base = params.dim + params.head_count * params.head_dim;
+    temp_state[temp_base + attn_stash_base + idx] = dot;
+
     // Add residual connection
     let residual = activation_in[act_base + idx];
     activation_in[act_base + idx] = residual + dot;
+}
+
+// -------------------------------------------------------------------------
+// Kernel 2.6: Post-Attention RMSNorm correction (Gemma-2 only)
+// -------------------------------------------------------------------------
+// When post_norm_enabled == 1: reads the stashed attn_proj dot, normalizes it
+// with the post-attn norm weights (slot 2 in norm_bank), then corrects the
+// residual: activation_in -= dot; activation_in += rms_normed_dot.
+@compute @workgroup_size(256, 1, 1)
+fn main_post_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    let token_idx = global_id.y;
+
+    if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
+    if (params.post_norm_enabled == 0u) { return; }
+
+    let act_base = token_idx * params.dim;
+    let temp_base = token_idx * params.temp_stride;
+    let attn_stash_base = params.dim + params.head_count * params.head_dim;
+
+    // Compute RMS over the stashed attn_proj output
+    var sum_sq = 0.0;
+    for (var i = 0u; i < params.dim; i++) {
+        let v = temp_state[temp_base + attn_stash_base + i];
+        sum_sq += v * v;
+    }
+    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    // Apply post-attn norm weight (slot 2 per layer: layer_idx * 4 + 2)
+    let norm_offset_base = (offsets.layer_idx * 4u + 2u) * params.dim;
+    let norm_w = norm_bank[norm_offset_base + idx];
+    let dot = temp_state[temp_base + attn_stash_base + idx];
+    let normed_dot = dot * rms * norm_w;
+
+    // Correct residual: activation_in was (residual + dot), should be (residual + normed_dot)
+    activation_in[act_base + idx] += normed_dot - dot;
+}
+
+// -------------------------------------------------------------------------
+// Kernel 4.5: Post-FFW RMSNorm correction (Gemma-2 only)
+// -------------------------------------------------------------------------
+// When post_norm_enabled == 1: reads the stashed ffn_down dot (already stored
+// at temp_base + ffn_dim*2 + idx by main_ffn_down), normalizes it with post-ffw
+// norm weights (slot 3 in norm_bank), then corrects the residual.
+@compute @workgroup_size(256, 1, 1)
+fn main_post_ffw_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    let token_idx = global_id.y;
+
+    if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
+    if (params.post_norm_enabled == 0u) { return; }
+
+    let act_base = token_idx * params.dim;
+    let temp_base = token_idx * params.temp_stride;
+
+    // FFN down stash is at temp_base + ffn_dim*2 + idx (written by main_ffn_down)
+    var sum_sq = 0.0;
+    for (var i = 0u; i < params.dim; i++) {
+        let v = temp_state[temp_base + params.ffn_dim * 2u + i];
+        sum_sq += v * v;
+    }
+    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    // Apply post-ffw norm weight (slot 3 per layer: layer_idx * 4 + 3)
+    let norm_offset_base = (offsets.layer_idx * 4u + 3u) * params.dim;
+    let norm_w = norm_bank[norm_offset_base + idx];
+    let dot = temp_state[temp_base + params.ffn_dim * 2u + idx];
+    let normed_dot = dot * rms * norm_w;
+
+    // Correct residual: activation_in was (residual + dot), should be (residual + normed_dot)
+    activation_in[act_base + idx] += normed_dot - dot;
 }
 
 // -------------------------------------------------------------------------
@@ -669,8 +758,8 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     // MatMul
     var dot = 0.0;
-    // Norm Params Base (Layer * 2 + 1 for FFN)
-    let norm_offset_base = (offsets.layer_idx * 2u + 1u) * params.dim;
+    // Norm Params Base (Layer * 4 + 1 for FFN)
+    let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
 
     if ((params.quant_type & 0xFFu) == 14u) { // Q6_K
         let bpr = params.dim / 256u;
@@ -758,13 +847,18 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
-    // If Gate, Apply SiLu
+    // If Gate, apply activation (GELU for Gemma-2, SiLU for LLaMA-style).
+    // Gemma-2 uses GeGLU; detected by attn_logit_softcap > 0 (only Gemma-2 uses it).
     if (idx < ffn_dim) {
-        let silu = dot / (1.0 + exp(-dot));
-        temp_state[temp_base + idx] = silu;
-        // Optimization: Store directly? We need Up * Gate.
-        // We can wait for Up thread? No.
-        // Store to temp.
+        var activated: f32;
+        if (params.attn_logit_softcap > 0.0) {
+            // GELU approximate (PyTorch tanh variant): 0.5*x*(1+tanh(sqrt(2/π)*(x+0.044715*x³)))
+            activated = 0.5 * dot * (1.0 + tanh(0.7978845608f * (dot + 0.044715f * dot * dot * dot)));
+        } else {
+            // SiLU: x * sigmoid(x) = x / (1 + exp(-x))
+            activated = dot / (1.0 + exp(-dot));
+        }
+        temp_state[temp_base + idx] = activated;
     } else {
         temp_state[temp_base + idx] = dot;
     }
