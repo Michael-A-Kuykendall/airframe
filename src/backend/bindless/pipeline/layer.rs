@@ -506,22 +506,13 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        // DIAGNOSTIC: Verify offsets are correct for first 2 layers
-        if layer_idx <= 1 {
-            eprintln!("[💾 GPU UPLOAD] Layer {} offsets:", layer_idx);
-            eprintln!(
-                "    attn_q: {} | attn_norm: {} | layer_idx (padding[0]): {}",
-                offsets.attn_q, offsets.attn_norm, offsets.padding[0]
-            );
-        }
-
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Layer Params"),
             contents: bytemuck::bytes_of(&params),
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        // 4. Cache params uniform
+        // Cache params uniform
         let cache_params = CacheParams {
             current_pos: kv_cache.get_seq_len(), // Position to write new K/V
             seq_len: kv_cache.get_seq_len() + 1, // After write, this many positions cached
@@ -532,14 +523,6 @@ impl BindlessPipeline {
             pad2: 0,
             pad3: 0,
         };
-
-        // DIAGNOSTIC: Print cache params for first 2 layers
-        if layer_idx <= 1 {
-            eprintln!(
-                "    [CACHE] Layer {}: current_pos={}, seq_len={}, max={}",
-                layer_idx, cache_params.current_pos, cache_params.seq_len, cache_params.max_seq_len
-            );
-        }
 
         let cache_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cache Params"),
