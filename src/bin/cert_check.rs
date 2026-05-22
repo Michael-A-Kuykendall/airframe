@@ -103,8 +103,9 @@ struct ScanState {
     // Criterion counters
     clone_count: usize,
     unwrap_prod: usize,
-    fn_count: usize,
-    pub_count: usize,
+    fn_count: usize,        // fn keyword occurrences — used for C11 threshold
+    pub_count: usize,       // pub-qualified declarations — B5 numerator
+    total_decl_count: usize, // all declarations (pub+private) — B5 denominator
 
     // Flags
     found_todo: bool,
@@ -170,6 +171,35 @@ const PLACEHOLDER_NAMES: &[&str] = &[
     "handler", "value", "info", "ctx", "manager", "helper",
     "service", "util", "obj", "item",
 ];
+
+/// Compute byte ranges of double-quoted string literals on a single line.
+/// Used to exclude pattern matches that fall inside string contents.
+/// Handles `\"` escapes. Does not handle raw strings or multi-line strings.
+fn string_literal_spans(line: &[u8]) -> Vec<std::ops::Range<usize>> {
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < line.len() {
+        if line[i] == b'"' {
+            let start = i;
+            i += 1;
+            while i < line.len() {
+                match line[i] {
+                    b'\\' => i += 2,  // skip escaped char — won't overrun; clamped below
+                    b'"' => {
+                        i += 1;
+                        spans.push(start..i);
+                        break;
+                    }
+                    _ => i += 1,
+                }
+                i = i.min(line.len());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    spans
+}
 
 /// True if a function-definition line has a placeholder name as a parameter.
 fn has_placeholder_param(line: &str) -> bool {
@@ -242,10 +272,15 @@ fn scan(content: &str, ac: &AhoCorasick) -> ScanState {
             st.consec_commented_code = 0;
         }
 
-        // ── fn_count: simple substring count outside AC ─────────────────────
-        // (avoids overlap ambiguity with "pub fn " vs "fn " in the AC loop)
+        // ── fn_count + total_decl_count ─────────────────────────────────────
+        // fn_count: used by C11 test-coverage threshold.
+        // total_decl_count: all declarable items (fn+struct+enum+trait+type+const,
+        //   pub and private) — correct denominator for B5 pub-pressure ratio.
         if !is_comment {
             st.fn_count += line.matches("fn ").count();
+            for kw in &["fn ", "struct ", "enum ", "trait ", "type ", "const "] {
+                st.total_decl_count += line.matches(kw).count();
+            }
         }
 
         // ── B7: vague expects ───────────────────────────────────────────────
@@ -269,7 +304,20 @@ fn scan(content: &str, ac: &AhoCorasick) -> ScanState {
         let mut saw_allow = false;
         let mut saw_dead_code = false;
 
+        // Pre-compute string literal spans so the dispatch loop can exclude
+        // matches that fall inside string contents (e.g. PAT array entries
+        // in cert_check.rs itself, or "use println! to..." error strings).
+        let str_spans = if !is_comment {
+            string_literal_spans(line.as_bytes())
+        } else {
+            vec![]
+        };
+
         for mat in ac.find_iter(line.as_bytes()) {
+            // Skip matches whose start position is inside a string literal.
+            if str_spans.iter().any(|r| r.contains(&mat.start())) {
+                continue;
+            }
             match mat.pattern().as_usize() {
                 P_CLONE => {
                     if !is_comment {
@@ -539,14 +587,18 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
     );
 
     // B5: pub_pressure
-    let b5 = if st.fn_count < MIN_FN_COUNT {
-        (Status::Skip, format!("too few functions ({} < {})", st.fn_count, MIN_FN_COUNT))
+    // Ratio = pub declarations / ALL declarations (pub+private).
+    // Denominator is total_decl_count (fn+struct+enum+trait+type+const), NOT fn_count.
+    // Using fn_count alone was a bug: pub structs/enums inflated the numerator
+    // against a fn-only denominator, producing ratios > 100% on type-heavy files.
+    let b5 = if st.total_decl_count < MIN_FN_COUNT {
+        (Status::Skip, format!("too few declarations ({} < {})", st.total_decl_count, MIN_FN_COUNT))
     } else {
-        let ratio = st.pub_count as f64 / st.fn_count as f64;
+        let ratio = st.pub_count as f64 / st.total_decl_count as f64;
         if ratio <= PUB_PRESSURE_MAX {
-            (Status::Pass, format!("{}/{} = {:.0}%", st.pub_count, st.fn_count, ratio * 100.0))
+            (Status::Pass, format!("{}/{} = {:.0}%", st.pub_count, st.total_decl_count, ratio * 100.0))
         } else {
-            (Status::Fail, format!("{}/{} = {:.0}% > {:.0}% (C3 AI signal)", st.pub_count, st.fn_count, ratio * 100.0, PUB_PRESSURE_MAX * 100.0))
+            (Status::Fail, format!("{}/{} = {:.0}% > {:.0}% (C3 AI signal)", st.pub_count, st.total_decl_count, ratio * 100.0, PUB_PRESSURE_MAX * 100.0))
         }
     };
     criterion!("B5", b5.0, b5.1);

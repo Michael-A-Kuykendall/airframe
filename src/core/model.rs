@@ -8,6 +8,7 @@ use crate::core::{
 };
 use crate::ensure;
 use byteorder::{LittleEndian, ReadBytesExt};
+// TODO: migrate println!/eprintln! calls to tracing::{info!, debug!} (post-v2.0 telemetry cleanup)
 use memmap2::Mmap;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
