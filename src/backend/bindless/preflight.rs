@@ -226,6 +226,8 @@ mod tests {
             model_name: "test".to_string(),
             temp_buffer_size: 64,
             kv_cache_size_per_layer: 64,
+            attn_logit_softcap: 0.0,
+            final_logit_softcap: 0.0,
         }
     }
 

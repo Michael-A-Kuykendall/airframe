@@ -1537,6 +1537,8 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
         quant_type: 0,
+        attn_logit_softcap: 0.0,
+        post_norm_enabled: 0,
     };
 
     let (gpu_l04_mid, gpu_l0_final) = pipeline.run_layer_stepwise_test(
