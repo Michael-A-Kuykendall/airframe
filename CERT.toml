@@ -1,3 +1,20 @@
+[files."src/core/model.rs".waivers]
+B6 = "intentional model load and inference progress messages; tracing migration tracked in TODO"
+C3 = "model.rs consolidates spec parsing, tensor book-keeping, and family dispatch; split deferred post-v2.0"
+
+[files."src/family/llama.rs".waivers]
+B6 = "intentional LLaMA prefill and decode progress messages; tracing migration tracked in TODO"
+C3 = "llama.rs contains full transformer architecture for LLaMA family; split deferred post-v2.0"
+
+[files."src/backend/bindless/metadata.rs".waivers]
+B6 = "intentional GGUF parse progress messages [BindlessMetadata]"
+
+[files."src/ops/reference/attention.rs".waivers]
+B6 = "intentional CPU reference implementation debug output for parity testing"
+
+[files."src/backend/bindless/kv_cache.rs".waivers]
+B6 = "intentional KV cache debug tracing for context overflow diagnostics"
+
 [files."src/backend/bindless/loader.rs".waivers]
 B6 = "intentional server startup progress messages [BindlessLoader]"
 

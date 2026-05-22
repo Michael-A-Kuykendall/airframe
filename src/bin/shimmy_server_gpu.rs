@@ -61,6 +61,7 @@ enum ChatTemplateFamily {
     TinyLlama,
     ChatML,
     Llama3,
+    Gemma2,
 }
 
 impl ChatTemplateFamily {
@@ -110,6 +111,23 @@ impl ChatTemplateFamily {
                 }
                 prompt
             }
+            ChatTemplateFamily::Gemma2 => {
+                let mut prompt = String::new();
+                for msg in messages {
+                    let role = match msg.role.as_str() {
+                        "assistant" => "model",
+                        other => other,
+                    };
+                    prompt.push_str(&format!(
+                        "<start_of_turn>{}\n{}<end_of_turn>\n",
+                        role, msg.content
+                    ));
+                }
+                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                    prompt.push_str("<start_of_turn>model\n");
+                }
+                prompt
+            }
         }
     }
 }
@@ -120,6 +138,8 @@ fn chat_template_family_for_model(spec: &ModelSpec) -> ChatTemplateFamily {
         ChatTemplateFamily::Llama3
     } else if model_name.contains("tinyllama") {
         ChatTemplateFamily::TinyLlama
+    } else if model_name.contains("gemma") {
+        ChatTemplateFamily::Gemma2
     } else {
         ChatTemplateFamily::ChatML
     }
@@ -132,6 +152,9 @@ fn chat_template_family_from_metadata(
     if let Some(GgufValue::String(chat_template)) = metadata.get("tokenizer.chat_template") {
         if chat_template.contains("<|start_header_id|>") && chat_template.contains("<|eot_id|>") {
             return ChatTemplateFamily::Llama3;
+        }
+        if chat_template.contains("<start_of_turn>") && chat_template.contains("<end_of_turn>") {
+            return ChatTemplateFamily::Gemma2;
         }
         if chat_template.contains("<|im_start|>") && chat_template.contains("<|im_end|>") {
             return ChatTemplateFamily::ChatML;

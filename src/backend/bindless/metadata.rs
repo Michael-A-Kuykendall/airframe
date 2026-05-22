@@ -289,6 +289,7 @@ fn read_gguf_value<R: Read + Seek>(r: &mut R, val_type: u32) -> GgufValue {
             r.read_exact(&mut buf).unwrap();
             GgufValue::F64(f64::from_le_bytes(buf))
         }
+        // Malformed GGUF: unknown value type code; reader position is undefined — abort parse.
         _ => panic!("Unknown GGUF value type {}", val_type),
     }
 }
@@ -328,6 +329,7 @@ fn skip_value<R: Read + Seek>(r: &mut R, val_type: u32) {
                 skip_value(r, item_type);
             }
         }
+        // Malformed GGUF: unknown type code; size unknown so reader position cannot be advanced.
         _ => panic!("Unknown GGUF value type {}", val_type),
     }
 }

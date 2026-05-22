@@ -265,7 +265,7 @@ impl GpuRuntime {
         {
             let mut cache = self.kv_cache.lock().unwrap();
             for _ in 0..prompt_tokens.len() {
-                cache.increment();
+                cache.increment().map_err(|e| e)?;
             }
         }
 
@@ -346,7 +346,7 @@ impl GpuRuntime {
                 let layer_offsets = self.model
                     .metadata
                     .get_layer_offsets(layer_idx, self.spec.arch_string())
-                    .unwrap_or_else(|| panic!("Missing offsets for layer {}", layer_idx));
+                    .ok_or_else(|| format!("Missing offsets for layer {}", layer_idx))?;
 
                 let mut cache = self.kv_cache.lock().unwrap();
                 layer_output = self.pipeline.run_layer_with_cache(
@@ -364,7 +364,7 @@ impl GpuRuntime {
             // Increment KV cache
             {
                 let mut cache = self.kv_cache.lock().unwrap();
-                cache.increment();
+                cache.increment().map_err(|e| e)?;
             }
 
             // Final RMSNorm + output head projection

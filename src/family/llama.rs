@@ -2,6 +2,7 @@
 //!
 //! Defines `LlamaBlock` (single transformer layer) and `LlamaModel`
 //! (full stack) with optional L0 tracing for parity validation.
+// TODO: migrate eprintln!/println! calls to tracing::{debug!, info!} (post-v2.0 telemetry cleanup)
 
 use crate::core::{error::Result, spec::ModelSpec, tensor::Tensor, weight_id::WeightId};
 use crate::ops::dispatch::OpDispatcher;
