@@ -178,7 +178,7 @@ impl GpuRuntime {
             temp_stride: spec.temp_buffer_size as u32,
             quant_type: packed_quant_type,
             attn_logit_softcap: spec.attn_logit_softcap,
-            _pad: 0,
+            post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
         };
 
         let norm_weight_offset = gpu_model

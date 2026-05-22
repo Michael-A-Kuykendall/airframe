@@ -402,7 +402,7 @@ fn run_inference_completion(
         temp_stride: spec.temp_buffer_size as u32,
         quant_type: packed_quant_type,
         attn_logit_softcap: spec.attn_logit_softcap,
-        _pad: 0,
+        post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
     };
 
     let mut generated_text = String::new();
@@ -638,6 +638,14 @@ fn run_inference_completion(
     let mut logits_vec = prefill_logits_f32;
 
     for _step in 0..max_new_tokens {
+        // Apply final logit softcap (Gemma-2 uses 30.0; 0.0 = disabled)
+        if spec.final_logit_softcap > 0.0 {
+            let cap = spec.final_logit_softcap;
+            for l in logits_vec.iter_mut() {
+                *l = (*l / cap).tanh() * cap;
+            }
+        }
+
         if let (Some(gs), Some(vocab)) = (grammar_state.as_ref(), vocab_texts.as_ref()) {
             apply_grammar_mask(&mut logits_vec, gs, vocab, eos, im_end_token);
         }

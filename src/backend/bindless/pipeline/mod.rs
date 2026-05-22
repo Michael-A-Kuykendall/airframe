@@ -74,7 +74,7 @@ pub struct LayerParams {
     pub temp_stride: u32, // Per-token temp buffer stride in floats (e.g. 16384)
     pub quant_type: u32, // GGML type: 2=Q4_0, 12=Q4_K
     pub attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
-    pub _pad: u32,               // align to 40 bytes
+    pub post_norm_enabled: u32,  // 1 = apply post-attn and post-ffw norm (Gemma-2); 0 = disabled
 }
 
 #[repr(C)]
@@ -110,6 +110,8 @@ pub struct BindlessPipeline {
     pub layer_pipeline_attn_proj: wgpu::ComputePipeline,
     pub layer_pipeline_ffn_proj: wgpu::ComputePipeline,
     pub layer_pipeline_ffn_down: wgpu::ComputePipeline,
+    pub layer_pipeline_post_attn_norm: wgpu::ComputePipeline,
+    pub layer_pipeline_post_ffw_norm: wgpu::ComputePipeline,
     pub layer_layout: wgpu::BindGroupLayout,
 }
 
@@ -621,6 +623,8 @@ impl BindlessPipeline {
         let layer_pipeline_attn_proj = mk_pipeline("main_attn_proj");
         let layer_pipeline_ffn_proj = mk_pipeline("main_ffn_proj");
         let layer_pipeline_ffn_down = mk_pipeline("main_ffn_down");
+        let layer_pipeline_post_attn_norm = mk_pipeline("main_post_attn_norm");
+        let layer_pipeline_post_ffw_norm = mk_pipeline("main_post_ffw_norm");
 
         Self {
             pipeline,
@@ -639,6 +643,8 @@ impl BindlessPipeline {
             layer_pipeline_attn_proj,
             layer_pipeline_ffn_proj,
             layer_pipeline_ffn_down,
+            layer_pipeline_post_attn_norm,
+            layer_pipeline_post_ffw_norm,
             layer_layout,
         }
     }
