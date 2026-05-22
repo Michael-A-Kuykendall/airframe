@@ -269,6 +269,19 @@ fn rust_compile_check(source: &str) -> Result<(), String> {
 }
 
 /// OpenAI-compatible chat completions request body.
+// When the output head buffer exceeds max_storage_buffer_binding_size, fall back to a plain
+// CPU dot-product against the pre-dequantized embedding table that is already in RAM.
+// This unblocks Gemma-2 (256K vocab × hidden_dim F32 > 2 GiB binding limit) at the cost of
+// ~5–15 ms per token on a server CPU — well within acceptable latency.
+fn cpu_head_logits(embd_table: &[f32], hidden: &[f32], vocab_size: usize, dim: usize) -> Vec<f32> {
+    (0..vocab_size)
+        .map(|i| {
+            let row = &embd_table[i * dim..(i + 1) * dim];
+            hidden.iter().zip(row).map(|(h, w)| h * w).sum()
+        })
+        .collect()
+}
+
 // run_inference_completion takes many args by design — GPU pipeline requires all context inline.
 // TODO: consider grouping device/queue/model/pipeline into a GpuContext struct to reduce arg count.
 #[allow(clippy::too_many_arguments)]
@@ -287,6 +300,7 @@ fn run_inference_completion(
     kv_cache: Arc<Mutex<KVCache>>,
     output_head_f32: &wgpu::Buffer,
     embd_table_cpu: &[f32], // Pre-dequantized CPU embedding table
+    use_cpu_head: bool,     // True when output head buffer exceeds binding limit
 ) -> Result<(InferenceResponse, String), Box<dyn std::error::Error>> {
     let max_new_tokens = req.max_tokens.unwrap_or(64);
     let temperature = req.temperature.unwrap_or(0.8);
@@ -382,11 +396,13 @@ fn run_inference_completion(
         dim,
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
-        head_dim: (spec.n_embd / spec.n_head) as u32,
+        head_dim: spec.head_dim as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
         quant_type: packed_quant_type,
+        attn_logit_softcap: spec.attn_logit_softcap,
+        _pad: 0,
     };
 
     let mut generated_text = String::new();
@@ -509,14 +525,18 @@ fn run_inference_completion(
 
                 let normed_output =
                     pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
-                last_logits = pipeline.run_matmul_f32(
-                    device,
-                    queue,
-                    output_head_f32,
-                    &normed_output,
-                    spec.n_vocab as u32,
-                    dim,
-                );
+                last_logits = if use_cpu_head {
+                    cpu_head_logits(embd_table_cpu, &normed_output, spec.n_vocab, dim as usize)
+                } else {
+                    pipeline.run_matmul_f32(
+                        device,
+                        queue,
+                        output_head_f32,
+                        &normed_output,
+                        spec.n_vocab as u32,
+                        dim,
+                    )
+                };
 
                 let (cache_len_after, window_base_after) = {
                     let mut cache = kv_cache.lock().unwrap();
@@ -549,19 +569,24 @@ fn run_inference_completion(
                 batched_embd.extend_from_slice(&embd_table_cpu[emb_start..emb_start + dim as usize]);
             }
 
-            let (_final_act, _l21, logits) = {
+            let (_pre_norm_a, l21_a, gpu_logits_a) = {
                 let cache_guard = kv_cache.lock().unwrap();
                 pipeline.run_full_model_prefill_chunked_with_cache_state(
                     device,
                     queue,
                     model,
                     &batched_embd,
-                    Some(&output_head_f32),
+                    if use_cpu_head { None } else { Some(&output_head_f32) },
                     0,
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     spec,
                     512,
                 )
+            };
+            let logits_a = if use_cpu_head {
+                cpu_head_logits(embd_table_cpu, &l21_a, spec.n_vocab, dim as usize)
+            } else {
+                gpu_logits_a
             };
 
             {
@@ -570,7 +595,7 @@ fn run_inference_completion(
                     cache.increment().map_err(|e| e)?;
                 }
             }
-            logits
+            logits_a
         }
     } else {
         let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
@@ -579,19 +604,24 @@ fn run_inference_completion(
             batched_embd.extend_from_slice(&embd_table_cpu[emb_start..emb_start + dim as usize]);
         }
 
-        let (_final_act, _l21, logits) = {
+        let (_pre_norm_b, l21_b, gpu_logits_b) = {
             let cache_guard = kv_cache.lock().unwrap();
             pipeline.run_full_model_prefill_chunked_with_cache_state(
                 device,
                 queue,
                 model,
                 &batched_embd,
-                Some(&output_head_f32),
+                if use_cpu_head { None } else { Some(&output_head_f32) },
                 0,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 spec,
                 512,
             )
+        };
+        let logits_b = if use_cpu_head {
+            cpu_head_logits(embd_table_cpu, &l21_b, spec.n_vocab, dim as usize)
+        } else {
+            gpu_logits_b
         };
 
         {
@@ -600,7 +630,7 @@ fn run_inference_completion(
                 cache.increment().map_err(|e| e)?;
             }
         }
-        logits
+        logits_b
     };
 
     eprintln!("[GPU Server] Prefill complete. Cache info updated.");
@@ -790,17 +820,13 @@ fn run_inference_completion(
                 let lqt_down = model.metadata.get_tensor_type(&format!("blk.{}.ffn_down.weight", layer_idx)).unwrap_or(lqt_main);
                 let layer_params_l = LayerParams { quant_type: lqt_main | (lqt_v << 8) | (lqt_down << 16), ..layer_params };
 
-                let mut cache = kv_cache.lock().unwrap();
-                layer_output = pipeline.run_layer_with_cache(
-                    device,
-                    queue,
-                    model,
-                    &mut cache,
-                    layer_idx,
-                    &layer_output,
-                    layer_offsets,
-                    layer_params_l,
-                );
+                {
+                    let mut cache = kv_cache.lock().unwrap();
+                    layer_output = pipeline.run_layer_with_cache(
+                        device, queue, model, &mut cache, layer_idx, &layer_output,
+                        layer_offsets, layer_params_l,
+                    );
+                }
             }
         }
 
@@ -812,14 +838,18 @@ fn run_inference_completion(
         let normed_output =
             pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
 
-        logits_vec = pipeline.run_matmul_f32(
-            device,
-            queue,
-            output_head_f32,
-            &normed_output,
-            spec.n_vocab as u32,
-            dim,
-        );
+        logits_vec = if use_cpu_head {
+            cpu_head_logits(embd_table_cpu, &normed_output, spec.n_vocab, dim as usize)
+        } else {
+            pipeline.run_matmul_f32(
+                device,
+                queue,
+                output_head_f32,
+                &normed_output,
+                spec.n_vocab as u32,
+                dim,
+            )
+        };
 
         let (cache_len_after_step, window_base_after_step) = {
             let cache = kv_cache.lock().unwrap();
@@ -935,6 +965,7 @@ pub(super) async fn process_inference_job(
     kv_cache: Arc<Mutex<KVCache>>,
     output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
     embd_table_cpu: &[f32],         // Pre-dequantized F32 token embeddings (CPU)
+    use_cpu_head: bool,             // True when output head buffer exceeds binding limit
 ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
     let session_window_tokens = spec.n_ctx;
     let disable_session_window = env_flag("SHIMMY_DISABLE_SESSION_WINDOW");
@@ -979,6 +1010,7 @@ pub(super) async fn process_inference_job(
         Arc::clone(&kv_cache),
         output_head_f32,
         embd_table_cpu,
+        use_cpu_head,
     )?;
 
     if !disable_session_window {

@@ -88,6 +88,8 @@ pub struct ModelSpec {
     /// Standard default: 32.0 (preserve high-frequency positional accuracy).
     pub yarn_beta: f32,
     pub n_ctx: usize,
+    /// Attention logit soft-cap (Gemma-2: 50.0, others: 0.0 = disabled)
+    pub attn_logit_softcap: f32,
 
     // Derived dimensions (computed once, used everywhere)
     pub head_dim: usize,  // n_embd / n_head
@@ -107,7 +109,13 @@ pub struct ModelSpec {
 impl ModelSpec {
     /// Compute derived fields from core dimensions
     pub fn compute_derived(mut self) -> Self {
-        self.head_dim = self.n_embd / self.n_head;
+        if self.head_dim == 0 {
+            self.head_dim = self.n_embd / self.n_head;
+        }
+        // RoPE must not exceed head_dim — cap it (handles Gemma-2: key_length=256, rope_dim may default to n_embd/n_head=288)
+        if self.rope_dim > self.head_dim {
+            self.rope_dim = self.head_dim;
+        }
         self.gqa_ratio = self.n_head / self.n_head_kv;
         self.kv_dim = self.n_head_kv * self.head_dim;
 
@@ -188,6 +196,10 @@ impl ModelSpec {
         let rope_dim =
             get_u32(&format!("{}.rope.dimension_count", prefix)).unwrap_or(n_embd / n_head); // default: head_dim
         let n_ctx = get_u32(&format!("{}.context_length", prefix)).unwrap_or(2048);
+        let attn_logit_softcap =
+            get_f32(&format!("{}.attention.logit_softcapping", prefix)).unwrap_or(0.0);
+        // Explicit head dimension (Gemma-2: key_length=256, not n_embd/n_head=288)
+        let head_dim_explicit = get_u32(&format!("{}.attention.key_length", prefix)).unwrap_or(0);
 
         Self {
             n_vocab,
@@ -203,7 +215,8 @@ impl ModelSpec {
             yarn_alpha: 1.0,
             yarn_beta: 32.0,
             n_ctx,
-            head_dim: 0,
+            attn_logit_softcap,
+            head_dim: head_dim_explicit,
             gqa_ratio: 0,
             kv_dim: 0,
             arch,
@@ -231,6 +244,7 @@ impl ModelSpec {
             yarn_alpha: 1.0,
             yarn_beta: 32.0,
             n_ctx: 2048,
+            attn_logit_softcap: 0.0,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
