@@ -14,6 +14,15 @@ This workspace contains a private `airframe` repo and a `shimmy_integration` sub
 - Do not create `-plan.md` files.
 - Log discovered side work in `bd` instead of expanding scope inline.
 
+## Test Failures
+
+**Zero tolerance. No exceptions.**
+
+`cargo test` must finish with 0 failures before any task is considered done.
+There is no such thing as a "pre-existing" failure that can be left alone.
+If a test was already broken before your change, you still own it — fix it before moving on.
+Do not declare work complete, summarize results, or ask what is next while any test is red.
+
 ## Scope Control
 
 - Keep the active task narrow.

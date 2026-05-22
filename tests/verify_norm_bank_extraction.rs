@@ -9,8 +9,24 @@ use std::path::PathBuf;
 
 #[test]
 fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error>> {
-    let model_path =
-        PathBuf::from("/home/ubuntu/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf");
+    let model_path = match std::env::var("SHIMMY_BASE_GGUF")
+        .map(PathBuf::from)
+        .or_else(|_| {
+            let candidates = [
+                "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
+                "/home/ubuntu/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf",
+            ];
+            candidates.iter()
+                .find(|p| PathBuf::from(p).exists())
+                .map(PathBuf::from)
+                .ok_or("Model not found")
+        }) {
+        Ok(p) => p,
+        Err(_) => {
+            println!("[SKIP] SHIMMY_BASE_GGUF not set and no model found at known paths - skipping norm bank test");
+            return Ok(());
+        }
+    };
     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
 
     // 1. Load metadata to get tensor offsets

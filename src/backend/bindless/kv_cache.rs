@@ -373,7 +373,7 @@ mod tests {
 
         // Increment beyond max_seq_len
         for _ in 0..9 {
-            cache.increment(); // Should panic at 9th call
+            cache.increment().unwrap(); // Should panic at 9th call
         }
     }
 }

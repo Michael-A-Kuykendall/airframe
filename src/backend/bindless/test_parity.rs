@@ -113,19 +113,24 @@ mod parity_tests {
         );
 
         // === STEP 2: Run GPU Layer 0 ===
-        let model_path = std::env::var("SHIMMY_BASE_GGUF")
+        let model_path = match std::env::var("SHIMMY_BASE_GGUF")
             .map(PathBuf::from)
             .or_else(|_| {
-                let p = PathBuf::from(
+                let candidates = [
+                    "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
                     "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
-                );
-                if p.exists() {
-                    Ok(p)
-                } else {
-                    Err("Model not found")
-                }
-            })
-            .expect("SHIMMY_BASE_GGUF not set and model not found at default path");
+                ];
+                candidates.iter()
+                    .find(|p| PathBuf::from(p).exists())
+                    .map(PathBuf::from)
+                    .ok_or("Model not found")
+            }) {
+            Ok(p) => p,
+            Err(_) => {
+                println!("[SKIP] SHIMMY_BASE_GGUF not set and no model found at known paths — skipping GPU parity test");
+                return;
+            }
+        };
 
         println!("\nLoading Model: {:?}", model_path);
         let (device, queue) = get_device().await;
