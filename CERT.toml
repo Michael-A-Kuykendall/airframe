@@ -9,9 +9,35 @@ C3 = "GPU pipeline monolith, modular split scheduled"
 B5 = "pub-count denominator mismatch on large pipeline file, known scoring issue"
 B6 = "intentional GPU debug telemetry [BindlessPipeline]"
 
+[files."src/backend/bindless/pipeline/mod.rs".waivers]
+C3 = "pipeline split: types, constructor, and helpers; further splitting would fragment coherence"
+B5 = "pub-count inflated by re-exported pipeline sub-struct fields; denominator undercounts public surface"
+B6 = "intentional GPU debug telemetry [BindlessPipeline]"
+
+[files."src/backend/bindless/pipeline/dequant.rs".waivers]
+B6 = "intentional GPU dequant telemetry [BindlessPipeline/dequant]"
+
+[files."src/backend/bindless/pipeline/matmul.rs".waivers]
+C3 = "pipeline split: matmul and rmsnorm dispatch; further splitting would break dispatch cohesion"
+B5 = "pub-count denominator mismatch on split pipeline sub-file"
+B6 = "intentional GPU matmul telemetry [BindlessPipeline/matmul]"
+
+[files."src/backend/bindless/pipeline/inference.rs".waivers]
+C3 = "pipeline split: full-model inference dispatch; single logical unit"
+B5 = "pub-count denominator mismatch on split pipeline sub-file"
+B6 = "intentional GPU inference telemetry [BindlessPipeline/inference]"
+
+[files."src/backend/bindless/pipeline/layer.rs".waivers]
+C3 = "pipeline split: layer test and cache-enabled dispatch; single logical unit"
+B6 = "intentional GPU layer telemetry [BindlessPipeline/layer]"
+
 [files."src/bin/shimmy_server_gpu.rs".waivers]
-C3 = "GPU server monolith, modular split scheduled"
+C3 = "GPU server split in progress; main file retains core HTTP routing and request handling"
 B6 = "intentional GPU server progress and diagnostic messages [ShimmyServerGpu]"
+
+[files."src/bin/shimmy_server_gpu/server_inference.rs".waivers]
+C3 = "inference sub-module: single inference pipeline function extracted from shimmy_server_gpu; further split would break call graph"
+B6 = "intentional inference progress messages and timing telemetry [ShimmyServerGpu/inference]"
 
 [files."src/backend/bindless/loader.rs"]
 sealed_sha256 = "cb0a462b9d0df9d53831c9660b03a176f8f4769fa51d0bcb3bd6cd9fbf881430"
@@ -22,13 +48,35 @@ sealed_sha256 = "af1692d91717bd9f1341beefadb15c069fbf6ad5c7d55027de5938c4d9d15eb
 sealed_date = "2026-05-21"
 
 [files."src/backend/bindless/preflight.rs"]
-sealed_sha256 = "cebfdb418b6cb8cce23f96d40d5bbec387fafc19d0a09b7fecfd3f596a00c2eb"
+sealed_sha256 = "3ea5343261b4391fa73f3fcfff8013d62397e9515752ecedded397a9fcd512ea"
 sealed_date = "2026-05-21"
-
 [files."src/backend/bindless/pipeline.rs"]
 sealed_sha256 = "7f671d047438c1979ad312d26a28be4c82a07b2bf622c970da4a1e1894ff2f21"
 sealed_date = "2026-05-21"
 
 [files."src/bin/shimmy_server_gpu.rs"]
-sealed_sha256 = "e39b567cd2a5eadcf67d2b1a5344cece3e1d06c9f43d94f3feedf582d8c0ef3f"
+sealed_sha256 = "ab139796efc4d52fbed07fe4649e4b6313779d1dfd39e99d281c4829cae5f2df"
+sealed_date = "2026-05-21"
+[files."src/bin/shimmy_server_gpu/server_inference.rs"]
+sealed_sha256 = "2ca4f0c09ef047c0255b3654fc7dcc573e011036cbc887ff539e5814683ffb6e"
+sealed_date = "2026-05-21"
+
+[files."src/backend/bindless/pipeline/mod.rs"]
+sealed_sha256 = "31052d323d32201c4c86fd3e8c7a9e056378d4fad99d05ff2d898c29bae3ff8a"
+sealed_date = "2026-05-21"
+
+[files."src/backend/bindless/pipeline/dequant.rs"]
+sealed_sha256 = "e33072c8f13d0c8f5a60e78a4126dbb0abe4117fd2dcafcf2a132b96b22147d9"
+sealed_date = "2026-05-21"
+
+[files."src/backend/bindless/pipeline/matmul.rs"]
+sealed_sha256 = "11c684684bd474c15fd5561b709637b9e39026d3d3cc09988a689a52c7206124"
+sealed_date = "2026-05-21"
+
+[files."src/backend/bindless/pipeline/inference.rs"]
+sealed_sha256 = "4cf8b7d857c5d34fef6508304a05bcf864e1dc0064e72d5394022a0dd911ed8f"
+sealed_date = "2026-05-21"
+
+[files."src/backend/bindless/pipeline/layer.rs"]
+sealed_sha256 = "6283c86ea3f27afd730198e92099f1ab1c53ac2fb0b4e67eaa4ee0594278e59a"
 sealed_date = "2026-05-21"

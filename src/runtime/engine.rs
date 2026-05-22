@@ -284,6 +284,8 @@ mod tests {
             rope_base: 10000.0,
             rope_scale: 1.0,
             rope_dim: 4,
+            yarn_alpha: 0.0,
+            yarn_beta: 0.0,
             n_ctx: 8,
             head_dim: 0,
             gqa_ratio: 0,
