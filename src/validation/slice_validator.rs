@@ -6,6 +6,7 @@ use crate::validation::{
 use std::path::{Path, PathBuf};
 
 /// Main slice validation framework for V2 runtime expansion
+// dead_code: SliceValidator scaffolded for V2 validation pipeline; fields populated during test runs
 #[allow(dead_code)]
 pub struct SliceValidator {
     target_model_sha256: String,

@@ -90,6 +90,7 @@ pub fn attention_f32(
 /// Multi-head attention with KV cache.
 ///
 /// Handles prefill (store all) and decode (append one) phases.
+// too_many_arguments: attention requires full tensor set, cache, and rope params; no logical grouping
 #[allow(clippy::too_many_arguments)]
 pub fn attention_with_cache_f32(
     input: &Tensor,

@@ -53,6 +53,7 @@ impl OpDispatcher {
 
     /// Multi-head attention with GQA support
     /// Supports both standard MHA and Grouped Query Attention
+    // too_many_arguments: attention requires all tensor weights and rope params; no logical grouping available
     #[allow(clippy::too_many_arguments)]
     pub fn attention(
         &self,
@@ -92,6 +93,7 @@ impl OpDispatcher {
     /// This version properly handles prefill and decode phases:
     /// - Prefill: Stores K, V in cache, attends to all input tokens
     /// - Decode: Stores new K, V, attends to ALL cached tokens + new token
+    // too_many_arguments: cache-aware attention requires all tensor weights, cache ref, and rope params
     #[allow(clippy::too_many_arguments)]
     pub fn attention_with_cache(
         &self,

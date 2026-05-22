@@ -230,6 +230,7 @@ fn parse_gguf_header<R: Read>(reader: &mut R) -> Result<GgufHeader> {
 }
 
 /// Parse metadata section with complete GGUF value type support
+// dead_code: retained as alternative parse path for exotic GGUF metadata layouts
 #[allow(dead_code)]
 fn skip_metadata<R: Read + Seek>(reader: &mut R, kv_count: u64) -> Result<()> {
     println!(
@@ -553,6 +554,7 @@ fn skip_metadata<R: Read + Seek>(reader: &mut R, kv_count: u64) -> Result<()> {
 
 /// Parse tensor information with comprehensive validation and instrumentation
 #[derive(Debug, Clone)]
+// dead_code: GgufMetaValue mirrors GGUF spec; all variants retained for completeness
 #[allow(dead_code)]
 enum GgufMetaValue {
     U8(u8),
@@ -1247,6 +1249,7 @@ fn get_required_weights(n_layer: usize) -> Vec<WeightId> {
 }
 
 /// Validate tensor layout against file size
+// dead_code: retained for offline validation tooling, not used in hot path
 #[allow(dead_code)]
 fn validate_tensor_layout(tensor_infos: &[GgufTensorInfo], file_len: u64) -> Result<()> {
     println!("🔍 Validating tensor layout against file size...");

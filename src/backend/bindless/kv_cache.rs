@@ -34,6 +34,7 @@ pub struct KVCache {
     max_seq_len: u32,
 
     /// Number of transformer layers
+    // dead_code: n_layers stored for future multi-layer cache management (currently n_layer is implicit)
     #[allow(dead_code)]
     n_layers: usize,
 
