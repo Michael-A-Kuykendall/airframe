@@ -46,9 +46,24 @@ mod layer_dump_tests {
         println!("\n=== GPU Layer Dump for Notebook Analysis ===\n");
 
         // Load model
-        let model_path = PathBuf::from(
-            "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
-        );
+        let model_path = match std::env::var("SHIMMY_BASE_GGUF")
+            .map(PathBuf::from)
+            .or_else(|_| {
+                let candidates = [
+                    "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
+                    "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
+                ];
+                candidates.iter()
+                    .find(|p| PathBuf::from(p).exists())
+                    .map(PathBuf::from)
+                    .ok_or("Model not found")
+            }) {
+            Ok(p) => p,
+            Err(_) => {
+                println!("[SKIP] SHIMMY_BASE_GGUF not set and no model found at known paths — skipping layer dump test");
+                return;
+            }
+        };
         println!("Loading model: {:?}", model_path);
 
         let (device, queue) = get_device().await;
