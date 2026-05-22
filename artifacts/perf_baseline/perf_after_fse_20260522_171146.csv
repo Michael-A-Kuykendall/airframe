@@ -1,0 +1,4 @@
+﻿label,model,avg_tps,min_tps,max_tps,max_tokens,timestamp
+after_fse_20260522_171146,TinyLlama-1.1B Q4_0,7.51,7.44,7.56,64,20260522_171146
+after_fse_20260522_171146,Llama-3.2-1B Q4_K_M,7.44,7.42,7.48,64,20260522_171146
+after_fse_20260522_171146,Llama-3.2-3B Q4_K_M,7.46,7.45,7.46,64,20260522_171146

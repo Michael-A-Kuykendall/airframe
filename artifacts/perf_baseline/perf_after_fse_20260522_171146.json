@@ -1,0 +1,98 @@
+﻿[
+    {
+        "timestamp":  "20260522_171146",
+        "model":  "TinyLlama-1.1B Q4_0",
+        "min_tps":  7.44,
+        "max_tps":  7.56,
+        "avg_tps":  7.51,
+        "label":  "after_fse_20260522_171146",
+        "max_tokens":  64,
+        "runs":  [
+                     {
+                         "inference_ms":  8503,
+                         "run":  1,
+                         "elapsed_ms":  8617,
+                         "tokens_per_sec":  7.53,
+                         "completion_tokens":  64
+                     },
+                     {
+                         "inference_ms":  8469,
+                         "run":  2,
+                         "elapsed_ms":  8548,
+                         "tokens_per_sec":  7.56,
+                         "completion_tokens":  64
+                     },
+                     {
+                         "inference_ms":  8598,
+                         "run":  3,
+                         "elapsed_ms":  8665,
+                         "tokens_per_sec":  7.44,
+                         "completion_tokens":  64
+                     }
+                 ]
+    },
+    {
+        "timestamp":  "20260522_171146",
+        "model":  "Llama-3.2-1B Q4_K_M",
+        "min_tps":  7.42,
+        "max_tps":  7.48,
+        "avg_tps":  7.44,
+        "label":  "after_fse_20260522_171146",
+        "max_tokens":  64,
+        "runs":  [
+                     {
+                         "inference_ms":  8608,
+                         "run":  1,
+                         "elapsed_ms":  8762,
+                         "tokens_per_sec":  7.43,
+                         "completion_tokens":  64
+                     },
+                     {
+                         "inference_ms":  8623,
+                         "run":  2,
+                         "elapsed_ms":  8734,
+                         "tokens_per_sec":  7.42,
+                         "completion_tokens":  64
+                     },
+                     {
+                         "inference_ms":  8559,
+                         "run":  3,
+                         "elapsed_ms":  8570,
+                         "tokens_per_sec":  7.48,
+                         "completion_tokens":  64
+                     }
+                 ]
+    },
+    {
+        "timestamp":  "20260522_171146",
+        "model":  "Llama-3.2-3B Q4_K_M",
+        "min_tps":  7.45,
+        "max_tps":  7.46,
+        "avg_tps":  7.46,
+        "label":  "after_fse_20260522_171146",
+        "max_tokens":  64,
+        "runs":  [
+                     {
+                         "inference_ms":  8576,
+                         "run":  1,
+                         "elapsed_ms":  8746,
+                         "tokens_per_sec":  7.46,
+                         "completion_tokens":  64
+                     },
+                     {
+                         "inference_ms":  8576,
+                         "run":  2,
+                         "elapsed_ms":  8674,
+                         "tokens_per_sec":  7.46,
+                         "completion_tokens":  64
+                     },
+                     {
+                         "inference_ms":  8589,
+                         "run":  3,
+                         "elapsed_ms":  8713,
+                         "tokens_per_sec":  7.45,
+                         "completion_tokens":  64
+                     }
+                 ]
+    }
+]
