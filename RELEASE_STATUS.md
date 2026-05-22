@@ -24,7 +24,7 @@ That means:
 
 ## Active Release Gates
 
-1. Keep the public context claim honest at `2048`.
+1. Keep the public context claim honest: context window is model-native (read from GGUF `n_ctx`). Do not advertise a specific number — it varies by model.
 2. Characterize helical-shift behavior with explicit long-run edge-case tests.
 3. Reduce repository clutter and generated noise.
 4. Defer OpenClaw provider rollout until a real 16K-capable model path exists.

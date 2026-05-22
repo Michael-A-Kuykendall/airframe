@@ -16,16 +16,15 @@ Use it as the source of truth for:
 - Product: Shimmy
 - Engine: Airframe
 - Launch model: TinyLlama 1.1B Chat Q4_0 GGUF
-- Truthful advertised context length: 2048 tokens
+- Truthful advertised context length: model-native (read from GGUF header at load time)
 
-Do not advertise 4096 or 8192 context for this launch.
+Do not advertise a fixed number — each model reports its own `n_ctx`. TinyLlama is 2048; Llama-3.2 models are 131072; Gemma-2-2B is 8192. Practical VRAM limits apply.
 
 ## Runtime Reality
 
-- Model GGUF metadata reports 2048 context
-- Effective ordinary content horizon is 2048 tokens
-- Session replay budget is 2048 tokens
-- Rolling KV cache allocation is 4096 slots
+- Context window (`n_ctx`) is read from the model's GGUF metadata at startup via `spec.n_ctx`
+- `SHIMMY_MAX_CTX` env var can cap or override the model-native value
+- Effective context is bounded by available VRAM (KV cache allocation)
 - Helical shifting allows continued generation beyond the active horizon
 - Continued generation is not the same thing as a larger fully visible context window
 

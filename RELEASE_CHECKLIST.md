@@ -2,11 +2,11 @@
 
 This document tracks the concrete steps required to ship the current `airframe` backend as the default provider for `shimmy_integration`. 
 
-## 1. Context Metadata Reconciliation (Goal: 2048 Truth)
-- [x] **Audit `shimmy_integration` Model Registry**: Ensure the default context window for models relying on Airframe is set to `2048` (currently claiming `4096`).
-- [x] **Audit API/OpenAI Surfaces**: Find and correct any hardcoded `4096` or `8192` maximums in the Shimmy API translation layers to respect the engine's `2048` limit.
-- [x] **Fix `shimmy_server_gpu.rs`**: Update the CLI parsing, default values, and comments. Remove references to `8192` and ensure `max_ctx` defaults to `2048` (with the shader non-sink clamp at ~2047 matching this reality).
-- [x] **Verify Session Window**: Ensure the session window allocation strictly matches the `2048` token limit.
+## 1. Context Window — Model-Native (not a fixed number)
+- [x] **Confirmed**: Server reads `spec.n_ctx` directly from GGUF metadata. No hardcoded context limit.
+- [x] **`SHIMMY_MAX_CTX` override**: Available to cap or extend beyond the model default.
+- [x] **Practical VRAM bound**: KV cache allocation scales with context × layers × heads — large context on large models requires adequate VRAM.
+- [x] **Per-model verified context**: TinyLlama 2048, Llama-3.2-1B/3B 131072, Gemma-2-2B 8192, StarCoder2-3B 16384.
 
 ## 2. Helical Shift Validation
 - [x] **Short Sanity Check**: Run current tip with default settings and confirm the short SHA matches `f82a1ad...`. (Use `scripts/short_story_sha_check.ps1`).
