@@ -172,11 +172,13 @@ impl GpuRuntime {
             dim,
             head_count: spec.n_head as u32,
             head_count_kv: spec.n_head_kv as u32,
-            head_dim: (spec.n_embd / spec.n_head) as u32,
+            head_dim: spec.head_dim as u32,
             rms_eps: spec.rms_eps,
             ffn_dim: spec.ff_dim as u32,
             temp_stride: spec.temp_buffer_size as u32,
             quant_type: packed_quant_type,
+            attn_logit_softcap: spec.attn_logit_softcap,
+            post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
         };
 
         let norm_weight_offset = gpu_model

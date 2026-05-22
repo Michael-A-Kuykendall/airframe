@@ -198,6 +198,8 @@ impl BindlessPipeline {
             ffn_dim,
             temp_stride,
             quant_type: 0, // overridden per-layer below
+            attn_logit_softcap: spec.attn_logit_softcap,
+            post_norm_enabled: if spec.arch_string() == "gemma2" { 1 } else { 0 },
         };
 
         // D. Output Logits
@@ -534,36 +536,81 @@ impl BindlessPipeline {
                     seq_len
                 );
             }
+            // Each kernel in its own compute pass to guarantee memory barriers
+            // (matches layer.rs ordering). PostAttnNorm and PostFfwNorm are no-ops
+            // when params.post_norm_enabled == 0 (non-Gemma models).
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {}", i)),
+                    label: Some(&format!("Loop Layer {} - AttnNorm", i)),
                     timestamp_writes: None,
                 });
-
                 cpass.set_bind_group(0, bg, &[]);
-
-                // Attn Norm Provider (compute shared normalized activations once)
                 cpass.set_pipeline(&self.layer_pipeline_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
-
-                // QKV (Calculates Q/K/V and applies Softmax + Attention)       
+            }
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - QKV", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(&self.layer_pipeline_qkv);
                 cpass.dispatch_workgroups(wg_qkv, batch_size, 1);
-
-                // Attn Out (Flash Attention — single pass, no scores buffer needed)
+            }
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - AttnOut", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(&self.layer_pipeline_attn_out);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
-
-                // Attn Proj (Apply output projection + residual add)
+            }
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - AttnProj", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(&self.layer_pipeline_attn_proj);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
-
-                // FFN Proj
+            }
+            {
+                // Post-attention norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - PostAttnNorm", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
+                cpass.set_pipeline(&self.layer_pipeline_post_attn_norm);
+                cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+            }
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - FFNProj", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(&self.layer_pipeline_ffn_proj);
                 cpass.dispatch_workgroups(wg_ffn, batch_size, 1);
-
-                // FFN Down
+            }
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - FFNDown", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(&self.layer_pipeline_ffn_down);
+                cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+            }
+            {
+                // Post-FFW norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - PostFfwNorm", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
+                cpass.set_pipeline(&self.layer_pipeline_post_ffw_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             
