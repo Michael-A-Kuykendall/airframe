@@ -73,6 +73,8 @@ pub struct LayerParams {
     pub ffn_dim: u32, // Feed-forward intermediate dimension (e.g. 5632 for TinyLlama)
     pub temp_stride: u32, // Per-token temp buffer stride in floats (e.g. 16384)
     pub quant_type: u32, // GGML type: 2=Q4_0, 12=Q4_K
+    pub attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
+    pub _pad: u32,               // align to 40 bytes
 }
 
 #[repr(C)]

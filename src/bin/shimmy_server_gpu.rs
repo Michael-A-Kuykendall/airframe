@@ -324,7 +324,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter_limits = adapter.limits();
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
-    limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
+    limits.max_buffer_size = adapter_limits.max_buffer_size;
     limits.max_storage_buffers_per_shader_stage = 8;
     limits.max_compute_invocations_per_workgroup = 256;
 
@@ -375,6 +375,17 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // GPU doesn't have Q6_K shader yet, so dequant to F32 on CPU
     let output_head_f32 = load_output_head_f32(&model_path, &gpu_model, &device, &queue, &spec)?;
     eprintln!("[GPU Server] Output head dequantized to F32 (262 MB)");
+
+    // If the output head buffer exceeds the hardware binding limit, route logit computation
+    // through the CPU embedding table (already loaded to RAM) instead of the GPU shader.
+    let use_cpu_head = output_head_f32.size() > adapter_limits.max_storage_buffer_binding_size as u64;
+    if use_cpu_head {
+        eprintln!(
+            "[GPU Server] Output head ({} MB) exceeds binding limit ({} MB) — CPU logit path active",
+            output_head_f32.size() / 1_048_576,
+            adapter_limits.max_storage_buffer_binding_size / 1_048_576,
+        );
+    }
 
     // === Token Embedding CPU Table ===
     // The dequant pipeline uses a hardcoded Q4_0 shader, which is wrong for
@@ -536,6 +547,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 cache_clone,
                 &output_head_f32,
                 &embd_table_cpu,
+                use_cpu_head,
             )
             .await
         };

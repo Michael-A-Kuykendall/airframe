@@ -198,6 +198,8 @@ impl BindlessPipeline {
             ffn_dim,
             temp_stride,
             quant_type: 0, // overridden per-layer below
+            attn_logit_softcap: spec.attn_logit_softcap,
+            _pad: 0,
         };
 
         // D. Output Logits
