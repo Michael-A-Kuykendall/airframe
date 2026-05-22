@@ -10,6 +10,7 @@ use crate::core::error::{LibshimmyError, Result};
 /// Supported GGML tensor quantization types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
+// non_camel_case_types: GGML naming convention uses underscores (Q4_0, Q4_K, etc.)
 #[allow(non_camel_case_types)]
 pub enum GgmlType {
     F32  = 0,

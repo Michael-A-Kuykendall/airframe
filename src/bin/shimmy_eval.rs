@@ -475,6 +475,7 @@ async fn main() -> Result<()> {
         "hellaswag" => run_hellaswag(&args, &tokenizer, &mut *engine).await?,
         "arc" | "arc-easy" | "arc-challenge" => run_arc(&args, &tokenizer, &mut *engine).await?,
         "determinism" => run_determinism(&args, &tokenizer, &mut *engine).await?,
+        // Unknown task string is a CLI misuse, not a runtime error — panic is appropriate here.
         _ => panic!(
             "Unknown task: {}. Available: wikitext, lambada, hellaswag, arc, determinism",
             args.task
