@@ -802,15 +802,8 @@ fn run_inference_completion(
                 (cache.get_seq_len(), cache.get_window_base())
             };
             for layer_idx in 0..spec.n_layer {
-                let layer_offsets = model
-                    .metadata
-                    .get_layer_offsets(layer_idx, spec.arch_string())
-                    .expect(&format!("Missing offsets for layer {}", layer_idx));
-
-                let lqt_main = model.metadata.get_tensor_type(&format!("blk.{}.attn_q.weight", layer_idx)).unwrap_or(2);
-                let lqt_v    = model.metadata.get_tensor_type(&format!("blk.{}.attn_v.weight", layer_idx)).unwrap_or(lqt_main);
-                let lqt_down = model.metadata.get_tensor_type(&format!("blk.{}.ffn_down.weight", layer_idx)).unwrap_or(lqt_main);
-                let layer_params_l = LayerParams { quant_type: lqt_main | (lqt_v << 8) | (lqt_down << 16), ..layer_params };
+                let compiled = &model.metadata.compiled_layers[layer_idx];
+                let layer_params_l = LayerParams { quant_type: compiled.quant_type_packed, ..layer_params };
 
                 let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = {
                     let mut cache = kv_cache.lock().unwrap();
@@ -821,7 +814,7 @@ fn run_inference_completion(
                         &mut cache,
                         layer_idx,
                         &layer_output,
-                        layer_offsets,
+                        compiled.offsets,
                         layer_params_l,
                     )
                 };
@@ -844,22 +837,14 @@ fn run_inference_completion(
             }
         } else {
             for layer_idx in 0..spec.n_layer {
-                let layer_offsets = model
-                    .metadata
-                    .get_layer_offsets(layer_idx, spec.arch_string())
-                    .expect(&format!("Missing offsets for layer {}", layer_idx));
-
-                // Per-layer quant types (Q4_K_M uses Q6_K for first layers, Q4_K for later layers)
-                let lqt_main = model.metadata.get_tensor_type(&format!("blk.{}.attn_q.weight", layer_idx)).unwrap_or(2);
-                let lqt_v    = model.metadata.get_tensor_type(&format!("blk.{}.attn_v.weight", layer_idx)).unwrap_or(lqt_main);
-                let lqt_down = model.metadata.get_tensor_type(&format!("blk.{}.ffn_down.weight", layer_idx)).unwrap_or(lqt_main);
-                let layer_params_l = LayerParams { quant_type: lqt_main | (lqt_v << 8) | (lqt_down << 16), ..layer_params };
+                let compiled = &model.metadata.compiled_layers[layer_idx];
+                let layer_params_l = LayerParams { quant_type: compiled.quant_type_packed, ..layer_params };
 
                 {
                     let mut cache = kv_cache.lock().unwrap();
                     layer_output = pipeline.run_layer_with_cache(
                         device, queue, model, &mut cache, layer_idx, &layer_output,
-                        layer_offsets, layer_params_l,
+                        compiled.offsets, layer_params_l,
                     );
                 }
             }

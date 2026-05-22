@@ -90,6 +90,19 @@ pub struct CacheParams {
     pub pad3: u32,
 }
 
+/// Pre-compiled per-layer lookup table entry.
+/// Built once at model load time from the GGUF tensor index.
+/// Eliminates per-token HashMap lookups and format! string allocations
+/// in the inference hot path (FSE compiled-layer optimization).
+#[derive(Clone, Debug)]
+pub struct CompiledLayerEntry {
+    /// All tensor byte-offsets for this layer, ready to upload to GPU.
+    pub offsets: LayerOffsets,
+    /// Packed quant types: bits[7:0]=attn_q, bits[15:8]=attn_v, bits[23:16]=ffn_down.
+    /// Matches the `quant_type` field layout expected by LayerParams.
+    pub quant_type_packed: u32,
+}
+
 /// The Control Plane for Bindless Inference.
 pub struct BindlessPipeline {
     pub pipeline: wgpu::ComputePipeline,
