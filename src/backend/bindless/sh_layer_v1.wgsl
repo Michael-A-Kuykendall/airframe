@@ -29,6 +29,8 @@ struct LayerParams {
     ffn_dim: u32,       // Feed-forward intermediate dim (e.g. 5632)
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
     quant_type: u32,    // GGML type: 0=F32, 1=F16, 2=Q4_0, 8=Q8_0, 12=Q4_K, 13=Q5_K, 14=Q6_K
+    attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
+    _pad: u32,               // align to 40 bytes
 };
 
 struct CacheParams {
@@ -504,7 +506,11 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
             dot_qk += (q_re * k_re + q_im * k_im) * cos_a
                     + (q_re * k_im - q_im * k_re) * sin_a;
         }
-        let score = dot_qk * scale;
+        let score_raw = dot_qk * scale;
+        // Gemma-2 attention logit soft-cap: tanh(score / cap) * cap
+        let score = select(score_raw,
+                           tanh(score_raw / params.attn_logit_softcap) * params.attn_logit_softcap,
+                           params.attn_logit_softcap > 0.0);
 
         // V value for this position / kv-head / output element
         let v_val = kv_cache_v[
