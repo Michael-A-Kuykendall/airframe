@@ -279,17 +279,9 @@ impl BindlessPipeline {
         let mut _params_buffers: Vec<wgpu::Buffer> = Vec::new(); // Keep alive
 
         for i in 0..layer_count {
-            let offsets = model
-                .metadata
-                .get_layer_offsets(i, spec.arch_string())
-                .expect(&format!("Missing offsets for layer {}", i));
-
-            // Per-layer quant types (mixed-quant models vary by layer)
-            let lqt_main = model.metadata.get_tensor_type(&format!("blk.{}.attn_q.weight", i)).unwrap_or(2);
-            let lqt_v    = model.metadata.get_tensor_type(&format!("blk.{}.attn_v.weight", i)).unwrap_or(lqt_main);
-            let lqt_down = model.metadata.get_tensor_type(&format!("blk.{}.ffn_down.weight", i)).unwrap_or(lqt_main);
+            let compiled = &model.metadata.compiled_layers[i as usize];
             let layer_params_i = LayerParams {
-                quant_type: lqt_main | (lqt_v << 8) | (lqt_down << 16),
+                quant_type: compiled.quant_type_packed,
                 ..params_base
             };
             let params_buffer_i = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -310,7 +302,7 @@ impl BindlessPipeline {
 
             let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Layer {} Offsets", i)),
-                contents: bytemuck::bytes_of(&offsets),
+                contents: bytemuck::bytes_of(&compiled.offsets),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 

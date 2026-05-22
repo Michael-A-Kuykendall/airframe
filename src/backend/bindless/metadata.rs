@@ -1,4 +1,5 @@
 use crate::core::spec::{GgufValue, ModelSpec};
+use super::pipeline::CompiledLayerEntry;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -17,6 +18,8 @@ pub struct BindlessMetadata {
     pub data_start_offset: u64,
     /// All GGUF metadata key-value pairs
     pub gguf_metadata: HashMap<String, GgufValue>,
+    /// Pre-compiled per-layer lookup table (FSE: built once at load, zero-cost at inference time).
+    pub compiled_layers: Vec<CompiledLayerEntry>,
 }
 
 impl BindlessMetadata {
@@ -121,6 +124,47 @@ impl BindlessMetadata {
             absolute_offsets.insert(k, data_start + v);
         }
 
+        // FSE compiled-layer table: single pass over layer indices at load time.
+        // Eliminates per-token format!/HashMap overhead from the inference hot path.
+        let mut compiled_layers = Vec::new();
+        {
+            let p = |offsets: &HashMap<String, u64>, layer: usize, s: &str| -> u32 {
+                offsets.get(&format!("blk.{}.{}", layer, s))
+                    .copied()
+                    .unwrap_or(0) as u32
+            };
+            let t = |types: &HashMap<String, u32>, layer: usize, s: &str| -> u32 {
+                types.get(&format!("blk.{}.{}", layer, s))
+                    .copied()
+                    .unwrap_or(2) // default Q4_0
+            };
+
+            let mut layer_idx = 0usize;
+            while absolute_offsets.contains_key(&format!("blk.{}.attn_norm.weight", layer_idx)) {
+                let offsets = super::pipeline::LayerOffsets {
+                    attn_norm: p(&absolute_offsets, layer_idx, "attn_norm.weight"),
+                    attn_q:    p(&absolute_offsets, layer_idx, "attn_q.weight"),
+                    attn_k:    p(&absolute_offsets, layer_idx, "attn_k.weight"),
+                    attn_v:    p(&absolute_offsets, layer_idx, "attn_v.weight"),
+                    attn_out:  p(&absolute_offsets, layer_idx, "attn_output.weight"),
+                    ffn_norm:  p(&absolute_offsets, layer_idx, "ffn_norm.weight"),
+                    ffn_gate:  p(&absolute_offsets, layer_idx, "ffn_gate.weight"),
+                    ffn_down:  p(&absolute_offsets, layer_idx, "ffn_down.weight"),
+                    ffn_up:    p(&absolute_offsets, layer_idx, "ffn_up.weight"),
+                    padding:   [layer_idx as u32, 0, 0],
+                };
+                let lqt_main = t(&tensor_types, layer_idx, "attn_q.weight");
+                let lqt_v    = t(&tensor_types, layer_idx, "attn_v.weight");
+                let lqt_down = t(&tensor_types, layer_idx, "ffn_down.weight");
+                compiled_layers.push(CompiledLayerEntry {
+                    offsets,
+                    quant_type_packed: lqt_main | (lqt_v << 8) | (lqt_down << 16),
+                });
+                layer_idx += 1;
+            }
+            println!("[Metadata] Compiled {} layers into lookup table.", compiled_layers.len());
+        }
+
         Self {
             version,
             tensor_count,
@@ -129,6 +173,7 @@ impl BindlessMetadata {
             tensor_dims,
             data_start_offset: data_start,
             gguf_metadata,
+            compiled_layers,
         }
     }
 
