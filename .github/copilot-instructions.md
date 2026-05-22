@@ -12,6 +12,15 @@ Keep this file limited to current operating rules. Do not carry forward historic
 
 If a push is not explicitly requested, do not push.
 
+## Test Failures
+
+**Zero tolerance. No exceptions.**
+
+`cargo test` must finish with 0 failures before any task is considered done.
+There is no such thing as a "pre-existing" failure that can be left alone.
+If a test was already broken before your change, you still own it — fix it before moving on.
+Do not declare work complete, summarize results, or ask what is next while any test is red.
+
 ## Session Focus
 
 - Prefer current repo state over historical side worktrees.
