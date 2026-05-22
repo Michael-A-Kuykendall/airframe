@@ -192,3 +192,104 @@ impl PreflightResources {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::spec::{ModelArch, GgufFileType};
+
+    /// Minimal spec for RoPE math tests — no GPU required.
+    fn tiny_spec(rope_scale: f32, yarn_alpha: f32, yarn_beta: f32) -> ModelSpec {
+        ModelSpec {
+            n_vocab: 32,
+            n_embd: 8,
+            n_layer: 1,
+            n_head: 2,
+            n_head_kv: 1,
+            ff_dim: 16,
+            rms_eps: 1e-5,
+            rope_base: 10000.0,
+            rope_scale,
+            rope_dim: 4,
+            yarn_alpha,
+            yarn_beta,
+            n_ctx: 4,
+            head_dim: 4,
+            gqa_ratio: 2,
+            kv_dim: 4,
+            arch: ModelArch::Llama,
+            file_type: GgufFileType::Q4_0,
+            model_name: "test".to_string(),
+            temp_buffer_size: 64,
+            kv_cache_size_per_layer: 64,
+        }
+    }
+
+    /// At distance 0 every (cos, sin) entry must be (1.0, 0.0) regardless of scaling.
+    #[test]
+    fn rope_table_distance_zero_is_one_zero() {
+        let spec = tiny_spec(1.0, 0.0, 0.0);
+        let table = PreflightResources::compute_rope_table(&spec, 1.0);
+        let n_pairs = spec.rope_dim / 2; // 2
+        for p in 0..n_pairs {
+            let cos_val = table[p * 2];
+            let sin_val = table[p * 2 + 1];
+            assert!(
+                (cos_val - 1.0).abs() < 1e-6,
+                "cos at d=0 p={p} should be 1.0, got {cos_val}"
+            );
+            assert!(
+                sin_val.abs() < 1e-6,
+                "sin at d=0 p={p} should be 0.0, got {sin_val}"
+            );
+        }
+    }
+
+    /// Linear scaling (no YaRN): effective theta = base_theta * scale.
+    /// At d=1 the angle for pair 0 is theta_0 * scale; verify cos matches.
+    #[test]
+    fn rope_table_linear_scale_matches_direct_formula() {
+        let scale = 0.5_f32;
+        let spec = tiny_spec(scale, 0.0, 0.0);
+        let table = PreflightResources::compute_rope_table(&spec, scale);
+        // theta_0 = 1 / base^(0 / dim) = 1 / 10000^0 = 1.0; effective = 1.0 * 0.5 = 0.5
+        let expected_cos = 0.5_f32.cos();
+        let n_pairs = spec.rope_dim / 2;
+        let cos_val = table[1 * n_pairs * 2 + 0 * 2]; // d=1, p=0, cos
+        assert!(
+            (cos_val - expected_cos).abs() < 1e-6,
+            "linear scale cos mismatch: expected {expected_cos}, got {cos_val}"
+        );
+    }
+
+    /// YaRN ramp: at the extreme high-frequency end (very short wavelength, i=0 in a small base),
+    /// ramp should clamp to 1.0 — meaning no frequency scaling applied to that dimension.
+    #[test]
+    fn yarn_ramp_high_freq_dim_is_unscaled() {
+        // Derivation: base=1.0001 gives theta_0≈1, lambda_0≈2π≈6.28.
+        // l_train is n_ctx*scale = 4000*0.5 = 2000.
+        // The clamp argument evaluates to ~353, clamping to 1.0 (high-freq: no scaling).
+        // Without YaRN the effective theta is theta*scale = theta*0.5.
+        // So at d=1: YaRN cos(1.0) ≠ linear cos(0.5).
+        let mut spec = tiny_spec(0.5, 0.1, 1.0); // alpha=0.1 > 0 enables YaRN
+        spec.n_ctx = 4000;
+        spec.rope_base = 1.0001; // tiny base → theta_0 ≈ 1, tiny lambda → ramp clamps to 1.0
+
+        let table_yarn = PreflightResources::compute_rope_table(&spec, 0.5);
+
+        let mut spec_no_yarn = spec.clone();
+        spec_no_yarn.yarn_alpha = 0.0; // disables YaRN → falls through to linear
+        spec_no_yarn.yarn_beta = 0.0;
+        let table_linear = PreflightResources::compute_rope_table(&spec_no_yarn, 0.5);
+
+        let n_pairs = spec.rope_dim / 2;
+        // At high-freq dim p=0, d=1: YaRN keeps theta unscaled (cos(1.0)),
+        // linear halves it (cos(0.5)). They must differ.
+        let yarn_cos = table_yarn[1 * n_pairs * 2 + 0 * 2];
+        let linear_cos = table_linear[1 * n_pairs * 2 + 0 * 2];
+        assert!(
+            (yarn_cos - linear_cos).abs() > 1e-3,
+            "YaRN high-freq dim should differ from linear scaling: yarn_cos={yarn_cos:.6}, linear_cos={linear_cos:.6}"
+        );
+    }
+}

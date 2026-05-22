@@ -1,0 +1,317 @@
+//! MatMul and RMSNorm dispatch methods for `BindlessPipeline`.
+use super::*;
+use super::super::loader::BindlessModel;
+use wgpu::util::DeviceExt;
+
+impl BindlessPipeline {
+    pub fn run_matmul_test(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        model: &BindlessModel,
+        input: &[f32],
+        params: MatMulParams,
+    ) -> Vec<f32> {
+        println!(
+            "[BindlessPipeline] Running MatMul Test (N={}, K={})",
+            params.n, params.k
+        );
+
+        // Upload Input Vector
+        let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Input X"),
+            contents: bytemuck::cast_slice(input),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        // Create Output Buffer
+        let output_size = (params.n as usize * std::mem::size_of::<f32>()) as u64;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Output Y"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        // Upload Params
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("MatMul Params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("MatMul BindGroup"),
+            layout: &self.matmul_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model.gpu_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: input_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("MatMul Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.matmul_pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = (params.n + 255) / 256;
+            cpass.dispatch_workgroups(workgroups, 1, 1);
+        }
+
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_size);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+
+        loop {
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            if let Ok(res) = rx.try_recv() {
+                res.expect("Buffer map failed");
+                break;
+            }
+        }
+
+        let data = slice.get_mapped_range();
+        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging_buffer.unmap();
+
+        result
+    }
+
+    /// Run MatMul with pre-dequantized F32 weights (for Q6_K workaround)
+    pub fn run_matmul_f32(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        weights_f32: &wgpu::Buffer, // Pre-uploaded F32 weights
+        input: &[f32],
+        n: u32, // Output dimension (vocab_size)
+        k: u32, // Input dimension (hidden_size)
+    ) -> Vec<f32> {
+        println!("[BindlessPipeline] Running MatMul F32 (N={}, K={})", n, k);
+
+        // Upload Input Vector
+        let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Input X"),
+            contents: bytemuck::cast_slice(input),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        // Create Output Buffer
+        let output_size = (n as usize * std::mem::size_of::<f32>()) as u64;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Output Y"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        // Upload Params (offset is ignored for F32, but struct requires it)
+        let params = MatMulParams {
+            n,
+            k,
+            weights_offset: 0, // Unused for F32 path
+            padding: 0,
+        };
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("MatMul Params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("MatMul F32 BindGroup"),
+            layout: &self.matmul_f32_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: weights_f32.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: input_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("MatMul F32 Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.matmul_f32_pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = (n + 63) / 64;
+            cpass.dispatch_workgroups(workgroups, 1, 1);
+        }
+
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_size);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+
+        loop {
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            if let Ok(res) = rx.try_recv() {
+                res.expect("Buffer map failed");
+                break;
+            }
+        }
+
+        let data = slice.get_mapped_range();
+        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging_buffer.unmap();
+
+        result
+    }
+
+    /// Run RMSNorm Test
+    pub fn run_rmsnorm_test(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        model: &BindlessModel,
+        input: &[f32],
+        params: RMSNormParams,
+    ) -> Vec<f32> {
+        println!(
+            "[BindlessPipeline] Running RMSNorm Test (Size={}, Eps={:e})",
+            params.count, params.eps
+        );
+
+        // Upload Input Vector
+        let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Input X"),
+            contents: bytemuck::cast_slice(input),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        // Create Output Buffer
+        let output_size = (params.count as usize * std::mem::size_of::<f32>()) as u64;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Output Y"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        // Upload Params
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("RMSNorm Params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RMSNorm BindGroup"),
+            layout: &self.rmsnorm_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model.gpu_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: input_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("RMSNorm Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.rmsnorm_pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.dispatch_workgroups(1, 1, 1);
+        }
+
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_size);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+
+        loop {
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            if let Ok(res) = rx.try_recv() {
+                res.expect("Buffer map failed");
+                break;
+            }
+        }
+
+        let data = slice.get_mapped_range();
+        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging_buffer.unmap();
+
+        result
+    }
+}
