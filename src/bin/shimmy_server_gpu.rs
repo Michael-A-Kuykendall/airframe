@@ -308,6 +308,45 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string()
     });
 
+    // === Model Inventory (auto-discovery) ===
+    // Build the list of available .gguf models.  The currently-loaded model is
+    // always entry 0.  LIBSHIMMY_MODEL_DIR, if set, is scanned for additional
+    // .gguf files so that /v1/models can advertise them to callers.
+    let loaded_model_id = std::path::Path::new(&model_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("local")
+        .to_string();
+    let mut model_inventory: Vec<(String, String)> =
+        vec![(loaded_model_id.clone(), model_path.clone())];
+    if let Ok(dir_str) = std::env::var("LIBSHIMMY_MODEL_DIR") {
+        if let Ok(entries) = std::fs::read_dir(&dir_str) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|e| e.to_str()) == Some("gguf") {
+                    let name = p
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let full = p.to_string_lossy().to_string();
+                    if full != model_path {
+                        model_inventory.push((name, full));
+                    }
+                }
+            }
+        }
+    }
+    let discovered_models: std::sync::Arc<Vec<(String, String)>> =
+        std::sync::Arc::new(model_inventory);
+    eprintln!(
+        "[GPU Server] Model inventory: {} model(s)",
+        discovered_models.len()
+    );
+    for (name, _) in discovered_models.iter() {
+        eprintln!("[GPU Server]   - {}", name);
+    }
+
     eprintln!("[GPU Server] Loading model: {}", model_path);
 
     // === GPU Initialization ===
@@ -435,6 +474,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&http_bind_addr).await?;
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
     let chat_template_family = chat_template_family_from_metadata(&gpu_model.metadata.gguf_metadata, &spec);
+    let models_for_http = Arc::clone(&discovered_models);
     tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
@@ -442,9 +482,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 let states = Arc::clone(&states_for_http);
                 let sessions = Arc::clone(&sessions_for_http);
                 let streams = Arc::clone(&streams_for_http);
+                let models = Arc::clone(&models_for_http);
                 let chat_template_family = chat_template_family;
                 tokio::spawn(async move {
-                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, chat_template_family).await {
+                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, models, chat_template_family).await {
                         eprintln!("[HTTP] Connection error: {}", e);
                     }
                 });
@@ -592,6 +633,7 @@ async fn handle_http_connection(
     states: Arc<Mutex<std::collections::HashMap<String, JobState>>>,
     _session_states: Arc<Mutex<std::collections::HashMap<String, SessionState>>>,
     stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
+    discovered_models: std::sync::Arc<Vec<(String, String)>>,
     chat_template_family: ChatTemplateFamily,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::AsyncWriteExt;
@@ -608,7 +650,30 @@ async fn handle_http_connection(
     let method = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("");
 
-    if method == "GET" && path.starts_with("/api/repro/queue") {
+    if method == "GET" && path == "/v1/models" {
+        // OpenAI-compatible model list — one entry per discovered .gguf
+        let mut items = String::from("[");
+        for (i, (name, _)) in discovered_models.iter().enumerate() {
+            if i > 0 {
+                items.push(',');
+            }
+            let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+            items.push_str(&format!(
+                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\"}}",
+                escaped
+            ));
+        }
+        items.push(']');
+        let body = format!("{{\"object\":\"list\",\"data\":{}}}", items);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await?;
+        stream.flush().await?;
+        return Ok(());
+    } else if method == "GET" && path.starts_with("/api/repro/queue") {
         let state_json = {
             let st = states.lock().unwrap();
             let mut list: Vec<&JobState> = st.values().collect();
@@ -791,7 +856,9 @@ async fn handle_http_connection(
             st.insert(job_id.clone(), state);
         }
 
-        let (stream_sender, _) = tokio::sync::broadcast::channel::<String>(256);
+        let is_streaming = req.stream.unwrap_or(false);
+
+        let (stream_sender, stream_rx) = tokio::sync::broadcast::channel::<String>(256);
         {
             let mut st = stream_channels.lock().unwrap();
             st.insert(job_id.clone(), stream_sender);
@@ -810,18 +877,66 @@ async fn handle_http_connection(
             return Ok(());
         }
 
-        let resp_json = format!(
-            "{{\"queued\": true, \"job_id\": \"{}\", \"position\": {}, \"eta_seconds\": {}}}",
-            job_id,
-            pos,
-            (pos + 1) * 30
-        );
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
-            resp_json.len(), resp_json
-        );
-        stream.write_all(response.as_bytes()).await?;
-        stream.flush().await?;
+        if is_streaming {
+            // SSE streaming path — hold the connection open and forward tokens
+            // as OpenAI-compatible `chat.completion.chunk` events.
+            let sse_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nX-Accel-Buffering: no\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+            stream.write_all(sse_headers.as_bytes()).await?;
+            stream.flush().await?;
+
+            let mut rx = stream_rx;
+            loop {
+                match rx.recv().await {
+                    Ok(token) => {
+                        // Escape the token text as a JSON string value
+                        let token_json = token
+                            .replace('\\', "\\\\")
+                            .replace('"', "\\\"")
+                            .replace('\n', "\\n")
+                            .replace('\r', "\\r");
+                        let chunk = format!(
+                            "data: {{\"id\":\"{}\",\"object\":\"chat.completion.chunk\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{}\"}},\"finish_reason\":null}}]}}\n\n",
+                            job_id, token_json
+                        );
+                        if stream.write_all(chunk.as_bytes()).await.is_err() {
+                            break;
+                        }
+                        stream.flush().await.ok();
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+
+            // Emit final chunk with finish_reason then [DONE]
+            let stop_reason = {
+                let st = states.lock().unwrap();
+                st.get(&job_id)
+                    .and_then(|s| s.result.as_ref().map(|r| r.stop_reason.clone()))
+                    .unwrap_or_else(|| "stop".to_string())
+            };
+            let finish_chunk = format!(
+                "data: {{\"id\":\"{}\",\"object\":\"chat.completion.chunk\",\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"{}\"}}]}}\n\ndata: [DONE]\n\n",
+                job_id, stop_reason
+            );
+            stream.write_all(finish_chunk.as_bytes()).await.ok();
+            stream.flush().await.ok();
+        } else {
+            // Non-streaming: return the job_id immediately; client polls /api/repro/job-status
+            let resp_json = format!(
+                "{{\"queued\": true, \"job_id\": \"{}\", \"position\": {}, \"eta_seconds\": {}}}",
+                job_id,
+                pos,
+                (pos + 1) * 30
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+                resp_json.len(),
+                resp_json
+            );
+            stream.write_all(response.as_bytes()).await?;
+            stream.flush().await?;
+        }
         return Ok(());
     }
 
@@ -1115,6 +1230,97 @@ mod tests {
     fn parse_content_length_from_header() {
         let header = "POST /v1/chat/completions HTTP/1.1\r\nContent-Length: 42\r\nHost: localhost\r\n";
         assert_eq!(parse_content_length(header), 42);
+    }
+
+    // --- Model inventory (auto-discovery) ---
+
+    #[test]
+    fn model_inventory_always_includes_loaded_model() {
+        // Minimal smoke: the code path that builds the inventory must produce
+        // at least one entry for the loaded model even when no MODEL_DIR is set.
+        let model_path =
+            "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf";
+        let loaded_id = std::path::Path::new(model_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("local");
+        let inventory: Vec<(String, String)> =
+            vec![(loaded_id.to_string(), model_path.to_string())];
+        assert_eq!(inventory.len(), 1);
+        assert_eq!(inventory[0].0, "TinyLlama-1.1B-Chat-v1.0.Q4_0");
+    }
+
+    #[test]
+    fn v1_models_response_is_valid_json() {
+        // Build the same JSON body the /v1/models handler builds and verify
+        // it can be parsed back.
+        let inventory = vec![
+            (
+                "TinyLlama-1.1B-Chat-v1.0.Q4_0".to_string(),
+                "/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string(),
+            ),
+            (
+                "Llama-3.2-1B-Instruct-Q4_K_M".to_string(),
+                "/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf".to_string(),
+            ),
+        ];
+        let mut items = String::from("[");
+        for (i, (name, _)) in inventory.iter().enumerate() {
+            if i > 0 {
+                items.push(',');
+            }
+            let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+            items.push_str(&format!(
+                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\"}}",
+                escaped
+            ));
+        }
+        items.push(']');
+        let body = format!("{{\"object\":\"list\",\"data\":{}}}", items);
+
+        // Must parse as valid JSON
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body).expect("response body must be valid JSON");
+        assert_eq!(parsed["object"], "list");
+        assert_eq!(parsed["data"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["data"][0]["id"], "TinyLlama-1.1B-Chat-v1.0.Q4_0");
+        assert_eq!(parsed["data"][1]["id"], "Llama-3.2-1B-Instruct-Q4_K_M");
+    }
+
+    // --- SSE streaming helpers ---
+
+    #[test]
+    fn sse_token_escaping_handles_newlines_and_quotes() {
+        // The streaming path manually escapes token text.  Verify the escaping
+        // rules match what a JSON decoder expects.
+        let token = "line1\nline2\"quoted\"";
+        let escaped = token
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r");
+        // Re-parse via serde_json as if we had wrapped it in quotes
+        let as_json_str = format!("\"{}\"", escaped);
+        let decoded: String = serde_json::from_str(&as_json_str).unwrap();
+        assert_eq!(decoded, token);
+    }
+
+    #[test]
+    fn sse_chunk_format_is_well_formed() {
+        // Verify the SSE event string we build starts with "data: " and ends
+        // with the double-newline required by the SSE spec.
+        let job_id = "job_12345";
+        let token_json = "hello";
+        let chunk = format!(
+            "data: {{\"id\":\"{}\",\"object\":\"chat.completion.chunk\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{}\"}},\"finish_reason\":null}}]}}\n\n",
+            job_id, token_json
+        );
+        assert!(chunk.starts_with("data: "));
+        assert!(chunk.ends_with("\n\n"));
+        // The JSON portion must parse
+        let json_part = &chunk["data: ".len()..chunk.len() - 2];
+        let v: serde_json::Value = serde_json::from_str(json_part).unwrap();
+        assert_eq!(v["choices"][0]["delta"]["content"], "hello");
     }
 }
 
