@@ -474,18 +474,23 @@ fn main_post_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let act_base = token_idx * params.dim;
     let scratch  = token_idx * params.temp_stride + params.ffn_dim * 2u;
 
-    // Compute RMS of attention output in scratch
-    var sum_sq = 0.0;
-    for (var i = 0u; i < params.dim; i++) {
-        let v = temp_state[scratch + i];
-        sum_sq += v * v;
-    }
-    let rms_inv = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
-
     let attn_out = temp_state[scratch + idx];
-    let norm_w   = get_f32_at(offsets.post_attn_norm + idx * 4u);
     let residual = activation_in[act_base + idx];
-    activation_in[act_base + idx] = residual + attn_out * rms_inv * norm_w;
+
+    if (offsets.post_attn_norm == 0u) {
+        // Standard (Llama-style): no extra post-attention norm — add residual directly
+        activation_in[act_base + idx] = residual + attn_out;
+    } else {
+        // Gemma-2: apply extra post-attention RMS norm before residual add
+        var sum_sq = 0.0;
+        for (var i = 0u; i < params.dim; i++) {
+            let v = temp_state[scratch + i];
+            sum_sq += v * v;
+        }
+        let rms_inv = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+        let norm_w   = get_f32_at(offsets.post_attn_norm + idx * 4u);
+        activation_in[act_base + idx] = residual + attn_out * rms_inv * norm_w;
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -700,16 +705,21 @@ fn main_post_ffn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let act_base = token_idx * params.dim;
     let scratch  = token_idx * params.temp_stride + params.ffn_dim * 2u;
 
-    // Compute RMS of FFN output in scratch
-    var sum_sq = 0.0;
-    for (var i = 0u; i < params.dim; i++) {
-        let v = temp_state[scratch + i];
-        sum_sq += v * v;
-    }
-    let rms_inv = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
-
     let ffn_out  = temp_state[scratch + idx];
-    let norm_w   = get_f32_at(offsets.post_ffn_norm + idx * 4u);
     let residual = activation_in[act_base + idx];
-    activation_in[act_base + idx] = residual + ffn_out * rms_inv * norm_w;
+
+    if (offsets.post_ffn_norm == 0u) {
+        // Standard (Llama-style): no extra post-FFN norm — add residual directly
+        activation_in[act_base + idx] = residual + ffn_out;
+    } else {
+        // Gemma-2: apply extra post-FFN RMS norm before residual add
+        var sum_sq = 0.0;
+        for (var i = 0u; i < params.dim; i++) {
+            let v = temp_state[scratch + i];
+            sum_sq += v * v;
+        }
+        let rms_inv = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+        let norm_w   = get_f32_at(offsets.post_ffn_norm + idx * 4u);
+        activation_in[act_base + idx] = residual + ffn_out * rms_inv * norm_w;
+    }
 }
