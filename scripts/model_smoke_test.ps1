@@ -79,6 +79,43 @@ function Wait-ServerReady {
     return $false
 }
 
+function Test-ModelsEndpoint {
+    param([string]$Url)
+    try {
+        $resp = Invoke-RestMethod -Method Get -Uri "$Url/v1/models" -TimeoutSec 5
+        return ($null -ne $resp.data -and $resp.data.Count -gt 0)
+    } catch {
+        return $false
+    }
+}
+
+function Test-SseStreaming {
+    # Quick SSE probe: send stream:true with max_tokens=4, verify we get
+    # at least one "data: " event back.  Uses curl.exe (available on Win10+).
+    param([string]$Url, [string]$ModelFile)
+    $curlPath = (Get-Command "curl.exe" -ErrorAction SilentlyContinue)?.Source
+    if (-not $curlPath) { return $null }  # curl not available: skip
+
+    $tmpBody = [System.IO.Path]::GetTempFileName()
+    try {
+        @{
+            model       = "local"
+            messages    = @(@{ role = "user"; content = "Say: hi" })
+            max_tokens  = 4
+            temperature = 0.0
+            stream      = $true
+        } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 -Path $tmpBody
+
+        $out = & curl.exe -s -N -m 30 `
+            -X POST "$Url/v1/chat/completions" `
+            -H "Content-Type: application/json" `
+            --data-binary "@$tmpBody" 2>&1
+        return ($out -match "data: ")
+    } finally {
+        Remove-Item $tmpBody -ErrorAction SilentlyContinue
+    }
+}
+
 function Stop-ServerProcess {
     param($Proc)
     if ($Proc -and -not $Proc.HasExited) {
@@ -126,6 +163,14 @@ foreach ($entry in $Models) {
         continue
     }
 
+    # === /v1/models check ===
+    $modelsOk = Test-ModelsEndpoint -Url $BaseUrl
+    if ($modelsOk) {
+        Write-Log "      /v1/models: OK"
+    } else {
+        Write-Log "      /v1/models: WARNING -- endpoint missing or returned empty list"
+    }
+
     # Each model entry carries its own prompt
     $body = @{
         model       = "local"
@@ -158,6 +203,16 @@ foreach ($entry in $Models) {
         $tag  = if ($pass) { "PASS" } else { "WEAK" }
         Write-Log "$tag  $modelFile -- response: $($text.Substring(0, [Math]::Min(80, $text.Length)))"
         $results += [pscustomobject]@{ Model=$modelFile; Result=$tag; Detail=$text }
+
+        # === SSE streaming probe ===
+        $sseResult = Test-SseStreaming -Url $BaseUrl -ModelFile $modelFile
+        if ($null -eq $sseResult) {
+            Write-Log "      SSE stream: SKIP (curl.exe not found)"
+        } elseif ($sseResult) {
+            Write-Log "      SSE stream: OK"
+        } else {
+            Write-Log "      SSE stream: WARNING -- no 'data: ' events received"
+        }
     } else {
         Write-Log "FAIL  $modelFile -- empty response"
         $results += [pscustomobject]@{ Model=$modelFile; Result="FAIL"; Detail="empty response" }
