@@ -127,6 +127,7 @@ struct ScanState {
 
     // Test-block tracking (approximate; brace-counted)
     in_test: bool,
+    has_test_module: bool,
     brace_depth: i32,
     test_entry_depth: i32,
 
@@ -205,6 +206,7 @@ fn scan(content: &str, ac: &AhoCorasick) -> ScanState {
         // ── Test-block tracking (brace depth) ──────────────────────────────
         if tr.contains("#[cfg(test)]") && !is_comment {
             st.in_test = true;
+            st.has_test_module = true;
             st.test_entry_depth = st.brace_depth;
         }
         for ch in line.chars() {
@@ -407,12 +409,25 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
         }};
     }
 
-    // C3: line_count
-    criterion!(
-        "C3",
-        if st.total_lines <= LINE_COUNT_MAX { Status::Pass } else { Status::Fail },
-        format!("{} lines (max {})", st.total_lines, LINE_COUNT_MAX)
-    );
+    // C3: line_count — soft cap 600 (waiveable), hard cap 2000 (non-waiveable)
+    const HARD_CAP_LINES: usize = 2000;
+    {
+        let (status, detail) = if st.total_lines > HARD_CAP_LINES {
+            // Hard cap — never waiveable regardless of CERT.toml entry
+            (Status::Fail,
+             format!("{} lines exceeds hard cap {} — architectural split required (waiver not accepted)",
+                st.total_lines, HARD_CAP_LINES))
+        } else if st.total_lines > LINE_COUNT_MAX {
+            if let Some(reason) = waivers.get("C3") {
+                (Status::Waived, format!("{} lines (max {}) [waiver: {}]", st.total_lines, LINE_COUNT_MAX, reason))
+            } else {
+                (Status::Fail, format!("{} lines (max {})", st.total_lines, LINE_COUNT_MAX))
+            }
+        } else {
+            (Status::Pass, format!("{} lines (max {})", st.total_lines, LINE_COUNT_MAX))
+        };
+        results.push(CriterionResult { id: "C3", status, detail });
+    }
 
     // C4: gpu_unwrap
     criterion!(
@@ -473,12 +488,26 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
         format!("{} .clone()s = {:.1}/100 lines (max {:.0})", st.clone_count, clone_rate, CLONE_PER_100_MAX)
     );
 
-    // B2: todo_desert (inverted — failing means NO TODO found; that's the AI signal)
+    // B2: todo_desert — FAIL for large files (> 1000 lines) with no TODO/FIXME; WARN otherwise
+    const TODO_DESERT_LARGE: usize = 1000;
+    let b2_status = if st.found_todo {
+        Status::Pass
+    } else if st.total_lines > TODO_DESERT_LARGE {
+        Status::Fail  // large file + no acknowledged debt = implausible; P1 AI signal
+    } else {
+        Status::Warn
+    };
     criterion!(
         "B2",
-        if st.found_todo { Status::Pass } else { Status::Warn },
-        if st.found_todo { "TODO/FIXME present".to_string() }
-        else { "no TODO/FIXME — possible AI-generated desert (P1 signal)".to_string() }
+        b2_status,
+        if st.found_todo {
+            "TODO/FIXME present".to_string()
+        } else if st.total_lines > TODO_DESERT_LARGE {
+            format!("no TODO/FIXME in {}-line file — AI desert FAIL (P1 signal); add at minimum one TODO",
+                st.total_lines)
+        } else {
+            "no TODO/FIXME — possible AI-generated desert (P1 signal)".to_string()
+        }
     );
 
     // B3: unwrap_density
@@ -571,6 +600,28 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
             format!("{} placeholder param(s) at lines {:?}",
                 st.placeholder_lines.len(),
                 st.placeholder_lines.iter().map(|(l, _)| l).collect::<Vec<_>>())
+        }
+    );
+
+    // C11: test_coverage — FAIL if > 5 functions and no #[cfg(test)] module present
+    const MIN_FNS_FOR_TEST: usize = 5;
+    let c11_status = if st.has_test_module {
+        Status::Pass
+    } else if st.fn_count > MIN_FNS_FOR_TEST {
+        Status::Fail
+    } else {
+        Status::Skip
+    };
+    criterion!(
+        "C11",
+        c11_status,
+        if st.has_test_module {
+            "has #[cfg(test)] module".to_string()
+        } else if st.fn_count > MIN_FNS_FOR_TEST {
+            format!("{} functions, no #[cfg(test)] module — pure-function code must have unit tests",
+                st.fn_count)
+        } else {
+            format!("{} functions (skip threshold {})", st.fn_count, MIN_FNS_FOR_TEST)
         }
     );
 
@@ -766,7 +817,11 @@ fn print_results(path: &Path, results: &[CriterionResult], st: &ScanState) {
         st.total_lines, pass_count, warn_count, blocking.len(), waived_count);
 
     if certifiable {
-        println!("  Certifiable: YES");
+        if waived_count > 0 {
+            println!("  Certifiable: YES  ({} waiver(s) active — review before merge)", waived_count);
+        } else {
+            println!("  Certifiable: YES");
+        }
     } else {
         println!("  Certifiable: NO  ({} blocking failure(s))", blocking.len());
         for r in &blocking {
@@ -792,6 +847,7 @@ fn print_criteria_list() {
         ("B7", "vague_expects",    "no .expect(\"error\"/\"failed\"/etc)  (A4)"),
         ("B8", "prod_panics",      "no todo!()/unimplemented!(); panic! needs preceding comment  (A3)"),
         ("B9", "placeholder_names","no data/buf/tmp/res/etc in function signatures  (D11)"),
+        ("C11","test_coverage",    "has #[cfg(test)] module when fn_count > 5"),
     ];
     for (id, name, desc) in &auto_criteria {
         println!("  {:<4} {:<20} {}", id, name, desc);
