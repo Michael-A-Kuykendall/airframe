@@ -144,9 +144,9 @@ impl PreflightResources {
         let block_size = dim * 4;
 
         // Layout:
-        // Layers: [AttnNorm, FfnNorm] interleaved
+        // Layers: [AttnNorm, FfnNorm, PostAttnNorm, PostFfwNorm] interleaved (4 slots/layer)
         // End: [OutputNorm]
-        let total_size = (n_layers * 2 + 1) * (block_size as usize);
+        let total_size = (n_layers * 4 + 1) * (block_size as usize);
 
         let mut bank = vec![0u8; total_size];
 
@@ -175,14 +175,18 @@ impl PreflightResources {
         for i in 0..n_layers {
             let attn_name = format!("blk.{}.attn_norm.weight", i);
             let ffn_name = format!("blk.{}.ffn_norm.weight", i);
+            let post_attn_name = format!("blk.{}.post_attention_norm.weight", i);
+            let post_ffw_name = format!("blk.{}.post_ffw_norm.weight", i);
 
-            let layer_base = i * 2 * (block_size as usize);
+            let layer_base = i * 4 * (block_size as usize);
             copy_tensor(&attn_name, layer_base);
             copy_tensor(&ffn_name, layer_base + (block_size as usize));
+            copy_tensor(&post_attn_name, layer_base + 2 * (block_size as usize));
+            copy_tensor(&post_ffw_name, layer_base + 3 * (block_size as usize));
         }
 
         // Final Norm
-        let final_base = n_layers * 2 * (block_size as usize);
+        let final_base = n_layers * 4 * (block_size as usize);
         copy_tensor("output_norm.weight", final_base);
 
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

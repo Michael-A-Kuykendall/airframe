@@ -648,6 +648,8 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
         yarn_alpha: 1.0,
         yarn_beta: 32.0,
         n_ctx,
+        attn_logit_softcap: 0.0,
+        final_logit_softcap: 0.0,
         head_dim: 0,
         gqa_ratio: 0,
         kv_dim: 0,
