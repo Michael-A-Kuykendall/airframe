@@ -21,7 +21,7 @@ use libfse::metrics::{
 use memmap2::Mmap;
 use schoolmarm::{Grammar, GrammarState};
 use serde::{Deserialize, Serialize};
-use shimmytok::Tokenizer;
+use shimmytok::{EncodeOptions, Tokenizer};
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -273,11 +273,16 @@ fn rust_compile_check(source: &str) -> Result<(), String> {
 // CPU dot-product against the pre-dequantized embedding table that is already in RAM.
 // This unblocks Gemma-2 (256K vocab × hidden_dim F32 > 2 GiB binding limit) at the cost of
 // ~5–15 ms per token on a server CPU — well within acceptable latency.
-fn cpu_head_logits(embd_table: &[f32], hidden: &[f32], vocab_size: usize, dim: usize) -> Vec<f32> {
+fn cpu_head_logits(embd_table: &[f32], hidden: &[f32], vocab_size: usize, dim: usize, final_logit_softcap: f32) -> Vec<f32> {
     (0..vocab_size)
         .map(|i| {
             let row = &embd_table[i * dim..(i + 1) * dim];
-            hidden.iter().zip(row).map(|(h, w)| h * w).sum()
+            let logit: f32 = hidden.iter().zip(row).map(|(h, w)| h * w).sum();
+            if final_logit_softcap > 0.0 {
+                (logit / final_logit_softcap).tanh() * final_logit_softcap
+            } else {
+                logit
+            }
         })
         .collect()
 }
@@ -319,7 +324,10 @@ fn run_inference_completion(
     let prompt_mode = req.prompt_mode.as_deref().unwrap_or("creative").to_string();
     let user_prompt = req.prompt.as_deref().ok_or("missing prompt")?;
     let templated_prompt = build_templated_prompt(&prompt_mode, user_prompt)?;
-    let mut prompt_tokens = tokenizer.encode(&templated_prompt, true)?;
+    let mut prompt_tokens = tokenizer.encode_with_options(
+        &templated_prompt,
+        &EncodeOptions::with_parse_special(true, true),
+    )?;
     let trace_config = TraceConfig::from_request(req);
     if !prior_tokens.is_empty() {
         prompt_tokens = prior_tokens
@@ -337,6 +345,11 @@ fn run_inference_completion(
             None
         }
     });
+    // Gemma-2 chat stop token (<end_of_turn> = token 107)
+    let end_of_turn_token: Option<u32> = tokenizer
+        .encode_with_options("<end_of_turn>", &EncodeOptions::with_parse_special(false, true))
+        .ok()
+        .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None });
 
     let grammar_text = if prompt_mode == "developer" {
         Some(developer_mode_grammar())
@@ -374,6 +387,13 @@ fn run_inference_completion(
     );
 
     let dim = spec.n_embd as u32;
+    // Gemma / Gemma-2 scales input embeddings by sqrt(hidden_size) before the first layer.
+    // Other architectures (LLaMA, etc.) do not apply this scale.
+    let emb_scale: f32 = if spec.arch_string().contains("gemma") {
+        (spec.n_embd as f32).sqrt()
+    } else {
+        1.0
+    };
     // Detect per-tensor quantization types.  Q4_K_M models use Q6_K for attn_v and
     // ffn_down while everything else is Q4_K.  Pack into one u32:
     //   bits  0-7  = main qt (Q/K/attn_out/gate/up)
@@ -476,8 +496,8 @@ fn run_inference_completion(
             let mut last_logits = vec![0.0; spec.n_vocab];
             for (prefill_step, &token_id) in prompt_tokens.iter().enumerate() {
                 let emb_start = token_id as usize * dim as usize;
-                let mut layer_output =
-                    embd_table_cpu[emb_start..emb_start + dim as usize].to_vec();
+                let mut layer_output: Vec<f32> =
+                    embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale).collect();
                 let (cache_len_before, window_base_before) = {
                     let cache = kv_cache.lock().unwrap();
                     (cache.get_seq_len(), cache.get_window_base())
@@ -526,7 +546,7 @@ fn run_inference_completion(
                 let normed_output =
                     pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
                 last_logits = if use_cpu_head {
-                    cpu_head_logits(embd_table_cpu, &normed_output, spec.n_vocab, dim as usize)
+                    cpu_head_logits(embd_table_cpu, &normed_output, spec.n_vocab, dim as usize, spec.final_logit_softcap)
                 } else {
                     pipeline.run_matmul_f32(
                         device,
@@ -566,7 +586,7 @@ fn run_inference_completion(
             let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
             for &token_id in &prompt_tokens {
                 let emb_start = token_id as usize * dim as usize;
-                batched_embd.extend_from_slice(&embd_table_cpu[emb_start..emb_start + dim as usize]);
+                batched_embd.extend(embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale));
             }
 
             let (_pre_norm_a, l21_a, gpu_logits_a) = {
@@ -584,7 +604,7 @@ fn run_inference_completion(
                 )
             };
             let logits_a = if use_cpu_head {
-                cpu_head_logits(embd_table_cpu, &l21_a, spec.n_vocab, dim as usize)
+                cpu_head_logits(embd_table_cpu, &l21_a, spec.n_vocab, dim as usize, spec.final_logit_softcap)
             } else {
                 gpu_logits_a
             };
@@ -601,7 +621,7 @@ fn run_inference_completion(
         let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
         for &token_id in &prompt_tokens {
             let emb_start = token_id as usize * dim as usize;
-            batched_embd.extend_from_slice(&embd_table_cpu[emb_start..emb_start + dim as usize]);
+            batched_embd.extend(embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale));
         }
 
         let (_pre_norm_b, l21_b, gpu_logits_b) = {
@@ -619,7 +639,7 @@ fn run_inference_completion(
             )
         };
         let logits_b = if use_cpu_head {
-            cpu_head_logits(embd_table_cpu, &l21_b, spec.n_vocab, dim as usize)
+            cpu_head_logits(embd_table_cpu, &l21_b, spec.n_vocab, dim as usize, spec.final_logit_softcap)
         } else {
             gpu_logits_b
         };
@@ -698,6 +718,13 @@ fn run_inference_completion(
             break;
         }
 
+        if let Some(eot) = end_of_turn_token {
+            if next_token == eot && !req.ignore_eos.unwrap_or(false) {
+                stop_reason = "end_of_turn";
+                break;
+            }
+        }
+
         if !disable_im_end_stop {
             if let Some(im_end) = im_end_token {
                 if next_token == im_end && !req.ignore_eos.unwrap_or(false) {
@@ -764,8 +791,8 @@ fn run_inference_completion(
         }
 
         let emb_start = next_token as usize * dim as usize;
-        let mut layer_output =
-            embd_table_cpu[emb_start..emb_start + dim as usize].to_vec();
+        let mut layer_output: Vec<f32> =
+            embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale).collect();
 
         let mut step_layer_traces = Vec::new();
         if capture_trace_step {
@@ -847,7 +874,7 @@ fn run_inference_completion(
             pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
 
         logits_vec = if use_cpu_head {
-            cpu_head_logits(embd_table_cpu, &normed_output, spec.n_vocab, dim as usize)
+            cpu_head_logits(embd_table_cpu, &normed_output, spec.n_vocab, dim as usize, spec.final_logit_softcap)
         } else {
             pipeline.run_matmul_f32(
                 device,
@@ -858,6 +885,18 @@ fn run_inference_completion(
                 dim,
             )
         };
+
+        // Debug: show top-5 logits for first decode step
+        if generated_count == 0 {
+            let mut indexed: Vec<(usize, f32)> = logits_vec.iter().copied().enumerate().collect();
+            indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            eprintln!("[DEBUG-DECODE0] normed_output L2={:.4}", normed_output.iter().map(|x| x*x).sum::<f32>().sqrt());
+            eprintln!("[DEBUG-DECODE0] Top-5 pre-cap decode logits:");
+            for (tok_id, logit) in indexed.iter().take(5) {
+                let piece = tokenizer.decode_single(*tok_id as u32, false).unwrap_or_default();
+                eprintln!("  id={} logit={:.4} text={:?}", tok_id, logit, piece);
+            }
+        }
 
         let (cache_len_after_step, window_base_after_step) = {
             let cache = kv_cache.lock().unwrap();
@@ -1028,7 +1067,10 @@ pub(super) async fn process_inference_job(
             } else {
                 ""
             };
-            let mut appended_tokens = tokenizer.encode(&templated_prompt, true)?;
+            let mut appended_tokens = tokenizer.encode_with_options(
+                &templated_prompt,
+                &EncodeOptions::with_parse_special(true, true),
+            )?;
             if !resp.text.is_empty() {
                 let assistant_tail = format!("{}{}", resp.text, response_suffix);
                 appended_tokens.extend(tokenizer.encode(&assistant_tail, false)?);
