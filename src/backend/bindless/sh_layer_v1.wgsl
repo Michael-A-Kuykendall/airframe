@@ -30,7 +30,7 @@ struct LayerParams {
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
     quant_type: u32,    // GGML type: 0=F32, 1=F16, 2=Q4_0, 8=Q8_0, 12=Q4_K, 13=Q5_K, 14=Q6_K
     attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
-    _pad: u32,               // align to 40 bytes
+    post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
 };
 
 struct CacheParams {
@@ -50,7 +50,7 @@ struct CacheParams {
 @group(0) @binding(2) var<storage, read_write> temp_state: array<f32>;    // Scratchpad
 @group(0) @binding(3) var<uniform> offsets: LayerOffsets;
 @group(0) @binding(4) var<uniform> params: LayerParams;
-@group(0) @binding(5) var<storage, read> norm_bank: array<f32>;           // [n_layer * dim * 2 + dim]
+@group(0) @binding(5) var<storage, read> norm_bank: array<f32>;           // [n_layer * dim * 4 + dim]
 @group(0) @binding(6) var<storage, read> rope_table: array<f32>;           // [2048 × head_dim/2 × 2] pre-computed (cos, sin)
 @group(0) @binding(7) var<storage, read_write> kv_cache_k: array<f32>;    // K cache [max_seq * n_head_kv * head_dim]
 @group(0) @binding(8) var<storage, read_write> kv_cache_v: array<f32>;    // V cache [max_seq * n_head_kv * head_dim]
@@ -272,7 +272,7 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
 
-    let norm_offset_base = offsets.layer_idx * 2u * params.dim;
+    let norm_offset_base = offsets.layer_idx * 4u * params.dim;
     let norm_w = norm_bank[norm_offset_base + idx];
     temp_state[temp_base + idx] = activation_in[act_base + idx] * rms * norm_w;
 }
@@ -627,9 +627,85 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
+    // Stash raw attn_proj dot for post-attn norm correction (Gemma-2)
+    // Uses Q-area + head_count*head_dim offset which is free after Kernel 2
+    let attn_stash_base = params.dim + params.head_count * params.head_dim;
+    temp_state[temp_base + attn_stash_base + idx] = dot;
+
     // Add residual connection
     let residual = activation_in[act_base + idx];
     activation_in[act_base + idx] = residual + dot;
+}
+
+// -------------------------------------------------------------------------
+// Kernel 2.6: Post-Attention RMSNorm correction (Gemma-2 only)
+// -------------------------------------------------------------------------
+// When post_norm_enabled == 1: reads the stashed attn_proj dot, normalizes it
+// with the post-attn norm weights (slot 2 in norm_bank), then corrects the
+// residual: activation_in -= dot; activation_in += rms_normed_dot.
+@compute @workgroup_size(256, 1, 1)
+fn main_post_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    let token_idx = global_id.y;
+
+    if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
+    if (params.post_norm_enabled == 0u) { return; }
+
+    let act_base = token_idx * params.dim;
+    let temp_base = token_idx * params.temp_stride;
+    let attn_stash_base = params.dim + params.head_count * params.head_dim;
+
+    // Compute RMS over the stashed attn_proj output
+    var sum_sq = 0.0;
+    for (var i = 0u; i < params.dim; i++) {
+        let v = temp_state[temp_base + attn_stash_base + i];
+        sum_sq += v * v;
+    }
+    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    // Apply post-attn norm weight (slot 2 per layer: layer_idx * 4 + 2)
+    let norm_offset_base = (offsets.layer_idx * 4u + 2u) * params.dim;
+    let norm_w = norm_bank[norm_offset_base + idx];
+    let dot = temp_state[temp_base + attn_stash_base + idx];
+    let normed_dot = dot * rms * norm_w;
+
+    // Correct residual: activation_in was (residual + dot), should be (residual + normed_dot)
+    activation_in[act_base + idx] += normed_dot - dot;
+}
+
+// -------------------------------------------------------------------------
+// Kernel 4.5: Post-FFW RMSNorm correction (Gemma-2 only)
+// -------------------------------------------------------------------------
+// When post_norm_enabled == 1: reads the stashed ffn_down dot (already stored
+// at temp_base + ffn_dim*2 + idx by main_ffn_down), normalizes it with post-ffw
+// norm weights (slot 3 in norm_bank), then corrects the residual.
+@compute @workgroup_size(256, 1, 1)
+fn main_post_ffw_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    let token_idx = global_id.y;
+
+    if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
+    if (params.post_norm_enabled == 0u) { return; }
+
+    let act_base = token_idx * params.dim;
+    let temp_base = token_idx * params.temp_stride;
+
+    // FFN down stash is at temp_base + ffn_dim*2 + idx (written by main_ffn_down)
+    var sum_sq = 0.0;
+    for (var i = 0u; i < params.dim; i++) {
+        let v = temp_state[temp_base + params.ffn_dim * 2u + i];
+        sum_sq += v * v;
+    }
+    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    // Apply post-ffw norm weight (slot 3 per layer: layer_idx * 4 + 3)
+    let norm_offset_base = (offsets.layer_idx * 4u + 3u) * params.dim;
+    let norm_w = norm_bank[norm_offset_base + idx];
+    let dot = temp_state[temp_base + params.ffn_dim * 2u + idx];
+    let normed_dot = dot * rms * norm_w;
+
+    // Correct residual: activation_in was (residual + dot), should be (residual + normed_dot)
+    activation_in[act_base + idx] += normed_dot - dot;
 }
 
 // -------------------------------------------------------------------------
@@ -675,8 +751,8 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     // MatMul
     var dot = 0.0;
-    // Norm Params Base (Layer * 2 + 1 for FFN)
-    let norm_offset_base = (offsets.layer_idx * 2u + 1u) * params.dim;
+    // Norm Params Base (Layer * 4 + 1 for FFN)
+    let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
 
     if ((params.quant_type & 0xFFu) == 14u) { // Q6_K
         let bpr = params.dim / 256u;
