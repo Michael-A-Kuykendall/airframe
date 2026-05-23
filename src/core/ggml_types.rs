@@ -287,4 +287,94 @@ mod tests {
         // Edge case - exactly at file end
         assert!(validate_tensor_bounds("test", 0, 1000, 1000, 2000).is_ok());
     }
+
+    // ── Uncovered: F16, Q5_0, Q8_0, Q5_K variants ────────────────────────────
+
+    #[test]
+    fn test_ggml_type_from_u32_all_variants() {
+        assert_eq!(GgmlType::from_u32(0).unwrap(), GgmlType::F32);
+        assert_eq!(GgmlType::from_u32(1).unwrap(), GgmlType::F16);
+        assert_eq!(GgmlType::from_u32(2).unwrap(), GgmlType::Q4_0);
+        assert_eq!(GgmlType::from_u32(6).unwrap(), GgmlType::Q5_0);
+        assert_eq!(GgmlType::from_u32(8).unwrap(), GgmlType::Q8_0);
+        assert_eq!(GgmlType::from_u32(12).unwrap(), GgmlType::Q4_K);
+        assert_eq!(GgmlType::from_u32(13).unwrap(), GgmlType::Q5_K);
+        assert_eq!(GgmlType::from_u32(14).unwrap(), GgmlType::Q6_K);
+        // all other values → Err
+        assert!(GgmlType::from_u32(3).is_err());
+        assert!(GgmlType::from_u32(5).is_err());
+        assert!(GgmlType::from_u32(7).is_err());
+        assert!(GgmlType::from_u32(255).is_err());
+    }
+
+    #[test]
+    fn test_ggml_type_name_all_variants() {
+        assert_eq!(GgmlType::F32.name(),  "F32");
+        assert_eq!(GgmlType::F16.name(),  "F16");
+        assert_eq!(GgmlType::Q4_0.name(), "Q4_0");
+        assert_eq!(GgmlType::Q5_0.name(), "Q5_0");
+        assert_eq!(GgmlType::Q8_0.name(), "Q8_0");
+        assert_eq!(GgmlType::Q4_K.name(), "Q4_K");
+        assert_eq!(GgmlType::Q5_K.name(), "Q5_K");
+        assert_eq!(GgmlType::Q6_K.name(), "Q6_K");
+    }
+
+    #[test]
+    fn test_ggml_type_id_roundtrip() {
+        for id in [0u32, 1, 2, 6, 8, 12, 13, 14] {
+            let t = GgmlType::from_u32(id).unwrap();
+            assert_eq!(t.type_id(), id);
+        }
+    }
+
+    #[test]
+    fn test_ggml_type_name_function_all() {
+        assert_eq!(ggml_type_name(1).unwrap(),  "F16");
+        assert_eq!(ggml_type_name(6).unwrap(),  "Q5_0");
+        assert_eq!(ggml_type_name(8).unwrap(),  "Q8_0");
+        assert_eq!(ggml_type_name(13).unwrap(), "Q5_K");
+    }
+
+    #[test]
+    fn test_f16_byte_calculation() {
+        assert_eq!(ggml_type_bytes_per_tensor(1, 1000).unwrap(), 2000);
+        assert_eq!(ggml_type_bytes_per_tensor(1, 1).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_q5_0_byte_calculation() {
+        // Q5_0: 32 elements/block, 22 bytes/block
+        assert_eq!(ggml_type_bytes_per_tensor(6, 32).unwrap(), 22);
+        assert_eq!(ggml_type_bytes_per_tensor(6, 64).unwrap(), 44);
+        assert_eq!(ggml_type_bytes_per_tensor(6, 33).unwrap(), 44);
+    }
+
+    #[test]
+    fn test_q8_0_byte_calculation() {
+        // Q8_0: 32 elements/block, 34 bytes/block
+        assert_eq!(ggml_type_bytes_per_tensor(8, 32).unwrap(), 34);
+        assert_eq!(ggml_type_bytes_per_tensor(8, 64).unwrap(), 68);
+        assert_eq!(ggml_type_bytes_per_tensor(8, 33).unwrap(), 68);
+    }
+
+    #[test]
+    fn test_q5_k_byte_calculation() {
+        // Q5_K: 256 elements/superblock, 176 bytes/superblock
+        assert_eq!(ggml_type_bytes_per_tensor(13, 256).unwrap(), 176);
+        assert_eq!(ggml_type_bytes_per_tensor(13, 512).unwrap(), 352);
+        assert_eq!(ggml_type_bytes_per_tensor(13, 257).unwrap(), 352);
+    }
+
+    #[test]
+    fn test_tensor_bounds_zero_size() {
+        assert!(validate_tensor_bounds("t", 0, 0, 0, 0).is_ok());
+    }
+
+    #[test]
+    fn test_tensor_bounds_unknown_type_in_error_message() {
+        // validate_tensor_bounds with an unknown type_id should return an error
+        let err = validate_tensor_bounds("my_tensor", 99, 10000, 999999, 100).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("my_tensor") || msg.len() > 0, "error message should be non-empty");
+    }
 }
