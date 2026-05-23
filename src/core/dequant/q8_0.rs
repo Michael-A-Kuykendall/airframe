@@ -77,4 +77,89 @@ mod tests {
         let result = q as f32 * scale;
         assert!((result - expected).abs() < 1e-6, "Got {}", result);
     }
+
+    // ── dequantize_q8_0 with synthetic mmap data ──────────────────────────────
+
+    use crate::core::model::GgufTensorInfo;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn make_q8_0_mmap(blocks: &[(u16, Vec<i8>)]) -> (NamedTempFile, memmap2::Mmap) {
+        let mut f = NamedTempFile::new().unwrap();
+        for (scale_bits, qs) in blocks {
+            f.write_all(&scale_bits.to_le_bytes()).unwrap();
+            let bytes: Vec<u8> = qs.iter().map(|&v| v as u8).collect();
+            f.write_all(&bytes).unwrap();
+        }
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        (f, mmap)
+    }
+
+    fn info(dims: Vec<usize>) -> GgufTensorInfo {
+        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 8, offset: 0 }
+    }
+
+    #[test]
+    fn test_q8_0_all_zeros() {
+        // scale=1.0, all qs=0 → all outputs 0.0
+        let scale = 0x3C00u16; // f16 1.0
+        let qs = vec![0i8; 32];
+        let (_f, mmap) = make_q8_0_mmap(&[(scale, qs)]);
+        let tensor = dequantize_q8_0(&info(vec![32]), &mmap, 0).unwrap();
+        for &v in &tensor.data {
+            assert_eq!(v, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_q8_0_known_values() {
+        // scale=1.0, qs[0]=10, qs[1]=-5 → [10.0, -5.0, ...]
+        let scale = 0x3C00u16;
+        let mut qs = vec![0i8; 32];
+        qs[0] = 10;
+        qs[1] = -5;
+        let (_f, mmap) = make_q8_0_mmap(&[(scale, qs)]);
+        let tensor = dequantize_q8_0(&info(vec![32]), &mmap, 0).unwrap();
+        assert!((tensor.data[0] - 10.0).abs() < 1e-4);
+        assert!((tensor.data[1] - (-5.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_q8_0_scale_multiplied() {
+        // scale=2.0, qs[0]=7 → 14.0
+        let scale = 0x4000u16; // f16 2.0
+        let mut qs = vec![0i8; 32];
+        qs[0] = 7;
+        let (_f, mmap) = make_q8_0_mmap(&[(scale, qs)]);
+        let tensor = dequantize_q8_0(&info(vec![32]), &mmap, 0).unwrap();
+        assert!((tensor.data[0] - 14.0).abs() < 0.01, "expected 14.0, got {}", tensor.data[0]);
+    }
+
+    #[test]
+    fn test_q8_0_bounds_error() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; 10]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let result = dequantize_q8_0(&info(vec![32]), &mmap, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_q8_0_two_blocks() {
+        let scale1 = 0x3C00u16; // 1.0
+        let scale2 = 0x4000u16; // 2.0
+        let qs1 = vec![1i8; 32];
+        let qs2 = vec![3i8; 32];
+        let (_f, mmap) = make_q8_0_mmap(&[(scale1, qs1), (scale2, qs2)]);
+        let tensor = dequantize_q8_0(&info(vec![64]), &mmap, 0).unwrap();
+        assert_eq!(tensor.data.len(), 64);
+        for &v in &tensor.data[..32] {
+            assert!((v - 1.0).abs() < 0.01, "block1 expected 1.0, got {v}");
+        }
+        for &v in &tensor.data[32..] {
+            assert!((v - 6.0).abs() < 0.01, "block2 expected 6.0, got {v}");
+        }
+    }
 }
