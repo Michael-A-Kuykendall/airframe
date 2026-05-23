@@ -277,7 +277,51 @@ mod tests {
         }
     }
 
-    // ── silu ─────────────────────────────────────────────────────────────────
+    // ── Softmax properties: all values in (0,1], sum==1.0 ────────────────────
+
+    #[test]
+    fn test_softmax_all_values_in_open_0_1() {
+        let ops = OpDispatcher::new();
+        let cases: &[&[f32]] = &[
+            &[1.0, 2.0, 3.0],
+            &[-10.0, 0.0, 10.0],
+            &[100.0, 100.0, 100.0],
+            &[0.5],               // single element: result is exactly 1.0, which is in (0,1]
+            &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        ];
+        for vals in cases {
+            let n = vals.len();
+            let input = t(vals.to_vec(), vec![1, n]);
+            let out = ops.softmax(&input, false).unwrap();
+            for &v in &out.data {
+                // softmax values are strictly positive and at most 1.0
+                assert!(v > 0.0 && v <= 1.0, "softmax value {v} not in (0,1] for input {:?}", vals);
+            }
+        }
+    }
+
+    #[test]
+    fn test_softmax_sum_invariant_across_inputs() {
+        let ops = OpDispatcher::new();
+        let cases: &[&[f32]] = &[
+            &[1.0, 2.0, 3.0],
+            &[-5.0, 0.0, 5.0],
+            &[1000.0, -1000.0],
+            &[0.1, 0.2, 0.3, 0.4],
+        ];
+        for vals in cases {
+            let n = vals.len();
+            let input = t(vals.to_vec(), vec![1, n]);
+            let out = ops.softmax(&input, false).unwrap();
+            let sum: f32 = out.data.iter().sum();
+            assert!(
+                (sum - 1.0).abs() < 1e-4,
+                "sum={sum} != 1.0 for input {:?}", vals
+            );
+        }
+    }
+
+
 
     #[test]
     fn test_silu_at_zero_is_zero() {

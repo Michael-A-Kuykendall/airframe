@@ -150,6 +150,57 @@ mod tests {
         }
     }
 
+    // ── Tensor-level (mmap) property tests ───────────────────────────────────
+
+    use crate::core::model::GgufTensorInfo;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn info_q6k(dims: Vec<usize>) -> GgufTensorInfo {
+        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 14, offset: 0 }
+    }
+
+    #[test]
+    fn test_q6_k_tensor_zero_superblock_produces_correct_count() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; 210]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q6_k(&info_q6k(vec![256]), &mmap, 0).unwrap();
+        assert_eq!(tensor.data.len(), 256);
+        assert!(tensor.data.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_q6_k_tensor_partial_superblock_truncated() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; 210]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q6_k(&info_q6k(vec![128]), &mmap, 0).unwrap();
+        assert_eq!(tensor.data.len(), 128);
+    }
+
+    #[test]
+    fn test_q6_k_tensor_oob_returns_error() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; 10]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        assert!(dequantize_q6_k(&info_q6k(vec![256]), &mmap, 0).is_err());
+    }
+
+    #[test]
+    fn test_q6_k_output_shape_matches_dimensions() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; 210 * 2]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q6_k(&info_q6k(vec![64, 8]), &mmap, 0).unwrap();
+        assert_eq!(tensor.shape, vec![64, 8]);
+        assert_eq!(tensor.data.len(), 512);
+    }
+
     #[test]
     fn test_dequantize_q6_k_superblock_structure() {
         // Test that the block parsing is correct by setting known values
