@@ -6,6 +6,34 @@ use crate::RuleId;
 use aho_corasick::automaton::Automaton;
 use aho_corasick::Anchored;
 
+// ──────────────────────────────────────────────────────────────────────────────
+// ScanCursor: borrowless mutable walker state
+//
+// Separates the "what have I seen so far" state from the `&FseMap` borrow.
+// This allows callers to hold cursor + `Arc<FseMap>` without lifetime friction,
+// which is exactly what `FseControl` (an `InferenceControl` implementor) needs.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Persistent DFA walker state, divorced from the `FseMap` borrow.
+///
+/// Construct via [`FseMap::new_cursor`], advance via [`FseMap::scan_with_cursor`].
+/// Can be stored alongside an `Arc<FseMap>` without lifetime parameters.
+#[derive(Debug, Clone)]
+pub struct ScanCursor {
+    pub(crate) sid: aho_corasick::automaton::StateID,
+    pub(crate) rule_bits: Vec<u64>,
+    pub(crate) rules_recorded: u32,
+}
+
+impl ScanCursor {
+    /// Reset the rule-tracking bits (Record flags/counters). DFA state is kept.
+    #[inline]
+    pub fn reset_rule_state(&mut self) {
+        for w in self.rule_bits.iter_mut() { *w = 0; }
+        self.rules_recorded = 0;
+    }
+}
+
 /// Fail-closed violation returned immediately on Reject.
 #[derive(Debug, Clone)]
 pub enum Violation {

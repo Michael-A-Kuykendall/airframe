@@ -16,7 +16,7 @@ pub mod metrics;
 mod tests_integration;
 
 
-pub use scanner::{FseScanner, ScanSummary, Violation};
+pub use scanner::{FseScanner, ScanSummary, ScanCursor, Violation};
 pub use store::FseMap;
 // pub mod automaton; // Deprecated by scanner/store
 // pub mod compiler;  // Deprecated by scanner/store
