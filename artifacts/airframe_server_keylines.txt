@@ -1,4 +1,0 @@
-281:fn main() -> Result<(), Box<dyn std::error::Error>> {
-360:    let shimmy_port = std::env::var("SHIMMY_PORT").unwrap_or_else(|_| "8080".to_string());
-382:        let listener = tokio::net::TcpListener::bind(&http_bind_addr)
-1470:    let has_code_anchor = s.contains("fn main")

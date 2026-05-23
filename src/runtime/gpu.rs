@@ -26,6 +26,9 @@ pub struct SamplingParams {
     pub top_p: f32,
     pub repetition_penalty: f32,
     pub seed: u64,
+    /// Additional stop strings (e.g. `<|eot_id|>`, `<|im_end|>`).
+    /// Encoded to token IDs at the start of generation and checked in the decode loop.
+    pub extra_stop_tokens: Vec<String>,
 }
 
 impl Default for SamplingParams {
@@ -36,6 +39,7 @@ impl Default for SamplingParams {
             top_p: 0.95,
             repetition_penalty: 1.1,
             seed: 42,
+            extra_stop_tokens: Vec::new(),
         }
     }
 }
@@ -275,6 +279,19 @@ impl GpuRuntime {
         let mut generated_text = String::new();
         let mut recent_tokens: Vec<u32> = Vec::new();
 
+        // Encode extra stop tokens to IDs once before the decode loop.
+        // Single-token strings only; multi-token stop strings are skipped.
+        let extra_stop_ids: Vec<u32> = params
+            .extra_stop_tokens
+            .iter()
+            .filter_map(|s| {
+                self.tokenizer
+                    .encode(s, false)
+                    .ok()
+                    .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None })
+            })
+            .collect();
+
         // Decode loop
         for _step in 0..params.max_tokens {
             let next_token = sample_token(
@@ -299,6 +316,9 @@ impl GpuRuntime {
                 if next_token == im_end {
                     break;
                 }
+            }
+            if extra_stop_ids.contains(&next_token) {
+                break;
             }
 
             // Decode token to text
@@ -517,4 +537,35 @@ fn sample_token(
         }
     }
     nucleus.last().unwrap().0 as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sampling_params_default_has_empty_stop_tokens() {
+        let p = SamplingParams::default();
+        assert!(p.extra_stop_tokens.is_empty());
+    }
+
+    #[test]
+    fn test_sampling_params_stop_tokens_stored() {
+        let p = SamplingParams {
+            extra_stop_tokens: vec!["<|eot_id|>".to_string(), "<|im_end|>".to_string()],
+            ..SamplingParams::default()
+        };
+        assert_eq!(p.extra_stop_tokens.len(), 2);
+        assert!(p.extra_stop_tokens.contains(&"<|eot_id|>".to_string()));
+    }
+
+    #[test]
+    fn test_sampling_params_clone_preserves_stop_tokens() {
+        let p = SamplingParams {
+            extra_stop_tokens: vec!["</s>".to_string()],
+            ..SamplingParams::default()
+        };
+        let p2 = p.clone();
+        assert_eq!(p2.extra_stop_tokens, p.extra_stop_tokens);
+    }
 }

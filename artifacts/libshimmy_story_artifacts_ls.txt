@@ -1,9 +1,0 @@
-../libshimmy/artifacts/story_4k_exact_request.json
-../libshimmy/artifacts/story_4k_exact_request_force.json
-../libshimmy/artifacts/story_4k_final.txt
-../libshimmy/artifacts/story_4k_final_extracted.txt
-../libshimmy/artifacts/story_4k_final_rerun.txt
-../libshimmy/artifacts/story_4k_request_seed_7777.json
-../libshimmy/artifacts/story_4k_request_seed_9999.json
-../libshimmy/artifacts/story_4k_sink_extracted.txt
-../libshimmy/artifacts/story_4k_sliding_window.json
