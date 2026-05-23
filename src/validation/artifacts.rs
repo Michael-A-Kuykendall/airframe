@@ -194,7 +194,41 @@ mod tests {
         assert!(!name.contains("14aede55"), "should only use first 8: {name}");
     }
 
-    // ── write_artifact / read_artifact roundtrip ──────────────────────────────
+    // ── Property: SHA prefix is always exactly 8 chars regardless of input length ──
+
+    #[test]
+    fn test_filename_sha_prefix_always_8_chars_property() {
+        let td = tmp_dir();
+        let gen = ArtifactGenerator::new(td.path());
+        // SHA strings of varying lengths (all ≥ 8)
+        let shas = [
+            "12345678",                                                          // exactly 8
+            "123456789",                                                         // 9
+            "abcdef0011223344",                                                  // 16
+            "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556", // 64 (real sha256)
+        ];
+        for sha in &shas {
+            let p = gen.generate_filename("slice01", sha, "prompt00");
+            let stem = p.file_stem().unwrap().to_string_lossy();
+            // Format: v2_{slice_id}_{sha8}_{prompt_id}
+            let parts: Vec<&str> = stem.splitn(4, '_').collect();
+            // parts[2] is the sha segment — must be exactly the first 8 chars of sha
+            assert_eq!(parts.len(), 4, "unexpected stem format: {stem}");
+            let sha_segment = parts[2];
+            assert_eq!(
+                sha_segment.len(), 8,
+                "sha segment in filename is {} chars, expected 8 (sha input: {sha}, stem: {stem})",
+                sha_segment.len()
+            );
+            assert_eq!(
+                sha_segment, &sha[..8],
+                "sha segment '{}' != first 8 chars '{}' of sha '{sha}'",
+                sha_segment, &sha[..8]
+            );
+        }
+    }
+
+
 
     #[test]
     fn test_write_read_roundtrip_decode_artifact() {

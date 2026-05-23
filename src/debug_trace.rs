@@ -221,6 +221,49 @@ mod tests {
         assert!(s.abs_max > 1e29);
     }
 
+    // ── Property: min <= mean <= max for any non-empty slice ──────────────────
+
+    #[test]
+    fn test_trace_stats_mean_in_range_property() {
+        let cases: &[&[f32]] = &[
+            &[1.0, 2.0, 3.0],
+            &[-5.0, -1.0, 0.0, 4.0],
+            &[42.0],
+            &[0.0, 0.0, 0.0],
+            &[-1e10, 1e10],
+            &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0],
+            &[-100.0, -50.0, -1.0],
+        ];
+        for slice in cases {
+            let s = TraceStats::from_slice(slice);
+            assert!(
+                s.min <= s.mean + 1e-4 && s.mean <= s.max + 1e-4,
+                "slice {:?}: min={} mean={} max={} — invariant min<=mean<=max violated",
+                slice, s.min, s.mean, s.max
+            );
+            assert!(s.max >= s.min, "max < min for slice {:?}", slice);
+            assert!(s.mean.is_finite(), "mean not finite for slice {:?}", slice);
+        }
+    }
+
+    #[test]
+    fn test_trace_stats_first8_never_exceeds_8_elements() {
+        let cases: &[&[f32]] = &[
+            &[1.0],
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+            &[0.0; 100],
+        ];
+        for slice in cases {
+            let s = TraceStats::from_slice(slice);
+            assert!(
+                s.first8.len() <= 8,
+                "first8 has {} elements for slice of len {}",
+                s.first8.len(), slice.len()
+            );
+        }
+    }
+
     // ── TensorTrace::from_slice ───────────────────────────────────────────────
 
     #[test]

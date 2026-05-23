@@ -193,4 +193,58 @@ mod tests {
         assert_eq!(out.len(), QK_K);
         assert!(out.iter().all(|v| v.is_finite()));
     }
+
+    // ── Tensor-level (mmap) property tests ───────────────────────────────────
+
+    use crate::core::model::GgufTensorInfo;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn info_q4k(dims: Vec<usize>) -> GgufTensorInfo {
+        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 12, offset: 0 }
+    }
+
+    #[test]
+    fn test_q4_k_tensor_zero_superblock_produces_correct_count() {
+        // One zero superblock (144 bytes) → 256 elements, all finite
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; BYTES_PER_BLOCK]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q4_k(&info_q4k(vec![256]), &mmap, 0).unwrap();
+        assert_eq!(tensor.data.len(), 256);
+        assert!(tensor.data.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_q4_k_tensor_partial_superblock_truncated() {
+        // Request 128 elements (half a superblock); mmap has one full superblock
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; BYTES_PER_BLOCK]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q4_k(&info_q4k(vec![128]), &mmap, 0).unwrap();
+        assert_eq!(tensor.data.len(), 128);
+    }
+
+    #[test]
+    fn test_q4_k_tensor_oob_returns_error() {
+        // 10-byte file is too small for a 144-byte superblock
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; 10]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        assert!(dequantize_q4_k(&info_q4k(vec![256]), &mmap, 0).is_err());
+    }
+
+    #[test]
+    fn test_q4_k_output_shape_matches_dimensions() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; BYTES_PER_BLOCK * 2]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q4_k(&info_q4k(vec![64, 8]), &mmap, 0).unwrap();
+        assert_eq!(tensor.shape, vec![64, 8]);
+        assert_eq!(tensor.data.len(), 512);
+    }
 }
