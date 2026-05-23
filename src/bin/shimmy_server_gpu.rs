@@ -13,9 +13,11 @@ use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace,
     TokenTrace,
 };
+use aho_corasick::AhoCorasick;
 use libfse::metrics::{
     logit_l2_norm, logit_variance, max_probability_from_logits, shannon_entropy_from_logits,
 };
+use std::sync::OnceLock;
 use memmap2::Mmap;
 use schoolmarm::{Grammar, GrammarState};
 use serde::{Deserialize, Serialize};
@@ -132,17 +134,73 @@ impl ChatTemplateFamily {
     }
 }
 
-fn chat_template_family_for_model(spec: &ModelSpec) -> ChatTemplateFamily {
-    let model_name = spec.model_name.to_ascii_lowercase();
-    if model_name.contains("llama 3") || model_name.contains("llama-3") {
-        ChatTemplateFamily::Llama3
-    } else if model_name.contains("tinyllama") {
-        ChatTemplateFamily::TinyLlama
-    } else if model_name.contains("gemma") {
-        ChatTemplateFamily::Gemma2
-    } else {
-        ChatTemplateFamily::ChatML
+// ── FSE Hit #4: chat-template family detection ───────────────────────────────
+// Pattern indices for the template-marker Aho-Corasick automaton.
+// Two markers per family; both must appear for a positive classification.
+const TM_LLAMA3_HEADER: usize = 0; // <|start_header_id|>
+const TM_LLAMA3_EOT:    usize = 1; // <|eot_id|>
+const TM_GEMMA_START:   usize = 2; // <start_of_turn>
+const TM_GEMMA_END:     usize = 3; // <end_of_turn>
+const TM_CHATML_START:  usize = 4; // <|im_start|>
+const TM_CHATML_END:    usize = 5; // <|im_end|>
+const TM_TINY_USER:     usize = 6; // <|user|>
+const TM_TINY_ASST:     usize = 7; // <|assistant|>
+// Model-name markers (TM_LLAMA3_NAME..TM_GEMMA_NAME)
+const TM_LLAMA3_SPACE:  usize = 8;  // "llama 3"
+const TM_LLAMA3_DASH:   usize = 9;  // "llama-3"
+const TM_TINYLLAMA:     usize = 10; // "tinyllama"
+const TM_GEMMA_NAME:    usize = 11; // "gemma"
+
+/// Single Aho-Corasick automaton covering all template + model-name markers.
+/// Built once, reused for every model load.
+fn template_ac() -> &'static AhoCorasick {
+    static AC: OnceLock<AhoCorasick> = OnceLock::new();
+    AC.get_or_init(|| {
+        AhoCorasick::new([
+            "<|start_header_id|>", // 0
+            "<|eot_id|>",          // 1
+            "<start_of_turn>",     // 2
+            "<end_of_turn>",       // 3
+            "<|im_start|>",        // 4
+            "<|im_end|>",          // 5
+            "<|user|>",            // 6
+            "<|assistant|>",       // 7
+            "llama 3",             // 8
+            "llama-3",             // 9
+            "tinyllama",           // 10
+            "gemma",               // 11
+        ])
+        .expect("static template AC must compile")
+    })
+}
+
+/// FSE single-pass: one scan dispatches to all family markers simultaneously.
+/// Accumulates a found-bitset; first fully-matched family wins.
+fn classify_template(haystack: &str) -> Option<ChatTemplateFamily> {
+    let mut found = 0u16;
+    for mat in template_ac().find_iter(haystack) {
+        found |= 1 << mat.pattern().as_usize();
+        // Short-circuit as soon as one family is fully confirmed.
+        if (found >> TM_LLAMA3_HEADER) & 1 != 0 && (found >> TM_LLAMA3_EOT) & 1 != 0 {
+            return Some(ChatTemplateFamily::Llama3);
+        }
+        if (found >> TM_GEMMA_START) & 1 != 0 && (found >> TM_GEMMA_END) & 1 != 0 {
+            return Some(ChatTemplateFamily::Gemma2);
+        }
+        if (found >> TM_CHATML_START) & 1 != 0 && (found >> TM_CHATML_END) & 1 != 0 {
+            return Some(ChatTemplateFamily::ChatML);
+        }
+        if (found >> TM_TINY_USER) & 1 != 0 && (found >> TM_TINY_ASST) & 1 != 0 {
+            return Some(ChatTemplateFamily::TinyLlama);
+        }
     }
+    None
+}
+
+fn chat_template_family_for_model(spec: &ModelSpec) -> ChatTemplateFamily {
+    let lower = spec.model_name.to_ascii_lowercase();
+    // Single pass over model name; all family markers checked simultaneously.
+    classify_template(&lower).unwrap_or(ChatTemplateFamily::ChatML)
 }
 
 fn chat_template_family_from_metadata(
@@ -150,20 +208,10 @@ fn chat_template_family_from_metadata(
     spec: &ModelSpec,
 ) -> ChatTemplateFamily {
     if let Some(GgufValue::String(chat_template)) = metadata.get("tokenizer.chat_template") {
-        if chat_template.contains("<|start_header_id|>") && chat_template.contains("<|eot_id|>") {
-            return ChatTemplateFamily::Llama3;
-        }
-        if chat_template.contains("<start_of_turn>") && chat_template.contains("<end_of_turn>") {
-            return ChatTemplateFamily::Gemma2;
-        }
-        if chat_template.contains("<|im_start|>") && chat_template.contains("<|im_end|>") {
-            return ChatTemplateFamily::ChatML;
-        }
-        if chat_template.contains("<|user|>") && chat_template.contains("<|assistant|>") {
-            return ChatTemplateFamily::TinyLlama;
+        if let Some(family) = classify_template(chat_template) {
+            return family;
         }
     }
-
     chat_template_family_for_model(spec)
 }
 
