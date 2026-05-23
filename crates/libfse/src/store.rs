@@ -91,6 +91,103 @@ impl FseMap {
     pub fn rule_count(&self) -> usize {
         self.rule_count
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // ScanCursor-based API (FSE Hit #3)
+    //
+    // Allows callers to hold persistent DFA state without a lifetime borrow.
+    // Wire: FseControl stores Arc<FseMap> + Mutex<ScanCursor> and calls
+    // scan_with_cursor() on each InferenceControl::intervene() call with
+    // only the delta bytes (new text since the last call).
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Initialise a fresh `ScanCursor` at the DFA start state.
+    pub fn new_cursor(&self) -> Result<crate::scanner::ScanCursor, crate::scanner::ScanError> {
+        use aho_corasick::automaton::Automaton;
+        let sid = self.dfa.start_state(aho_corasick::Anchored::No)
+            .map_err(crate::scanner::ScanError::StartState)?;
+        let words = self.rule_count.saturating_add(63) / 64;
+        Ok(crate::scanner::ScanCursor { sid, rule_bits: vec![0u64; words], rules_recorded: 0 })
+    }
+
+    /// Advance `cursor` over `input` bytes using the compiled DFA + opcode table.
+    ///
+    /// - Maintains DFA state across calls — feed deltas, not the full buffer.
+    /// - All rules fire in a single pass (FSE pattern).
+    /// - Returns `Err(Violation)` immediately on `Reject`; caller must treat the
+    ///   cursor as poisoned after an error.
+    pub fn scan_with_cursor(
+        &self,
+        cursor: &mut crate::scanner::ScanCursor,
+        input: &[u8],
+    ) -> Result<crate::scanner::ScanSummary, crate::scanner::Violation> {
+        use aho_corasick::automaton::Automaton;
+
+        let aut = &self.dfa;
+        let mut sid = cursor.sid;
+        let mut match_states_seen: u64 = 0;
+        let mut pattern_hits:      u64 = 0;
+
+        for (at, &b) in input.iter().enumerate() {
+            sid = aut.next_state(aho_corasick::Anchored::No, sid, b);
+
+            let acts = self.actions_for_state(sid);
+            if acts.is_empty() { continue; }
+
+            match_states_seen += 1;
+            let end = at + 1;
+
+            for act in acts {
+                match *act {
+                    PackedAction::Ignore => {}
+                    PackedAction::Record { word_idx, bit_mask } => {
+                        pattern_hits += 1;
+                        if let Some(word) = cursor.rule_bits.get_mut(word_idx as usize) {
+                            if (*word & bit_mask) == 0 {
+                                *word |= bit_mask;
+                                cursor.rules_recorded = cursor.rules_recorded.saturating_add(1);
+                            }
+                        } else {
+                            cursor.sid = sid;
+                            return Err(crate::scanner::Violation::IntegrityError {
+                                pattern_index: 0,
+                                details: "word_idx out of bounds in scan_with_cursor",
+                            });
+                        }
+                    }
+                    PackedAction::Reject { rule_id, pattern_index, pattern_len } => {
+                        let start = end.saturating_sub(pattern_len as usize);
+                        cursor.sid = sid;
+                        return Err(crate::scanner::Violation::PolicyReject {
+                            rule_id,
+                            pattern_index: pattern_index as usize,
+                            span: start..end,
+                        });
+                    }
+                    PackedAction::ControlResetRuleState => {
+                        pattern_hits += 1;
+                        cursor.reset_rule_state();
+                    }
+                    PackedAction::IntegrityError { pattern_index } => {
+                        cursor.sid = sid;
+                        return Err(crate::scanner::Violation::IntegrityError {
+                            pattern_index: pattern_index as usize,
+                            details: "precomputed integrity error in compiled map",
+                        });
+                    }
+                }
+            }
+        }
+
+        cursor.sid = sid;
+        Ok(crate::scanner::ScanSummary {
+            bytes_scanned:       input.len(),
+            match_states_seen,
+            pattern_hits,
+            rules_recorded:      cursor.rules_recorded,
+            rules_rejected:      0,
+        })
+    }
 }
 
 fn build_state_tables(

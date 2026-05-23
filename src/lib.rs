@@ -19,3 +19,4 @@ pub mod adapter;
 pub use family::llama::init_verbose_diagnostics;
 pub mod backend;
 pub mod schoolmarm_control;
+pub mod fse_control;
