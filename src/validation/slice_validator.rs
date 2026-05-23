@@ -318,3 +318,292 @@ pub struct OracleResult {
     pub oracle_command: String,
     pub conformance_result: ConformanceResult,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    const TARGET_SHA: &str =
+        "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556";
+
+    fn tmp() -> TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    fn good_decode() -> DecodeResult {
+        DecodeResult {
+            model_sha256: TARGET_SHA.to_string(),
+            model_file_size: 1234567,
+            prompt_tokens: vec![1, 2, 3],
+            generated_tokens: vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
+            per_step_logits: (0..16)
+                .map(|i| LogitInfo { step: i, max_logit_index: 10, max_logit_value: Some(5.0), finite: true })
+                .collect(),
+            determinism_proof: DeterminismProof {
+                run1_tokens: vec![10, 11],
+                run2_tokens: vec![10, 11],
+                identical: true,
+            },
+        }
+    }
+
+    fn good_kv(base: usize, steps: usize) -> KVCacheResult {
+        KVCacheResult {
+            model_sha256: TARGET_SHA.to_string(),
+            base_cache_len: base,
+            cache_len_by_step: (0..steps).map(|i| base + i).collect(),
+            attention_diagnostics: None,
+            equivalence_test: EquivalenceResult::Pass,
+        }
+    }
+
+    fn good_oracle() -> OracleResult {
+        OracleResult {
+            model_sha256: TARGET_SHA.to_string(),
+            oracle_tool: "llama.cpp".to_string(),
+            oracle_version: "b1234".to_string(),
+            oracle_command: "llama-run --model foo.gguf".to_string(),
+            conformance_result: ConformanceResult::ExactMatch,
+        }
+    }
+
+    // ── SliceValidator::new / v2_target ───────────────────────────────────────
+
+    #[test]
+    fn test_new_constructs_with_sha() {
+        let td = tmp();
+        let v = SliceValidator::new("mysha".to_string(), td.path());
+        assert_eq!(v.target_model_sha256, "mysha");
+    }
+
+    #[test]
+    fn test_v2_target_sha_is_canonical() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        assert_eq!(v.target_model_sha256, TARGET_SHA);
+    }
+
+    // ── validate_tensor_type ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_tensor_type_f32_ok() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        assert!(v.validate_tensor_type(0).is_ok());
+    }
+
+    #[test]
+    fn test_tensor_type_q4_0_ok() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        assert!(v.validate_tensor_type(2).is_ok());
+    }
+
+    #[test]
+    fn test_tensor_type_q4_k_ok() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        assert!(v.validate_tensor_type(12).is_ok());
+    }
+
+    #[test]
+    fn test_tensor_type_q6_k_ok() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        assert!(v.validate_tensor_type(14).is_ok());
+    }
+
+    #[test]
+    fn test_tensor_type_unknown_fails_closed() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        for bad in [1u32, 3, 5, 6, 7, 8, 9, 10, 11, 13, 15, 99, 255] {
+            let r = v.validate_tensor_type(bad);
+            match r {
+                Err(SliceValidationError::UnknownTensorType { ggml_type }) => {
+                    assert_eq!(ggml_type, bad);
+                }
+                _ => panic!("expected UnknownTensorType for type {bad}"),
+            }
+        }
+    }
+
+    // ── validate_invariant ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_invariant_true_is_ok() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        assert!(v.validate_invariant(true, "should pass").is_ok());
+    }
+
+    #[test]
+    fn test_invariant_false_returns_error() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let err = v.validate_invariant(false, "bad thing").unwrap_err();
+        match err {
+            SliceValidationError::InvariantViolation { description } => {
+                assert_eq!(description, "bad thing");
+            }
+            other => panic!("expected InvariantViolation, got {other:?}"),
+        }
+    }
+
+    // ── validate_boundary ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_boundary_within_is_ok() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        assert!(v.validate_boundary(true, "max_tokens", "under limit").is_ok());
+    }
+
+    #[test]
+    fn test_boundary_exceeded_returns_error() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let err = v.validate_boundary(false, "context_window", "overflow at 4097").unwrap_err();
+        match err {
+            SliceValidationError::SystemBoundaryExceeded { boundary, details } => {
+                assert_eq!(boundary, "context_window");
+                assert_eq!(details, "overflow at 4097");
+            }
+            other => panic!("expected SystemBoundaryExceeded, got {other:?}"),
+        }
+    }
+
+    // ── validate_slice_01 ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_slice_01_success() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let result = v.validate_slice_01(&good_decode(), "p1");
+        assert!(result.is_ok());
+        assert!(result.unwrap().exists(), "artifact file must be created");
+    }
+
+    #[test]
+    fn test_slice_01_wrong_sha_fails() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let mut dr = good_decode();
+        dr.model_sha256 = "wrong_sha".to_string();
+        let err = v.validate_slice_01(&dr, "p").unwrap_err();
+        assert!(matches!(err, SliceValidationError::ValidationRuleViolated { .. }));
+    }
+
+    #[test]
+    fn test_slice_01_not_16_tokens_fails() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let mut dr = good_decode();
+        dr.generated_tokens = vec![1, 2, 3]; // only 3 tokens
+        let err = v.validate_slice_01(&dr, "p").unwrap_err();
+        assert!(matches!(err, SliceValidationError::ValidationRuleViolated { .. }));
+    }
+
+    #[test]
+    fn test_slice_01_17_tokens_fails() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let mut dr = good_decode();
+        dr.generated_tokens = vec![1; 17];
+        // Also need 17 logit infos
+        dr.per_step_logits = (0..17)
+            .map(|i| LogitInfo { step: i, max_logit_index: 1, max_logit_value: Some(1.0), finite: true })
+            .collect();
+        let err = v.validate_slice_01(&dr, "p").unwrap_err();
+        assert!(matches!(err, SliceValidationError::ValidationRuleViolated { .. }));
+    }
+
+    #[test]
+    fn test_slice_01_nonfinite_logit_fails() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let mut dr = good_decode();
+        dr.per_step_logits[5].finite = false;
+        let err = v.validate_slice_01(&dr, "p").unwrap_err();
+        assert!(matches!(err, SliceValidationError::InvariantViolation { .. }));
+    }
+
+    #[test]
+    fn test_slice_01_nondeterministic_fails() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let mut dr = good_decode();
+        dr.determinism_proof.identical = false;
+        dr.determinism_proof.run2_tokens = vec![99, 88];
+        let err = v.validate_slice_01(&dr, "p").unwrap_err();
+        assert!(matches!(err, SliceValidationError::DeterminismFailed { .. }));
+    }
+
+    // ── validate_slice_02 ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_slice_02_success() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let kv = good_kv(10, 8);
+        let result = v.validate_slice_02(&kv, "p2");
+        assert!(result.is_ok());
+        assert!(result.unwrap().exists());
+    }
+
+    #[test]
+    fn test_slice_02_monotonic_violation_at_first_step() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let mut kv = good_kv(10, 4);
+        kv.cache_len_by_step[0] = 999; // step 0 should be base=10, not 999
+        let err = v.validate_slice_02(&kv, "p").unwrap_err();
+        assert!(matches!(err, SliceValidationError::InvariantViolation { .. }));
+    }
+
+    #[test]
+    fn test_slice_02_monotonic_violation_mid_sequence() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let mut kv = good_kv(5, 6);
+        kv.cache_len_by_step[3] = 7; // step 3: expected 5+3=8, got 7
+        let err = v.validate_slice_02(&kv, "p").unwrap_err();
+        assert!(matches!(err, SliceValidationError::InvariantViolation { .. }));
+    }
+
+    #[test]
+    fn test_slice_02_empty_steps_is_ok() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let kv = good_kv(0, 0); // no steps — nothing to violate
+        assert!(v.validate_slice_02(&kv, "p").is_ok());
+    }
+
+    // ── validate_slice_03 ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_slice_03_success_exact_match() {
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let result = v.validate_slice_03(&good_oracle(), "p3");
+        assert!(result.is_ok());
+        assert!(result.unwrap().exists());
+    }
+
+    #[test]
+    fn test_slice_03_success_with_mismatch_result() {
+        // Validator doesn't gate on ConformanceResult value — it records whatever it gets
+        let td = tmp();
+        let v = SliceValidator::v2_target(td.path());
+        let mut oracle = good_oracle();
+        oracle.conformance_result = ConformanceResult::Mismatch {
+            first_divergence_step: 3,
+            lib_token: 42,
+            oracle_token: 99,
+            mismatch_report: "diverged at step 3".to_string(),
+        };
+        let result = v.validate_slice_03(&oracle, "p");
+        assert!(result.is_ok(), "slice_03 records mismatch but doesn't fail on it");
+    }
+}

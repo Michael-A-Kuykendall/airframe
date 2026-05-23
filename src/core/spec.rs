@@ -430,4 +430,212 @@ mod tests {
         // dim=2048: 2048/32 * 18 = 1152 bytes per row
         assert_eq!(spec.quant_row_bytes(2048), 1152);
     }
+
+    // ── GgufFileType::from(u32) ───────────────────────────────────────────────
+
+    #[test]
+    fn test_gguf_file_type_all_known_variants() {
+        assert!(matches!(GgufFileType::from(0), GgufFileType::F32));
+        assert!(matches!(GgufFileType::from(1), GgufFileType::F16));
+        assert!(matches!(GgufFileType::from(2), GgufFileType::Q4_0));
+        assert!(matches!(GgufFileType::from(3), GgufFileType::Q4_1));
+        assert!(matches!(GgufFileType::from(7), GgufFileType::Q8_0));
+        assert!(matches!(GgufFileType::from(8), GgufFileType::Q5_0));
+        assert!(matches!(GgufFileType::from(9), GgufFileType::Q5_1));
+        assert!(matches!(GgufFileType::from(10), GgufFileType::Q2_K));
+        assert!(matches!(GgufFileType::from(11), GgufFileType::Q3_K));
+        assert!(matches!(GgufFileType::from(12), GgufFileType::Q4_K));
+        assert!(matches!(GgufFileType::from(13), GgufFileType::Q5_K));
+        assert!(matches!(GgufFileType::from(14), GgufFileType::Q6_K));
+    }
+
+    #[test]
+    fn test_gguf_file_type_unknown_variant() {
+        assert!(matches!(GgufFileType::from(99), GgufFileType::Unknown));
+        assert!(matches!(GgufFileType::from(255), GgufFileType::Unknown));
+        assert!(matches!(GgufFileType::from(4), GgufFileType::Unknown));
+    }
+
+    // ── ModelArch::from(&str) ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_model_arch_all_known_variants() {
+        assert!(matches!(ModelArch::from("llama"), ModelArch::Llama));
+        assert!(matches!(ModelArch::from("mistral"), ModelArch::Mistral));
+        assert!(matches!(ModelArch::from("phi"), ModelArch::Phi));
+        assert!(matches!(ModelArch::from("phi2"), ModelArch::Phi));
+        assert!(matches!(ModelArch::from("phi3"), ModelArch::Phi));
+        assert!(matches!(ModelArch::from("gemma"), ModelArch::Gemma));
+    }
+
+    #[test]
+    fn test_model_arch_case_insensitive() {
+        assert!(matches!(ModelArch::from("LLAMA"), ModelArch::Llama));
+        assert!(matches!(ModelArch::from("Mistral"), ModelArch::Mistral));
+        assert!(matches!(ModelArch::from("PHI2"), ModelArch::Phi));
+    }
+
+    #[test]
+    fn test_model_arch_other() {
+        let a = ModelArch::from("starcoder2");
+        match &a {
+            ModelArch::Other(s) => assert_eq!(s, "starcoder2"),
+            _ => panic!("expected Other"),
+        }
+    }
+
+    // ── ModelSpec::arch_string ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_arch_string_all_known() {
+        let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+        assert_eq!(spec.arch_string(), "llama");
+    }
+
+    #[test]
+    fn test_arch_string_other() {
+        let mut spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+        spec.arch = ModelArch::Other("starcoder2".to_string());
+        assert_eq!(spec.arch_string(), "starcoder2");
+    }
+
+    #[test]
+    fn test_arch_string_gemma() {
+        let mut spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+        spec.arch = ModelArch::Gemma;
+        assert_eq!(spec.arch_string(), "gemma");
+    }
+
+    // ── compute_derived: rope_dim capping ────────────────────────────────────
+
+    #[test]
+    fn test_compute_derived_caps_rope_dim() {
+        let spec = ModelSpec {
+            n_vocab: 1000,
+            n_embd: 8,
+            n_layer: 1,
+            n_head: 2,
+            n_head_kv: 2,
+            ff_dim: 16,
+            rms_eps: 1e-5,
+            rope_base: 10000.0,
+            rope_scale: 1.0,
+            rope_dim: 999, // way over head_dim=4
+            yarn_alpha: 1.0,
+            yarn_beta: 32.0,
+            n_ctx: 128,
+            attn_logit_softcap: 0.0,
+            final_logit_softcap: 0.0,
+            head_dim: 0,
+            gqa_ratio: 0,
+            kv_dim: 0,
+            arch: ModelArch::Llama,
+            file_type: GgufFileType::F32,
+            model_name: "test".to_string(),
+            temp_buffer_size: 0,
+            kv_cache_size_per_layer: 0,
+        }
+        .compute_derived();
+        assert_eq!(spec.head_dim, 4); // 8/2=4
+        assert_eq!(spec.rope_dim, 4, "rope_dim should be capped to head_dim");
+    }
+
+    // ── quant_block_size / quant_block_bytes — all variants ──────────────────
+
+    #[test]
+    fn test_quant_block_size_all_variants() {
+        let mut spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+
+        for (ft, expected_size) in [
+            (GgufFileType::Q4_0, 32),
+            (GgufFileType::Q4_1, 32),
+            (GgufFileType::Q5_0, 32),
+            (GgufFileType::Q5_1, 32),
+            (GgufFileType::Q8_0, 32),
+            (GgufFileType::Q2_K, 256),
+            (GgufFileType::Q3_K, 256),
+            (GgufFileType::Q4_K, 256),
+            (GgufFileType::Q5_K, 256),
+            (GgufFileType::Q6_K, 256),
+            (GgufFileType::F16, 1),
+            (GgufFileType::F32, 1),
+            (GgufFileType::Unknown, 32),
+        ] {
+            spec.file_type = ft;
+            assert_eq!(spec.quant_block_size(), expected_size, "{ft:?}");
+        }
+    }
+
+    #[test]
+    fn test_quant_block_bytes_all_variants() {
+        let mut spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+
+        for (ft, expected_bytes) in [
+            (GgufFileType::Q4_0, 18),
+            (GgufFileType::Q4_1, 20),
+            (GgufFileType::Q5_0, 22),
+            (GgufFileType::Q5_1, 24),
+            (GgufFileType::Q8_0, 34),
+            (GgufFileType::Q2_K, 84),
+            (GgufFileType::Q3_K, 110),
+            (GgufFileType::Q4_K, 144),
+            (GgufFileType::Q5_K, 176),
+            (GgufFileType::Q6_K, 210),
+            (GgufFileType::F16, 2),
+            (GgufFileType::F32, 4),
+            (GgufFileType::Unknown, 18),
+        ] {
+            spec.file_type = ft;
+            assert_eq!(spec.quant_block_bytes(), expected_bytes, "{ft:?}");
+        }
+    }
+
+    // ── from_gguf_metadata: edge cases ───────────────────────────────────────
+
+    #[test]
+    fn test_from_gguf_metadata_gqa_llama32() {
+        // Llama-3.2: 16 heads, 8 kv heads → gqa_ratio=2
+        let mut meta = HashMap::new();
+        meta.insert("general.architecture".to_string(), GgufValue::String("llama".to_string()));
+        meta.insert("general.name".to_string(), GgufValue::String("llama32".to_string()));
+        meta.insert("general.file_type".to_string(), GgufValue::U32(12));
+        meta.insert("llama.embedding_length".to_string(), GgufValue::U32(2048));
+        meta.insert("llama.block_count".to_string(), GgufValue::U32(16));
+        meta.insert("llama.feed_forward_length".to_string(), GgufValue::U32(8192));
+        meta.insert("llama.attention.head_count".to_string(), GgufValue::U32(32));
+        meta.insert("llama.attention.head_count_kv".to_string(), GgufValue::U32(8));
+        meta.insert("llama.attention.layer_norm_rms_epsilon".to_string(), GgufValue::F32(1e-5));
+        meta.insert("llama.rope.freq_base".to_string(), GgufValue::F32(500000.0));
+        meta.insert("llama.rope.dimension_count".to_string(), GgufValue::U32(64));
+        meta.insert("llama.context_length".to_string(), GgufValue::U32(131072));
+        meta.insert("tokenizer.ggml.tokens".to_string(), GgufValue::ArrayLen(32000));
+
+        let spec = ModelSpec::from_gguf_metadata(&meta);
+        assert_eq!(spec.gqa_ratio, 4, "32/8 = 4");
+        assert_eq!(spec.kv_dim, 8 * 64); // 8 kv heads × head_dim=64
+    }
+
+    #[test]
+    fn test_from_gguf_metadata_arch_prefix_used_for_keys() {
+        // Verify the suffix-scan picks up arch-prefixed keys
+        let mut meta = HashMap::new();
+        meta.insert("general.architecture".to_string(), GgufValue::String("llama".to_string()));
+        meta.insert("general.name".to_string(), GgufValue::String("x".to_string()));
+        meta.insert("general.file_type".to_string(), GgufValue::U32(2));
+        meta.insert("llama.embedding_length".to_string(), GgufValue::U32(512));
+        meta.insert("llama.block_count".to_string(), GgufValue::U32(4));
+        meta.insert("llama.feed_forward_length".to_string(), GgufValue::U32(1024));
+        meta.insert("llama.attention.head_count".to_string(), GgufValue::U32(8));
+        meta.insert("llama.attention.head_count_kv".to_string(), GgufValue::U32(8));
+        meta.insert("llama.attention.layer_norm_rms_epsilon".to_string(), GgufValue::F32(1e-6));
+        meta.insert("llama.rope.freq_base".to_string(), GgufValue::F32(10000.0));
+        meta.insert("llama.rope.dimension_count".to_string(), GgufValue::U32(64));
+        meta.insert("llama.context_length".to_string(), GgufValue::U32(2048));
+        meta.insert("tokenizer.ggml.tokens".to_string(), GgufValue::ArrayLen(8192));
+
+        let spec = ModelSpec::from_gguf_metadata(&meta);
+        assert_eq!(spec.n_embd, 512);
+        assert_eq!(spec.n_layer, 4);
+        assert_eq!(spec.n_vocab, 8192);
+    }
 }

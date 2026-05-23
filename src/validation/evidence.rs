@@ -138,3 +138,150 @@ impl Default for EvidenceChecklist {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── EvidenceChecklist construction ────────────────────────────────────────
+
+    #[test]
+    fn test_new_is_empty() {
+        let c = EvidenceChecklist::new();
+        assert!(c.validate().is_ok(), "empty checklist (no required items) should pass");
+    }
+
+    #[test]
+    fn test_default_equals_new() {
+        let a = EvidenceChecklist::new();
+        let b = EvidenceChecklist::default();
+        assert_eq!(a.items.len(), b.items.len());
+    }
+
+    // ── add_required / add_optional ───────────────────────────────────────────
+
+    #[test]
+    fn test_required_missing_fails_validation() {
+        let mut c = EvidenceChecklist::new();
+        c.add_required("sha256");
+        let err = c.validate().expect_err("missing required item must fail");
+        match err {
+            SliceValidationError::EvidenceIncomplete { missing_items } => {
+                assert!(missing_items.contains(&"sha256".to_string()));
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_optional_missing_does_not_fail() {
+        let mut c = EvidenceChecklist::new();
+        c.add_optional("extra");
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn test_required_set_passes() {
+        let mut c = EvidenceChecklist::new();
+        c.add_required("sha256");
+        c.set("sha256", "abc123".to_string());
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn test_set_on_missing_key_is_noop() {
+        // set() on a key that was never added should not panic or create an entry
+        let mut c = EvidenceChecklist::new();
+        c.set("nonexistent", "value".to_string());
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn test_multiple_required_all_must_be_set() {
+        let mut c = EvidenceChecklist::new();
+        c.add_required("a");
+        c.add_required("b");
+        c.add_required("c");
+        c.set("a", "1".to_string());
+        c.set("b", "2".to_string());
+        // "c" not set
+        assert!(c.validate().is_err());
+        c.set("c", "3".to_string());
+        assert!(c.validate().is_ok());
+    }
+
+    // ── Slice factory constructors ────────────────────────────────────────────
+
+    #[test]
+    fn test_slice_01_has_required_fields() {
+        let mut c = EvidenceChecklist::slice_01();
+        // Should fail until all 6 required items are filled
+        assert!(c.validate().is_err());
+
+        c.set("Model SHA256", "x".to_string());
+        c.set("Model file size", "y".to_string());
+        c.set("Prompt fixture identifier", "p1".to_string());
+        c.set("Token count expected vs produced", "16 expected, 16 produced".to_string());
+        c.set("Determinism confirmation", "PASS".to_string());
+        c.set("Artifact path emitted", "/tmp/foo.json".to_string());
+
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn test_slice_02_has_required_fields() {
+        let mut c = EvidenceChecklist::slice_02();
+        assert!(c.validate().is_err());
+
+        c.set("Model SHA256", "x".to_string());
+        c.set("KV cache growth validation", "PASS".to_string());
+        c.set("Attention history usage", "PASS".to_string());
+        c.set("Prefill/decode equivalence", "PASS".to_string());
+        c.set("Artifact path emitted", "/tmp/foo.json".to_string());
+
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn test_slice_03_has_required_fields() {
+        let mut c = EvidenceChecklist::slice_03();
+        assert!(c.validate().is_err());
+
+        c.set("Model SHA256", "x".to_string());
+        c.set("Oracle tool version", "v1.0".to_string());
+        c.set("Oracle command line", "cmd".to_string());
+        c.set("Conformance result", "PASS".to_string());
+        c.set("Artifact path emitted", "/tmp/foo.json".to_string());
+
+        assert!(c.validate().is_ok());
+    }
+
+    // ── EvidenceItem fields ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_required_flag_is_true_for_add_required() {
+        let mut c = EvidenceChecklist::new();
+        c.add_required("must-have");
+        let item = &c.items["must-have"];
+        assert!(item.required);
+        assert!(item.value.is_none());
+    }
+
+    #[test]
+    fn test_required_flag_is_false_for_add_optional() {
+        let mut c = EvidenceChecklist::new();
+        c.add_optional("nice-to-have");
+        let item = &c.items["nice-to-have"];
+        assert!(!item.required);
+    }
+
+    // ── print() exercises the display path ───────────────────────────────────
+
+    #[test]
+    fn test_print_does_not_panic() {
+        let mut c = EvidenceChecklist::slice_01();
+        c.set("Model SHA256", "deadbeef".to_string());
+        // Calling print() should not panic regardless of fill state
+        c.print();
+    }
+}

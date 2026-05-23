@@ -110,4 +110,74 @@ mod tests {
         assert_eq!(max_val, 15.0);
         assert_eq!(min_val, -16.0);
     }
+
+    // ── dequantize_q5_0 with synthetic mmap data ──────────────────────────────
+
+    use crate::core::model::GgufTensorInfo;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn info(dims: Vec<usize>) -> GgufTensorInfo {
+        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 6, offset: 0 }
+    }
+
+    fn write_q5_0_block(f: &mut NamedTempFile, scale_bits: u16, qh: u32, qs: &[u8; 16]) {
+        f.write_all(&scale_bits.to_le_bytes()).unwrap();
+        f.write_all(&qh.to_le_bytes()).unwrap();
+        f.write_all(qs).unwrap();
+    }
+
+    #[test]
+    fn test_q5_0_all_zero_output() {
+        // val = (low_nibble | (high_bit << 4)) - 16
+        // For val=0: low_nibble=0, high_bit=1 → (0 | 0x10) - 16 = 16-16 = 0
+        // qh = 0xFFFF_FFFF (all high bits set), qs = [0x00; 16] (all low nibbles 0)
+        let mut f = NamedTempFile::new().unwrap();
+        write_q5_0_block(&mut f, 0x3C00, 0xFFFF_FFFFu32, &[0x00u8; 16]);
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q5_0(&info(vec![32]), &mmap, 0).unwrap();
+        assert_eq!(tensor.data.len(), 32);
+        for &v in &tensor.data {
+            assert!((v).abs() < 1e-4, "expected 0.0, got {v}");
+        }
+    }
+
+    #[test]
+    fn test_q5_0_max_positive() {
+        // For val=15: low_nibble=0xF, high_bit=1 → (0xF | 0x10) - 16 = 31-16 = 15
+        // qh = 0xFFFF_FFFF, qs = [0xFF; 16], scale=1.0
+        let mut f = NamedTempFile::new().unwrap();
+        write_q5_0_block(&mut f, 0x3C00, 0xFFFF_FFFFu32, &[0xFFu8; 16]);
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q5_0(&info(vec![32]), &mmap, 0).unwrap();
+        for &v in &tensor.data {
+            assert!((v - 15.0).abs() < 0.01, "expected 15.0, got {v}");
+        }
+    }
+
+    #[test]
+    fn test_q5_0_max_negative() {
+        // For val=-16: low_nibble=0, high_bit=0 → (0 | 0) - 16 = -16
+        // qh = 0, qs = [0x00; 16], scale=1.0
+        let mut f = NamedTempFile::new().unwrap();
+        write_q5_0_block(&mut f, 0x3C00, 0u32, &[0x00u8; 16]);
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let tensor = dequantize_q5_0(&info(vec![32]), &mmap, 0).unwrap();
+        for &v in &tensor.data {
+            assert!((v - (-16.0)).abs() < 0.01, "expected -16.0, got {v}");
+        }
+    }
+
+    #[test]
+    fn test_q5_0_bounds_error() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0u8; 10]).unwrap();
+        f.flush().unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(f.as_file()) }.unwrap();
+        let result = dequantize_q5_0(&info(vec![32]), &mmap, 0);
+        assert!(result.is_err());
+    }
 }

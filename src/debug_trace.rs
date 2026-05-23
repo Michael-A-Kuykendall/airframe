@@ -139,3 +139,170 @@ pub struct InferenceTracePackage {
     pub final_tokens_generated: usize,
     pub final_text: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPSILON: f32 = 1e-5;
+
+    fn approx_eq(a: f32, b: f32) -> bool {
+        (a - b).abs() < EPSILON
+    }
+
+    // ── TraceStats::from_slice ────────────────────────────────────────────────
+
+    #[test]
+    fn test_trace_stats_empty() {
+        let s = TraceStats::from_slice(&[]);
+        assert_eq!(s.min, 0.0);
+        assert_eq!(s.max, 0.0);
+        assert_eq!(s.mean, 0.0);
+        assert_eq!(s.std_dev, 0.0);
+        assert_eq!(s.abs_max, 0.0);
+        assert!(s.first8.is_empty());
+    }
+
+    #[test]
+    fn test_trace_stats_single_element() {
+        let s = TraceStats::from_slice(&[3.0]);
+        assert!(approx_eq(s.min, 3.0));
+        assert!(approx_eq(s.max, 3.0));
+        assert!(approx_eq(s.mean, 3.0));
+        assert!(approx_eq(s.std_dev, 0.0));
+        assert!(approx_eq(s.abs_max, 3.0));
+        assert_eq!(s.first8, vec![3.0]);
+    }
+
+    #[test]
+    fn test_trace_stats_basic_values() {
+        // [1, 2, 3]: mean=2, variance=2/3, std_dev=sqrt(2/3)
+        let s = TraceStats::from_slice(&[1.0, 2.0, 3.0]);
+        assert!(approx_eq(s.min, 1.0));
+        assert!(approx_eq(s.max, 3.0));
+        assert!(approx_eq(s.mean, 2.0));
+        let expected_std = (2.0f32 / 3.0).sqrt();
+        assert!((s.std_dev - expected_std).abs() < 1e-4, "std_dev={}", s.std_dev);
+        assert!(approx_eq(s.abs_max, 3.0));
+        assert_eq!(s.first8, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_trace_stats_negative_values() {
+        let s = TraceStats::from_slice(&[-5.0, -1.0, 2.0]);
+        assert!(approx_eq(s.min, -5.0));
+        assert!(approx_eq(s.max, 2.0));
+        assert!(approx_eq(s.abs_max, 5.0), "abs_max should be 5.0, got {}", s.abs_max);
+    }
+
+    #[test]
+    fn test_trace_stats_all_same() {
+        let v: Vec<f32> = vec![7.0; 10];
+        let s = TraceStats::from_slice(&v);
+        assert!(approx_eq(s.min, 7.0));
+        assert!(approx_eq(s.max, 7.0));
+        assert!(approx_eq(s.mean, 7.0));
+        assert!(approx_eq(s.std_dev, 0.0));
+    }
+
+    #[test]
+    fn test_trace_stats_first8_cap() {
+        // 12 values — only first 8 should appear
+        let v: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let s = TraceStats::from_slice(&v);
+        assert_eq!(s.first8.len(), 8);
+        assert_eq!(s.first8, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
+    }
+
+    #[test]
+    fn test_trace_stats_large_positive_and_negative() {
+        let s = TraceStats::from_slice(&[1e30, -1e30]);
+        assert!(approx_eq(s.mean, 0.0));
+        assert!(s.abs_max > 1e29);
+    }
+
+    // ── TensorTrace::from_slice ───────────────────────────────────────────────
+
+    #[test]
+    fn test_tensor_trace_without_values() {
+        let v = vec![1.0, 2.0, 3.0];
+        let tt = TensorTrace::from_slice(&v, false);
+        assert!(tt.values.is_none());
+        assert!(approx_eq(tt.stats.mean, 2.0));
+    }
+
+    #[test]
+    fn test_tensor_trace_with_values() {
+        let v = vec![1.0, 2.0, 3.0];
+        let tt = TensorTrace::from_slice(&v, true);
+        assert_eq!(tt.values.as_ref().unwrap(), &v);
+    }
+
+    #[test]
+    fn test_tensor_trace_empty() {
+        let tt = TensorTrace::from_slice(&[], true);
+        assert!(tt.values.as_ref().unwrap().is_empty());
+        assert_eq!(tt.stats.min, 0.0);
+    }
+
+    // ── topk_from_logits ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_topk_basic_ordering() {
+        // Token 1 has highest logit (5.0), token 2 second (3.0)
+        let logits = vec![0.1, 5.0, 3.0, 1.0];
+        let top = topk_from_logits(&logits, 2, None);
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0].token_id, 1);
+        assert!(approx_eq(top[0].logit, 5.0));
+        assert_eq!(top[1].token_id, 2);
+        assert!(approx_eq(top[1].logit, 3.0));
+    }
+
+    #[test]
+    fn test_topk_k_larger_than_vocab_returns_all() {
+        let logits = vec![1.0, 2.0, 3.0];
+        let top = topk_from_logits(&logits, 100, None);
+        assert_eq!(top.len(), 3);
+    }
+
+    #[test]
+    fn test_topk_k_zero_returns_empty() {
+        let logits = vec![1.0, 2.0, 3.0];
+        let top = topk_from_logits(&logits, 0, None);
+        assert!(top.is_empty());
+    }
+
+    #[test]
+    fn test_topk_empty_logits() {
+        let top = topk_from_logits(&[], 5, None);
+        assert!(top.is_empty());
+    }
+
+    #[test]
+    fn test_topk_no_tokenizer_token_text_is_none() {
+        let logits = vec![1.0, 2.0];
+        let top = topk_from_logits(&logits, 2, None);
+        for t in &top {
+            assert!(t.token_text.is_none());
+        }
+    }
+
+    #[test]
+    fn test_topk_negative_logits() {
+        let logits = vec![-10.0, -1.0, -5.0];
+        let top = topk_from_logits(&logits, 3, None);
+        // Should still be sorted descending: -1.0, -5.0, -10.0
+        assert_eq!(top[0].token_id, 1);
+        assert_eq!(top[1].token_id, 2);
+        assert_eq!(top[2].token_id, 0);
+    }
+
+    #[test]
+    fn test_topk_single_element() {
+        let top = topk_from_logits(&[42.0], 5, None);
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].token_id, 0);
+        assert!(approx_eq(top[0].logit, 42.0));
+    }
+}
