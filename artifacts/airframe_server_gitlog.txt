@@ -1,4 +1,0 @@
-639895c chore: checkpoint console branch and release plan
-a7d9621 feat: stream token deltas over chunked job transport
-8b66198 feat: add session-based rolling chat context
-82f28e1 feat(cli-tools): rescue shimmy-console intact source files and map into airframe crate workspace

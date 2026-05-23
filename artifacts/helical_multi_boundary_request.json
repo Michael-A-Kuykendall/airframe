@@ -1,1 +1,0 @@
-{"prompt":"Repeat this exact five-word cycle continuously with single spaces and no explanation: red blue green gold black","prompt_mode":"raw","max_tokens":5200,"ignore_eos":true,"temperature":0.0,"top_p":1.0,"repetition_penalty":1.0,"seed":7777,"stream":false}

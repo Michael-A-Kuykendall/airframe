@@ -1,1 +1,0 @@
-{"job_id":"job_1775584843469724100","task":"story","prompt":"Write one short sentence about the moon.","status":"completed","position":0,"eta_seconds":0,"started_at":1775584843469,"completed_at":1775584848788,"result":{"text":"The moon shines","stop_reason":"max_tokens","tokens_generated":4,"debug_trace_path":"artifacts/trace_smoke_output.json"},"partial_text":"The moon shines"}

@@ -1,2 +1,0 @@
-../libshimmy/handoff/repro-arena-bundle-2026-03-02/artifacts/helical_story_4096_full.json
-../libshimmy/handoff/repro-arena-bundle-2026-03-02/artifacts/story_4096_readable.txt
