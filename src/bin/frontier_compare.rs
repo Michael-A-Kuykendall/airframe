@@ -274,6 +274,7 @@ async fn async_main() -> Result<()> {
         quant_type: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
+        qk_norm_enabled: 0,
     };
 
     eprintln!("[GPU vs CPU] comparing {} layers ...", spec.n_layer);
@@ -560,7 +561,8 @@ fn cpu_debug_target_token(
             spec.rope_scale,
             layer_idx,
             kv_cache,
-        )?;
+            None, // no QK norm for non-Qwen3
+        )?;;
         let post_attn = ops.add(&hidden, &attn_output)?;
         let ffn_input = ops.rmsnorm(&post_attn, ffn_norm, spec.rms_eps)?;
         let ffn_output = ops.ffn_swiglu(&ffn_input, gate, up, down)?;

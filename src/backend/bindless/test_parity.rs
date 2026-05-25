@@ -118,7 +118,7 @@ mod parity_tests {
             .or_else(|_| {
                 let candidates = [
                     "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
-                    "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
+                    "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
                 ];
                 candidates.iter()
                     .find(|p| PathBuf::from(p).exists())
@@ -174,6 +174,7 @@ mod parity_tests {
             quant_type: 0,
             attn_logit_softcap: 0.0,
             post_norm_enabled: 0,
+            qk_norm_enabled: 0,
         };
 
         let (mid_vec, gpu_output) = pipeline.run_layer_stepwise_test(

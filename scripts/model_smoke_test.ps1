@@ -23,7 +23,8 @@ $VerifiedModels = @(
     @("Llama-3.2-3B-Instruct-Q4_K_M.gguf",      "Paris",  "The capital of France is"),
     @("phi-2.Q4_K_M.gguf",                       "Paris",  "The capital of France is"),
     @("starcoder2-3b-Q4_K_M.gguf",              "def ",   "def hello_world():"),
-    @("gpt2.Q4_K_M.gguf",                        "",       "The capital of France is")
+    @("gpt2.Q4_K_M.gguf",                        "",       "The capital of France is"),
+    @("Qwen3-0.6B-Q4_K_M.gguf",                 "Paris",  "The capital of France is")
 )
 
 # Models with known hardware/architecture limitations — not run, recorded as LIMIT.
@@ -93,7 +94,8 @@ function Test-SseStreaming {
     # Quick SSE probe: send stream:true with max_tokens=4, verify we get
     # at least one "data: " event back.  Uses curl.exe (available on Win10+).
     param([string]$Url, [string]$ModelFile)
-    $curlPath = (Get-Command "curl.exe" -ErrorAction SilentlyContinue)?.Source
+    $curlCmd = Get-Command "curl.exe" -ErrorAction SilentlyContinue
+    $curlPath = if ($curlCmd) { $curlCmd.Source } else { $null }
     if (-not $curlPath) { return $null }  # curl not available: skip
 
     $tmpBody = [System.IO.Path]::GetTempFileName()

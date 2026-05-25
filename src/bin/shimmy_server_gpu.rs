@@ -8,7 +8,7 @@ use airframe::backend::bindless::pipeline::{
 };
 use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0};
 use airframe::core::model::GgufTensorInfo;
-use airframe::core::spec::{GgufValue, ModelSpec};
+use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace,
     TokenTrace,
@@ -454,6 +454,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let pipeline = BindlessPipeline::new(&device);
 
     eprintln!("[GPU Server] Model loaded to VRAM");
+    log_arch_tensor_registry(&spec, &gpu_model.metadata);
     // Flush any pending staging work from GGUF upload before allocating output head buffer
     device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during initial flush");
 
@@ -492,10 +493,45 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let kv_mb =
         (max_ctx as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4 * spec.n_layer as u64)
             / (1024 * 1024);
+    let kv_total_mb = kv_mb * 2; // K + V buffers
     eprintln!(
         "[GPU Server] KV Cache initialized ({} MB F32, ctx={})",
-        kv_mb, max_ctx
+        kv_total_mb, max_ctx
     );
+    // === VRAM Budget Check ===
+    // Tracks known large allocations: KV cache (K+V) + output head.
+    // Does not block startup — emits a structured warning if totals look tight.
+    // Set SHIMMY_VRAM_LIMIT_MB to override the default (10500 for RTX 3060 12 GB).
+    {
+        let head_mb = output_head_f32.size() / 1_048_576;
+        let total_known_mb = kv_total_mb + head_mb;
+        let vram_limit_mb: u64 = std::env::var("SHIMMY_VRAM_LIMIT_MB")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10500);
+        eprintln!(
+            "[VRAM_BUDGET] kv_cache={} MB  output_head={} MB  tracked_total={} MB  limit={} MB",
+            kv_total_mb, head_mb, total_known_mb, vram_limit_mb
+        );
+        if total_known_mb > vram_limit_mb {
+            let safe_ctx = ((vram_limit_mb.saturating_sub(head_mb))
+                * 1_048_576
+                / (spec.n_layer as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4 * 2))
+                as u32;
+            eprintln!(
+                "[VRAM_BUDGET] WARN: tracked allocations ({} MB) exceed limit ({} MB).",
+                total_known_mb, vram_limit_mb
+            );
+            eprintln!(
+                "[VRAM_BUDGET] KV cache is dominant: ctx={}  layers={}  kv_heads={}  head_dim={}",
+                max_ctx, spec.n_layer, spec.n_head_kv, spec.head_dim
+            );
+            eprintln!(
+                "[VRAM_BUDGET] Suggest: set SHIMMY_MAX_CTX={} to bring KV cache within budget.",
+                safe_ctx.max(256)
+            );
+        }
+    }
     eprintln!("[GPU Server] FSE enabled (CrewChief active)");
     let shimmy_port = std::env::var("SHIMMY_PORT").unwrap_or_else(|_| "8080".to_string());
     let shimmy_bind_addr = format!("0.0.0.0:{}", shimmy_port);
@@ -970,12 +1006,31 @@ async fn handle_http_connection(
             stream.write_all(finish_chunk.as_bytes()).await.ok();
             stream.flush().await.ok();
         } else {
-            // Non-streaming: return the job_id immediately; client polls /api/repro/job-status
+            // Non-streaming: collect all tokens then return OpenAI-compatible response.
+            let mut rx = stream_rx;
+            let mut full_text = String::new();
+            loop {
+                match rx.recv().await {
+                    Ok(token) => full_text.push_str(&token),
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+            let stop_reason = {
+                let st = states.lock().unwrap();
+                st.get(&job_id)
+                    .and_then(|s| s.result.as_ref().map(|r| r.stop_reason.clone()))
+                    .unwrap_or_else(|| "stop".to_string())
+            };
+            // Escape the full text for JSON
+            let text_json = full_text
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
             let resp_json = format!(
-                "{{\"queued\": true, \"job_id\": \"{}\", \"position\": {}, \"eta_seconds\": {}}}",
-                job_id,
-                pos,
-                (pos + 1) * 30
+                "{{\"id\":\"{}\",\"object\":\"chat.completion\",\"choices\":[{{\"index\":0,\"message\":{{\"role\":\"assistant\",\"content\":\"{}\"}},\"finish_reason\":\"{}\"}}],\"usage\":{{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}}}}",
+                job_id, text_json, stop_reason
             );
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
@@ -1052,6 +1107,51 @@ async fn read_http_request(
     }
 
     Ok(buffer)
+}
+
+/// Architecture tensor registry: verify required tensors are present for the detected arch.
+/// Emits [ARCH_TENSOR_MISSING] for tensors that must exist, and [ARCH_TENSOR_UNEXPECTED]
+/// for tensors that indicate a likely arch mismatch. Conforms to FSE debug standards —
+/// pure log-layer, no hot-path involvement.
+fn log_arch_tensor_registry(spec: &ModelSpec, metadata: &airframe::backend::bindless::metadata::BindlessMetadata) {
+    let has = |name: &str| metadata.tensor_offsets.contains_key(name);
+    eprintln!(
+        "[ARCH_REGISTRY] arch={}  layers={}  vocab={}  kv_heads={}  head_dim={}",
+        spec.arch_string(), spec.n_layer, spec.n_vocab, spec.n_head_kv, spec.head_dim
+    );
+    // Universal tensors required in every supported architecture
+    for name in &["token_embd.weight", "output_norm.weight", "blk.0.attn_norm.weight", "blk.0.ffn_norm.weight"] {
+        if !has(name) {
+            eprintln!("[ARCH_TENSOR_MISSING] REQUIRED (universal): {}  arch={}", name, spec.arch_string());
+        }
+    }
+    // Arch-specific required vs not-expected tensors
+    let (required, unexpected): (&[&str], &[&str]) = match &spec.arch {
+        ModelArch::Qwen3 => (
+            &["blk.0.attn_q.weight", "blk.0.attn_k.weight", "blk.0.attn_v.weight",
+              "blk.0.attn_q_norm.weight", "blk.0.attn_k_norm.weight"],
+            &["blk.0.attn_qkv.weight"],
+        ),
+        ModelArch::Phi => (
+            &["blk.0.attn_qkv.weight"],
+            &["blk.0.attn_q.weight"],
+        ),
+        // Llama, Mistral, Qwen2, Gemma, Other — separate Q/K/V tensors
+        _ => (
+            &["blk.0.attn_q.weight", "blk.0.attn_k.weight", "blk.0.attn_v.weight"],
+            &["blk.0.attn_q_norm.weight", "blk.0.attn_k_norm.weight"],
+        ),
+    };
+    for name in required {
+        if !has(name) {
+            eprintln!("[ARCH_TENSOR_MISSING] REQUIRED for {}: {}", spec.arch_string(), name);
+        }
+    }
+    for name in unexpected {
+        if has(name) {
+            eprintln!("[ARCH_TENSOR_UNEXPECTED] {} found {} — possible arch mismatch", spec.arch_string(), name);
+        }
+    }
 }
 
 /// Dequantize `token_embd.weight` to a CPU Vec<f32> for embedding lookup.

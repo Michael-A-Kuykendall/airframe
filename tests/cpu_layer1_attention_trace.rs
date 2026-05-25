@@ -14,7 +14,7 @@ fn cpu_layer1_attention_trace() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== CPU Layer1 Attention Trace (BOS + Hello) ===\n");
 
     let model_path =
-        PathBuf::from("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+        PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
 
     let cpu_model = CpuModel::from_tinylama_q4_0_gguf(&model_path)?;

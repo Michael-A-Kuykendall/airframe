@@ -38,7 +38,7 @@ async fn test_layer1_weights_on_gpu() -> Result<(), Box<dyn std::error::Error>> 
 
     // Load model
     let model_path =
-        PathBuf::from("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+        PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
     let gpu_model = BindlessModel::load_from_disk(&device, &model_path, Some(&spec));
 

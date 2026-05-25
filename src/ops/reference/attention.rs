@@ -87,6 +87,27 @@ pub fn attention_f32(
     }
 }
 
+/// Apply per-head RMSNorm to a heads tensor [seq_len, n_heads, head_dim].
+/// Used for Qwen3 QK norm (applied after projection, before RoPE).
+fn apply_qk_norm(heads: &Tensor, norm_weight: &Tensor, eps: f32) -> Result<Tensor> {
+    let seq_len = heads.shape[0];
+    let n_heads = heads.shape[1];
+    let head_dim = heads.shape[2];
+    let mut out = heads.data.clone();
+    for t in 0..seq_len {
+        for h in 0..n_heads {
+            let base = (t * n_heads + h) * head_dim;
+            let slice = &heads.data[base..base + head_dim];
+            let rms_sq: f32 = slice.iter().map(|x| x * x).sum::<f32>() / head_dim as f32;
+            let scale = 1.0 / (rms_sq + eps).sqrt();
+            for d in 0..head_dim {
+                out[base + d] = slice[d] * scale * norm_weight.data[d];
+            }
+        }
+    }
+    Tensor::new(out, vec![seq_len, n_heads, head_dim])
+}
+
 /// Multi-head attention with KV cache.
 ///
 /// Handles prefill (store all) and decode (append one) phases.
@@ -107,6 +128,7 @@ pub fn attention_with_cache_f32(
     rope_scale: f32,
     layer_idx: usize,
     kv_cache: &mut KvCache,
+    qk_norm: Option<(&Tensor, &Tensor)>, // (q_norm_weight, k_norm_weight) for Qwen3
 ) -> Result<Tensor> {
     // Validate GQA configuration
     if n_head % n_head_kv != 0 {
@@ -157,6 +179,17 @@ pub fn attention_with_cache_f32(
     let q_heads = reshape_to_heads(&q, seq_len, n_head, head_dim)?; // [seq_len, n_head, head_dim]
     let k_heads = reshape_to_heads(&k, seq_len, n_head_kv, head_dim)?; // [seq_len, n_head_kv, head_dim]
     let v_heads = reshape_to_heads(&v, seq_len, n_head_kv, head_dim)?; // [seq_len, n_head_kv, head_dim]
+
+    // 2.5. QK Norm (Qwen3): per-head RMSNorm on Q and K before RoPE
+    let rms_eps = 1e-6_f32;
+    let (q_heads, k_heads) = if let Some((q_nw, k_nw)) = qk_norm {
+        (
+            apply_qk_norm(&q_heads, q_nw, rms_eps)?,
+            apply_qk_norm(&k_heads, k_nw, rms_eps)?,
+        )
+    } else {
+        (q_heads, k_heads)
+    };
 
     // 3. Apply RoPE to Q and K (using position_ids for absolute positions)
     let q_rope = rope::apply_rope_scaled_f32(

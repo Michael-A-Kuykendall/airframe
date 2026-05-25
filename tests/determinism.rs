@@ -10,7 +10,7 @@ fn test_exact_determinism_parity() -> Result<(), Box<dyn std::error::Error>> {
     // Basic determinism test without depending on local tinyllama if not present,
     // though tests/parity.rs already assumes it's present.
     let model_path = std::env::var("LIBSHIMMY_MODEL_PATH").unwrap_or_else(|_| {
-        "../../llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string()
+        "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string()
     });
 
     if !Path::new(&model_path).exists() {

@@ -52,6 +52,10 @@ pub enum ModelArch {
     Mistral,
     Phi,
     Gemma,
+    /// Qwen2 / Qwen2.5 (no per-head QK norm)
+    Qwen2,
+    /// Qwen3 (has per-head Q and K RMSNorm before RoPE)
+    Qwen3,
     Other(String),
 }
 
@@ -62,6 +66,8 @@ impl From<&str> for ModelArch {
             "mistral" => Self::Mistral,
             "phi" | "phi2" | "phi3" => Self::Phi,
             "gemma" => Self::Gemma,
+            "qwen2" => Self::Qwen2,
+            "qwen3" => Self::Qwen3,
             other => Self::Other(other.to_string()),
         }
     }
@@ -92,6 +98,8 @@ pub struct ModelSpec {
     pub attn_logit_softcap: f32,
     /// Final logit soft-cap applied after lm_head (Gemma-2: 30.0, others: 0.0 = disabled)
     pub final_logit_softcap: f32,
+    /// Per-head Q and K RMSNorm before RoPE (Qwen3). False for all other architectures.
+    pub has_qk_norm: bool,
 
     // Derived dimensions (computed once, used everywhere)
     pub head_dim: usize,  // n_embd / n_head
@@ -120,6 +128,8 @@ impl ModelSpec {
         }
         self.gqa_ratio = self.n_head / self.n_head_kv;
         self.kv_dim = self.n_head_kv * self.head_dim;
+        // Qwen3 uses per-head Q and K RMSNorm before RoPE
+        self.has_qk_norm = matches!(self.arch, ModelArch::Qwen3);
 
         // Temp buffer needs to hold the largest intermediate:
         // FFN uses ff_dim*2 (gate+up) plus dim for residual connections
@@ -232,6 +242,7 @@ impl ModelSpec {
             n_ctx:               n_ctx.unwrap_or(2048),
             attn_logit_softcap:  attn_softcap.unwrap_or(0.0),
             final_logit_softcap: final_softcap.unwrap_or(0.0),
+            has_qk_norm:         false, // set in compute_derived() from arch
             head_dim:            head_dim_expl.unwrap_or(0),
             gqa_ratio:           0,
             kv_dim:              0,
@@ -262,6 +273,7 @@ impl ModelSpec {
             n_ctx: 2048,
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
+            has_qk_norm: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
@@ -280,6 +292,7 @@ impl ModelSpec {
             ModelArch::Llama | ModelArch::Mistral => "blk",
             ModelArch::Phi => "blk", // Phi also uses blk in GGUF
             ModelArch::Gemma => "blk",
+            ModelArch::Qwen2 | ModelArch::Qwen3 => "blk",
             ModelArch::Other(_) => "blk", // default
         }
     }
@@ -291,6 +304,8 @@ impl ModelSpec {
             ModelArch::Mistral => "mistral",
             ModelArch::Phi => "phi",
             ModelArch::Gemma => "gemma",
+            ModelArch::Qwen2 => "qwen2",
+            ModelArch::Qwen3 => "qwen3",
             ModelArch::Other(s) => s.as_str(),
         }
     }
@@ -526,6 +541,7 @@ mod tests {
             n_ctx: 128,
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
+            has_qk_norm: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,

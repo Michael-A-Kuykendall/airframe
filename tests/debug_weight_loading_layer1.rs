@@ -12,7 +12,7 @@ async fn debug_weight_read_layer1() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::{Read, Seek, SeekFrom};
 
     let model_path =
-        PathBuf::from("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+        PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
 
     // Load metadata

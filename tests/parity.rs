@@ -21,7 +21,7 @@ const EXPECTED_FILE_SIZE: u64 = 637_699_456;
 /// Get model path from environment or use default
 fn get_model_path() -> String {
     std::env::var("LIBSHIMMY_MODEL_PATH").unwrap_or_else(|_| {
-        "../../../llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string()
+        "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string()
     })
 }
 
@@ -107,7 +107,7 @@ fn test_airframe_parity_control() {
 
     if !model_path.exists() {
         // Fallback check for alternative path (relative to crate root vs workspace root)
-        let alt_path = "../llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"; // Try one level up?
+        let alt_path = "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"; // D drive collection
         if Path::new(alt_path).exists() {
             // We can't change the path easily here without refactoring get_model_path logic
             // but we'll panic with clear instruction.

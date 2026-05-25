@@ -141,6 +141,11 @@ impl BindlessMetadata {
 
             let mut layer_idx = 0usize;
             while absolute_offsets.contains_key(&format!("blk.{}.attn_norm.weight", layer_idx)) {
+                // Optional tensor lookup — returns 0 if not present (e.g. QK norm on non-Qwen3)
+                let opt = |offsets: &std::collections::HashMap<String, u64>, li: usize, suffix: &str| -> u32 {
+                    let key = format!("blk.{}.{}", li, suffix);
+                    *offsets.get(&key).unwrap_or(&0) as u32
+                };
                 let offsets = super::pipeline::LayerOffsets {
                     attn_norm: p(&absolute_offsets, layer_idx, "attn_norm.weight"),
                     attn_q:    p(&absolute_offsets, layer_idx, "attn_q.weight"),
@@ -151,7 +156,9 @@ impl BindlessMetadata {
                     ffn_gate:  p(&absolute_offsets, layer_idx, "ffn_gate.weight"),
                     ffn_down:  p(&absolute_offsets, layer_idx, "ffn_down.weight"),
                     ffn_up:    p(&absolute_offsets, layer_idx, "ffn_up.weight"),
-                    padding:   [layer_idx as u32, 0, 0],
+                    layer_idx: layer_idx as u32,
+                    attn_q_norm: opt(&absolute_offsets, layer_idx, "attn_q_norm.weight"),
+                    attn_k_norm: opt(&absolute_offsets, layer_idx, "attn_k_norm.weight"),
                 };
                 let lqt_main = t(&tensor_types, layer_idx, "attn_q.weight");
                 let lqt_v    = t(&tensor_types, layer_idx, "attn_v.weight");
@@ -229,7 +236,9 @@ impl BindlessMetadata {
             ffn_gate: p("ffn_gate.weight"),
             ffn_down: p("ffn_down.weight"),
             ffn_up: p("ffn_up.weight"),
-            padding: [layer_idx as u32, 0, 0], // padding[0] = layer_idx for shader
+            layer_idx: layer_idx as u32,
+            attn_q_norm: self.tensor_offsets.get(&format!("blk.{}.attn_q_norm.weight", layer_idx)).copied().unwrap_or(0) as u32,
+            attn_k_norm: self.tensor_offsets.get(&format!("blk.{}.attn_k_norm.weight", layer_idx)).copied().unwrap_or(0) as u32,
         })
     }
 }
