@@ -30,6 +30,28 @@ airframe/                     ← PRIVATE repo (GPU engine, WGSL shaders, infere
 - `shimmy_integration` has only ONE remote: `private` → `shimmy-private`. Never push to `origin`.
   `shimmy_integration` has NO `origin` remote. Do not add one.
 
+## Airframe Versioning & CI Pin Rule
+
+**Rule: Shimmy CI always pins to an explicit airframe version tag. Never use a branch name.**
+
+Airframe uses semver tags tied to its `Cargo.toml` version field:
+
+| Airframe tag | Cargo.toml version | Status |
+|-------------|-------------------|--------|
+| `v0.0.1` | `0.0.1` | Current release — GPU engine, FSE architecture |
+
+**Upgrade procedure (when airframe needs an update):**
+1. Commit changes on airframe `master`
+2. Bump `version` in airframe `Cargo.toml`
+3. `git tag -a vX.Y.Z -m "..."` → `git push origin master && git push origin vX.Y.Z`
+4. Update `--branch vX.Y.Z` in ALL airframe clone steps in shimmy's `ci.yml` and `release.yml`
+5. Commit and push shimmy change
+
+**Console / vision deferred rule:**
+- `crates/console` and `crates/vision` are NOT included in airframe release tags.
+- They are removed from `[workspace] members` in Cargo.toml before tagging.
+- When console/vision are ready to ship: re-add to workspace, bump minor version, new tag.
+
 ---
 
 ## Terminal Names
