@@ -650,12 +650,19 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
         n_ctx,
         attn_logit_softcap: 0.0,
         final_logit_softcap: 0.0,
+        has_qk_norm: false,
         head_dim: 0,
         gqa_ratio: 0,
         kv_dim: 0,
         arch: crate::core::spec::ModelArch::Llama,
-        file_type: crate::core::spec::GgufFileType::Unknown,
-        model_name: String::new(),
+        file_type: match metadata.get("general.file_type") {
+            Some(GgufMetaValue::U32(v)) => crate::core::spec::GgufFileType::from(*v),
+            _ => crate::core::spec::GgufFileType::Unknown,
+        },
+        model_name: match metadata.get("general.name") {
+            Some(GgufMetaValue::String(s)) => s.clone(),
+            _ => String::new(),
+        },
         temp_buffer_size: 0,
         kv_cache_size_per_layer: 0,
     }
@@ -1213,6 +1220,15 @@ fn create_weight_mapping(n_layer: usize) -> HashMap<String, WeightId> {
             format!("blk.{}.ffn_norm.weight", layer),
             WeightId::FfnNorm { layer },
         );
+        // Optional per-head QK norm weights (Qwen3)
+        mapping.insert(
+            format!("blk.{}.attn_q_norm.weight", layer),
+            WeightId::AttnQNorm { layer },
+        );
+        mapping.insert(
+            format!("blk.{}.attn_k_norm.weight", layer),
+            WeightId::AttnKNorm { layer },
+        );
     }
 
     // Final norm
@@ -1344,6 +1360,7 @@ mod tests {
             kv_cache_size_per_layer: 0,
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
+            has_qk_norm: false,
         }
         .compute_derived();
 
@@ -1387,8 +1404,9 @@ mod tests {
             Some(&WeightId::FfnNorm { layer: 21 })
         );
 
-        // Should have correct total count: 1 token + 1 output + 22*9 layer weights + 1 output_norm = 201
-        assert_eq!(mapping.len(), 1 + 1 + 22 * 9 + 1);
+        // Should have correct total count: 1 token + 1 output + 22*(9+2) layer weights + 1 output_norm = 245
+        // The +2 per layer accounts for optional attn_q_norm and attn_k_norm (Qwen3)
+        assert_eq!(mapping.len(), 1 + 1 + 22 * 11 + 1);
     }
 
     #[test]

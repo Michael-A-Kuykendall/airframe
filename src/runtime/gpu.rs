@@ -183,6 +183,7 @@ impl GpuRuntime {
             quant_type: packed_quant_type,
             attn_logit_softcap: spec.attn_logit_softcap,
             post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
+            qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
         };
 
         let norm_weight_offset = gpu_model

@@ -15,6 +15,10 @@ pub enum WeightId {
     AttnV { layer: usize },
     AttnO { layer: usize },
     AttnNorm { layer: usize },
+    /// Per-head Q RMSNorm weight (Qwen3). Shape: [head_dim]. GGUF: blk.N.attn_q_norm.weight
+    AttnQNorm { layer: usize },
+    /// Per-head K RMSNorm weight (Qwen3). Shape: [head_dim]. GGUF: blk.N.attn_k_norm.weight
+    AttnKNorm { layer: usize },
 
     FfnGate { layer: usize },
     FfnUp { layer: usize },

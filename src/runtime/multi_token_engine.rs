@@ -313,6 +313,7 @@ mod tests {
             kv_cache_size_per_layer: 0,
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
+            has_qk_norm: false,
         }
         .compute_derived()
     }

@@ -111,6 +111,7 @@ impl OpDispatcher {
         rope_scale: f32,
         layer_idx: usize,
         kv_cache: &mut KvCache,
+        qk_norm: Option<(&Tensor, &Tensor)>,
     ) -> Result<Tensor> {
         attention::attention_with_cache_f32(
             input,
@@ -127,6 +128,7 @@ impl OpDispatcher {
             rope_scale,
             layer_idx,
             kv_cache,
+            qk_norm,
         )
     }
 

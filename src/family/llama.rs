@@ -238,6 +238,14 @@ impl LlamaBlock {
             }
         })?;
 
+        // Optional per-head QK norm weights (Qwen3)
+        let q_norm_weight = weights.get(&WeightId::AttnQNorm { layer });
+        let k_norm_weight = weights.get(&WeightId::AttnKNorm { layer });
+        let qk_norm = match (q_norm_weight, k_norm_weight) {
+            (Some(qn), Some(kn)) => Some((qn, kn)),
+            _ => None,
+        };
+
         // 1. Attention block with residual connection
         let attn_input = ops.rmsnorm(input, attn_norm_weight, self.spec.rms_eps)?;
 
@@ -261,6 +269,7 @@ impl LlamaBlock {
             self.spec.rope_scale,
             layer, // layer_idx for KV cache
             kv_cache,
+            qk_norm,
         )?;
 
         if layer == 0 {
@@ -579,6 +588,7 @@ mod tests {
             kv_cache_size_per_layer: 0,
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
+            has_qk_norm: false,
         }
         .compute_derived()
     }

@@ -254,3 +254,70 @@ cargo build --release --bin shimmy_server_gpu
 ```
 
 Check binary freshness: if `target/release/shimmy_server_gpu.exe` is older than the most recent `.rs` change in `src/`, rebuild.
+
+---
+
+## New Model Debug Checklist
+
+Three structured log tags are emitted on every server startup and first inference. Grep these to
+diagnose new model failures before wasting time on template or code investigations.
+
+### `[ARCH_REGISTRY]` — emitted on model load
+
+```
+[ARCH_REGISTRY] arch=qwen3  layers=28  vocab=151936  kv_heads=8  head_dim=128
+```
+
+Followed by `[ARCH_TENSOR_MISSING]` for any absent required tensors and `[ARCH_TENSOR_UNEXPECTED]`
+for tensors that signal a likely arch mismatch (e.g. fused `attn_qkv.weight` on a Qwen3 model).
+
+**Action:** If `[ARCH_TENSOR_MISSING] REQUIRED` appears, the model is missing a tensor the server
+needs for this arch. It will run but produce garbage or crash. Check the GGUF file and the
+server's arch detection logic in `ModelArch::from`.
+
+### `[VRAM_BUDGET]` — emitted after KV cache init
+
+```
+[VRAM_BUDGET] kv_cache=8960 MB  output_head=593 MB  tracked_total=9553 MB  limit=10500 MB
+[VRAM_BUDGET] WARN: tracked allocations (9553 MB) exceed limit (10500 MB).
+[VRAM_BUDGET] KV cache is dominant: ctx=40960  layers=28  kv_heads=8  head_dim=128
+[VRAM_BUDGET] Suggest: set SHIMMY_MAX_CTX=896 to bring KV cache within budget.
+```
+
+**Action when WARN appears:** The model's native context is too large for available VRAM.
+Set `SHIMMY_MAX_CTX` to the suggested value. Example: Qwen3-0.6B native ctx=40960 needs 8960 MB
+KV cache alone; setting `SHIMMY_MAX_CTX=4096` cuts it to ~896 MB.
+
+Override the default limit (10500 MB for RTX 3060) with `SHIMMY_VRAM_LIMIT_MB`.
+
+### `[PREFILL_SANITY]` — emitted after first prefill
+
+```
+[PREFILL_SANITY] arch=qwen3  ctx=40960  kv_cache=8960MB  top1_prob=0.0012  ppl_est=3245.44  norm=1202.68  WARN:high_ppl -- likely VRAM pressure; try lower SHIMMY_MAX_CTX
+```
+
+| `ppl_est` range | Meaning |
+|----------------|---------|
+| < 50 | OK — model is working correctly |
+| 50–500 | ELEVATED — may work; monitor first few tokens |
+| > 500 | WARN — almost always VRAM pressure (garbage numerics), not template or arch issue |
+
+**Diagnosis rule:** PPL > 500 at step 0 = VRAM pressure. Do NOT investigate templates, tokenizer,
+or chat format until VRAM budget is confirmed clean. Check `[VRAM_BUDGET]` first.
+
+**What `[REDO] Metric Violation` means:** Every generation step where `ppl > 500 || norm > 1e5`
+falls back to greedy. This is the per-token self-heal. When you see it on every step, the entire
+KV cache is corrupted — VRAM is the cause.
+
+### Typical new model failure sequence
+
+```
+[VRAM_BUDGET] WARN ...                       ← 1. Budget exceeded on load
+[PREFILL_SANITY] ... ppl_est=3245 ... WARN   ← 2. Numerics are garbage immediately
+[REDO] Metric Violation (PPL=3245...) ...    ← 3. Per-token fallback fires every step
+→ WEAK result in smoke test with random multilingual tokens
+```
+
+**Fix:** Lower `SHIMMY_MAX_CTX` until `[VRAM_BUDGET]` shows no WARN and `[PREFILL_SANITY]`
+shows `ppl_est < 50`.
+

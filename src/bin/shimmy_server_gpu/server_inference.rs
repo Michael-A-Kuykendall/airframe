@@ -423,6 +423,7 @@ fn run_inference_completion(
         quant_type: packed_quant_type,
         attn_logit_softcap: spec.attn_logit_softcap,
         post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
+        qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
     };
 
     let mut generated_text = String::new();
@@ -656,6 +657,32 @@ fn run_inference_completion(
     eprintln!("[GPU Server] Prefill complete. Cache info updated.");
 
     let mut logits_vec = prefill_logits_f32;
+
+    // === Prefill Sanity Gate ===
+    // Log a structured [PREFILL_SANITY] block immediately after prefill.
+    // PPL > 500 at step 0 = almost always VRAM pressure (garbage numerics), NOT a template issue.
+    // Grep [PREFILL_SANITY] in server output when debugging new model onboarding.
+    {
+        let raw: Vec<f32> = logits_vec.iter().filter(|&&x| x > -100.0).copied().collect();
+        let entropy = shannon_entropy_from_logits(&raw);
+        let norm = logit_l2_norm(&raw);
+        let max_p = max_probability_from_logits(&raw);
+        let ppl_est = entropy.exp();
+        let kv_mb = (spec.n_ctx as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4
+            * spec.n_layer as u64 * 2)
+            / 1_048_576;
+        let status = if ppl_est < 50.0 {
+            "OK"
+        } else if ppl_est < 500.0 {
+            "ELEVATED -- monitor first tokens"
+        } else {
+            "WARN:high_ppl -- likely VRAM pressure; try lower SHIMMY_MAX_CTX"
+        };
+        eprintln!(
+            "[PREFILL_SANITY] arch={}  ctx={}  kv_cache={}MB  top1_prob={:.4}  ppl_est={:.2}  norm={:.2}  {}",
+            spec.arch_string(), spec.n_ctx, kv_mb, max_p, ppl_est, norm, status
+        );
+    }
 
     for _step in 0..max_new_tokens {
         // Apply final logit softcap (Gemma-2 uses 30.0; 0.0 = disabled)

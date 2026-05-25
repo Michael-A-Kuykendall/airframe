@@ -19,7 +19,7 @@ fn OLD_test_cpu_layer_dump_for_notebook() {
     println!("\n=== CPU Layer Dump for Notebook Analysis ===\n");
 
     // Load model
-    let model_path = PathBuf::from("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+    let model_path = PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     println!("Loading model: {:?}", model_path);
 
     let model_data = Model::from_tinylama_q4_0_gguf(&model_path).expect("Failed to load model");

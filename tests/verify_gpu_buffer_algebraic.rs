@@ -30,7 +30,7 @@ async fn verify_gpu_buffer_matches_file() -> Result<(), Box<dyn std::error::Erro
 
     // 2. Parse metadata directly to get authoritative offset
     let model_path =
-        PathBuf::from("C:/Users/micha/repos/llama.cpp/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf");
+        PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     let mut file = File::open(&model_path)?;
     let metadata = BindlessMetadata::new(&mut file);
 
