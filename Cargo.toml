@@ -1,5 +1,8 @@
 [workspace]
-members = ["crates/console", "crates/libfse"]
+# Console CLI is deferred — released separately on its own timeline.
+# Only the GPU engine and FSE library ship with airframe v0.x releases.
+# When console is ready: add "crates/console" back to members and bump the minor version.
+members = ["crates/libfse"]
 
 [package]
 name = "airframe"
