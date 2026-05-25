@@ -21,7 +21,7 @@ serde_json = "1.0"
 byteorder = "1.4"
 memmap2 = "0.9"
 half = "2.4"
-shimmytok = { path = "../shimmytok" }
+shimmytok = "0.7.1"
 chrono = { version = "0.4.43", features = ["serde"] }
 wgpu = "27.0.1"
 pollster = "0.4.0"
