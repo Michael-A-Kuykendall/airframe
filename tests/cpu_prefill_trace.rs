@@ -23,7 +23,7 @@ fn test_cpu_prefill_hello() {
 
     // Load model
     let model_path =
-        Path::new("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+        Path::new("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     let model = Model::from_tinylama_q4_0_gguf(model_path).expect("Failed to load model");
 
     // Create engine

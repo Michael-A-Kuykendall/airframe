@@ -48,7 +48,7 @@ fn generate_22layer_oracle_checkpoints() -> Result<(), Box<dyn std::error::Error
 
     // Load TinyLlama model
     let model_path =
-        PathBuf::from("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+        PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     println!("[1/6] Loading model: {:?}", model_path);
 
     let model_data = Model::from_tinylama_q4_0_gguf(&model_path)?;

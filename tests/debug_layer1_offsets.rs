@@ -9,7 +9,7 @@ async fn debug_layer_offsets() -> Result<(), Box<dyn std::error::Error>> {
     use std::path::PathBuf;
 
     let model_path =
-        PathBuf::from("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+        PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
 
     // Load metadata only
@@ -30,7 +30,7 @@ async fn debug_layer_offsets() -> Result<(), Box<dyn std::error::Error>> {
     println!("  ffn_gate:    {}", l0.ffn_gate);
     println!("  ffn_up:      {}", l0.ffn_up);
     println!("  ffn_down:    {}", l0.ffn_down);
-    println!("  layer_idx:   {}", l0.padding[0]);
+    println!("  layer_idx:   {}", l0.layer_idx);
 
     println!("\nLayer 1 Offsets:");
     let l1 = metadata.get_layer_offsets(1, "tinyllama").unwrap();
@@ -43,7 +43,7 @@ async fn debug_layer_offsets() -> Result<(), Box<dyn std::error::Error>> {
     println!("  ffn_gate:    {}", l1.ffn_gate);
     println!("  ffn_up:      {}", l1.ffn_up);
     println!("  ffn_down:    {}", l1.ffn_down);
-    println!("  layer_idx:   {}", l1.padding[0]);
+    println!("  layer_idx:   {}", l1.layer_idx);
 
     println!("\n=== ALGEBRAIC VERIFICATION ===");
     println!("Formula: offset(L1.tensor) SHOULD BE > offset(L0.tensor)");
@@ -68,8 +68,8 @@ async fn debug_layer_offsets() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "  L1.layer_idx ({}) == 1: {}",
-        l1.padding[0],
-        l1.padding[0] == 1
+        l1.layer_idx,
+        l1.layer_idx == 1
     );
 
     // Now check the norm bank directly
@@ -96,8 +96,8 @@ async fn debug_layer_offsets() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== ALGEBRAIC FORMULA CHECK ===");
     println!("Shader formula for Layer 1 attn norm:");
     println!("  norm_offset_base = layer_idx * 2 * dim");
-    println!("  = {} * 2 * {}", l1.padding[0], spec.n_embd);
-    println!("  = {}", (l1.padding[0] * 2) as usize * spec.n_embd);
+    println!("  = {} * 2 * {}", l1.layer_idx, spec.n_embd);
+    println!("  = {}", (l1.layer_idx * 2) as usize * spec.n_embd);
     println!(
         "\n✅ If formula produces {}, norm index is CORRECT",
         1 * 2 * spec.n_embd

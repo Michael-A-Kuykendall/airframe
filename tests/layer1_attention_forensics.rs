@@ -82,7 +82,7 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
         .await?;
 
     let model_path =
-        PathBuf::from("C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
+        PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
     let gpu_model = BindlessModel::load_from_disk(&device, &model_path, Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
@@ -99,6 +99,7 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
         quant_type: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
+        qk_norm_enabled: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);

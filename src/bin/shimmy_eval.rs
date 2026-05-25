@@ -1518,6 +1518,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         spec.rope_scale,
         0,
         &mut kv_cache,
+        None, // no QK norm for non-Qwen3
     )?;
 
     let post_attn = ops.add(&input_tensor, &attn_output)?;
@@ -1539,6 +1540,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         quant_type: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
+        qk_norm_enabled: 0,
     };
 
     let (gpu_l04_mid, gpu_l0_final) = pipeline.run_layer_stepwise_test(

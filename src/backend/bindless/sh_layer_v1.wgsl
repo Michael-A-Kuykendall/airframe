@@ -15,9 +15,9 @@ struct LayerOffsets {
     ffn_gate: u32,
     ffn_down: u32,
     ffn_up: u32,
-    layer_idx: u32,     // padding[0] from host = layer index
-    pad2: u32,
-    pad3: u32,
+    layer_idx: u32,     // was padding[0] — layer index for norm_bank lookup
+    attn_q_norm: u32,   // byte offset of Q-norm weights in GGUF blob (0 = disabled)
+    attn_k_norm: u32,   // byte offset of K-norm weights in GGUF blob (0 = disabled)
 };
 
 struct LayerParams {
@@ -31,6 +31,7 @@ struct LayerParams {
     quant_type: u32,    // GGML type: 0=F32, 1=F16, 2=Q4_0, 8=Q8_0, 12=Q4_K, 13=Q5_K, 14=Q6_K
     attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
     post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
+    qk_norm_enabled: u32,     // 1 = apply per-head Q/K RMSNorm before attention (Qwen3); 0 = disabled
 };
 
 struct CacheParams {
@@ -436,6 +437,76 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
                       + (head * params.head_dim)
                       + dim_in_head;
         kv_cache_v[cache_idx] = dot;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Kernel 1.5: QK Norm — per-head RMSNorm on Q and K (Qwen3 only)
+// -------------------------------------------------------------------------
+// When qk_norm_enabled == 1: normalizes each Q head (in temp_state) and each
+// K head (in kv_cache_k at the freshly-written position) using per-element
+// F32 weights stored in the GGUF blob at offsets.attn_q_norm / attn_k_norm.
+//
+// When qk_norm_enabled == 0: no-op (early return).
+//
+// Layout:
+//   idx 0..dim_q-1           -> Q heads in temp_state[temp_base + dim + idx]
+//   idx dim_q..dim_q+dim_k-1 -> K heads in kv_cache_k[...] at current_pos
+//
+// Each thread owns one output element. To compute RMS it reads all head_dim
+// elements of its head (scalar loop, same approach as main_attn_norm).
+@compute @workgroup_size(256, 1, 1)
+fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx        = global_id.x;
+    let token_idx  = global_id.y;
+
+    if (token_idx >= cache_params.batch_size) { return; }
+    if (params.qk_norm_enabled == 0u) { return; }
+
+    let temp_base = token_idx * params.temp_stride;
+    let dim_q     = params.head_count    * params.head_dim;
+    let dim_k     = params.head_count_kv * params.head_dim;
+
+    if (idx >= dim_q + dim_k) { return; }
+
+    let is_k       = idx >= dim_q;
+    let elem_idx   = select(idx, idx - dim_q, is_k);
+    let head_idx   = elem_idx / params.head_dim;
+    let dim_in_head = elem_idx % params.head_dim;
+
+    // Norm weight byte offset in GGUF blob (F32, one per head_dim element)
+    let norm_off = select(offsets.attn_q_norm, offsets.attn_k_norm, is_k);
+
+    // Compute RMS across the full head (all head_dim elements)
+    var sum_sq = 0.0;
+    if (!is_k) {
+        let q_base = temp_base + params.dim + head_idx * params.head_dim;
+        for (var i = 0u; i < params.head_dim; i++) {
+            let v = temp_state[q_base + i];
+            sum_sq += v * v;
+        }
+    } else {
+        let cache_base = (cache_params.current_pos + token_idx) * params.head_count_kv * params.head_dim
+                       + head_idx * params.head_dim;
+        for (var i = 0u; i < params.head_dim; i++) {
+            let v = kv_cache_k[cache_base + i];
+            sum_sq += v * v;
+        }
+    }
+
+    let rms = inverseSqrt(sum_sq / f32(params.head_dim) + params.rms_eps);
+
+    // Read norm weight for this dimension from GGUF blob (F32)
+    let w = bitcast<f32>(gguf_blob[norm_off / 4u + dim_in_head]);
+
+    // Apply norm and write back
+    if (!is_k) {
+        let q_base = temp_base + params.dim + head_idx * params.head_dim;
+        temp_state[q_base + dim_in_head] = temp_state[q_base + dim_in_head] * rms * w;
+    } else {
+        let cache_base = (cache_params.current_pos + token_idx) * params.head_count_kv * params.head_dim
+                       + head_idx * params.head_dim;
+        kv_cache_k[cache_base + dim_in_head] = kv_cache_k[cache_base + dim_in_head] * rms * w;
     }
 }
 

@@ -59,7 +59,9 @@ pub struct LayerOffsets {
     pub ffn_gate: u32,
     pub ffn_down: u32,
     pub ffn_up: u32,
-    pub padding: [u32; 3], // Pad to 48 bytes (12 * 4) for alignment
+    pub layer_idx: u32,        // was padding[0] — layer index for norm_bank lookup
+    pub attn_q_norm: u32,      // byte offset of Q-norm weights in GGUF blob (0 = disabled)
+    pub attn_k_norm: u32,      // byte offset of K-norm weights in GGUF blob (0 = disabled)
 }
 
 #[repr(C)]
@@ -75,6 +77,7 @@ pub struct LayerParams {
     pub quant_type: u32, // GGML type: 2=Q4_0, 12=Q4_K
     pub attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
     pub post_norm_enabled: u32,  // 1 = apply post-attn and post-ffw norm (Gemma-2); 0 = disabled
+    pub qk_norm_enabled: u32,    // 1 = apply per-head Q/K RMSNorm before RoPE (Qwen3); 0 = disabled
 }
 
 #[repr(C)]
@@ -119,6 +122,7 @@ pub struct BindlessPipeline {
     // Split Layer Pipelines
     pub layer_pipeline_attn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_qkv: wgpu::ComputePipeline,
+    pub layer_pipeline_qk_norm: wgpu::ComputePipeline,
     pub layer_pipeline_attn_out: wgpu::ComputePipeline,
     pub layer_pipeline_attn_proj: wgpu::ComputePipeline,
     pub layer_pipeline_ffn_proj: wgpu::ComputePipeline,
@@ -632,6 +636,7 @@ impl BindlessPipeline {
 
         let layer_pipeline_attn_norm = mk_pipeline("main_attn_norm");
         let layer_pipeline_qkv = mk_pipeline("main_qkv");
+        let layer_pipeline_qk_norm = mk_pipeline("main_qk_norm");
         let layer_pipeline_attn_out = mk_pipeline("main_attn_out");
         let layer_pipeline_attn_proj = mk_pipeline("main_attn_proj");
         let layer_pipeline_ffn_proj = mk_pipeline("main_ffn_proj");
@@ -652,6 +657,7 @@ impl BindlessPipeline {
             rmsnorm_layout,
             layer_pipeline_attn_norm,
             layer_pipeline_qkv,
+            layer_pipeline_qk_norm,
             layer_pipeline_attn_out,
             layer_pipeline_attn_proj,
             layer_pipeline_ffn_proj,

@@ -200,6 +200,7 @@ impl BindlessPipeline {
             quant_type: 0, // overridden per-layer below
             attn_logit_softcap: spec.attn_logit_softcap,
             post_norm_enabled: if spec.arch_string() == "gemma2" { 1 } else { 0 },
+            qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
         };
 
         // D. Output Logits

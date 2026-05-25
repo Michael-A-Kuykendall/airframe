@@ -19,7 +19,7 @@ pub struct ChatCommand {
 
 impl ChatCommand {
     pub async fn run(&self) -> anyhow::Result<()> {
-        let default_model = "C:/Users/micha/repos/llama.cpp/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string();
+        let default_model = "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string();
         let _model_path = self.model.clone().unwrap_or(default_model);
         let session_id = self
             .session

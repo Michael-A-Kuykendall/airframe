@@ -373,6 +373,18 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_qkv, 1, 1);
         }
 
+        // Kernel 2.5: QK Norm (Qwen3; no-op when qk_norm_enabled == 0)
+        {
+            let wg_qknorm = (q_len + kv_len + 255) / 256;
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("QKNorm"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_qk_norm);
+            cpass.dispatch_workgroups(wg_qknorm, 1, 1);
+        }
+
         // Kernel 3: Attention
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -624,6 +636,18 @@ impl BindlessPipeline {
             cpass.set_pipeline(&self.layer_pipeline_qkv);
             cpass.dispatch_workgroups(wg_qkv, 1, 1);
         } // ← GPU waits for QKV to finish before proceeding
+
+        // Kernel 2.5: QK Norm (Qwen3; no-op when qk_norm_enabled == 0)
+        {
+            let wg_qknorm = (q_len + kv_len + 255) / 256;
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - QKNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_qk_norm);
+            cpass.dispatch_workgroups(wg_qknorm, 1, 1);
+        } // ← GPU waits for QKNorm to finish before Attn
 
         // Kernel 3: Attention (Q @ cached_K, softmax, weighted sum of cached_V)
         {
@@ -911,6 +935,19 @@ impl BindlessPipeline {
         );
 
         // Continue with remaining kernels (2-5) - same as run_layer_with_cache
+        // Kernel 2.5: QK Norm (Qwen3; no-op when qk_norm_enabled == 0)
+        {
+            let wg_qknorm = (q_len + kv_len + 255) / 256;
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - QKNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_qk_norm);
+            cpass.dispatch_workgroups(wg_qknorm, 1, 1);
+        }
+
+        // Kernel 3: Attention
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - Attn", layer_idx)),
