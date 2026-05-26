@@ -3,7 +3,7 @@ name = "libfse"
 version = "0.1.0"
 edition = "2021"
 description = "Fused Semantic Execution: A Fail-Closed Policy Engine"
-publish = false # PROPRIETARY - DO NOT PUBLISH
+publish = true
 
 [dependencies]
 # We use the standard crate for the graph compilation algorithms
