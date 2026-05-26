@@ -1,0 +1,17 @@
+title = "Airframe Gitleaks Config"
+
+[allowlist]
+description = "Global allowlist for non-secret test fixtures and docs examples"
+paths = [
+  '''^artifacts/''',
+  '''^fixtures/''',
+  '''^vendor/''',
+  '''^target/''',
+  '''^chat\.md$''',
+  '''^LAMBDA_.*\.md$'''
+]
+
+# Add only narrowly scoped, reviewed exceptions below when needed.
+# [[rules]]
+# id = "custom-allow-example"
+# regex = '''example'''

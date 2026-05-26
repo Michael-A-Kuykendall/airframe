@@ -21,8 +21,8 @@ crates/console/fix_image.patch
 vendor/shimmy/
 vendor/human-eval/
 
-# Local generated scratch and archival outputs
-/fused_semantic_execution_full_markdown_reconstruction.md
+# Local environment
+.venv/
 
 # Smoke test run artifacts (timestamped CSVs and logs)
 artifacts/model_smoke/smoke_*.csv
