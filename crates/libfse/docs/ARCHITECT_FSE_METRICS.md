@@ -2,7 +2,7 @@
 
 **Date:** January 25, 2026
 **Status:** DRAFT (Architecture Phase)
-**Goal:** Define the low-level Rust integration of Patent Enforcement and "Glass Box" Metrics inside `libshimmy`.
+**Goal:** Define the low-level Rust integration of Patent Enforcement and "Glass Box" Metrics inside `airframe`.
 
 ## 1. Executive Summary: Why Low-Level?
 
@@ -115,5 +115,5 @@ impl InferenceControl for FseMonitor {
 2.  **Output:** Write a sidecar `.audit` file alongside the output.
 
 ## 5. Artifacts
--   **New Crate?** No, keep inside `libshimmy` for now to access internal Types.
+-   **New Crate?** No, keep inside `airframe` for now to access internal Types.
 -   **External Dependency:** `aho-corasick` (Standard, blazingly fast).

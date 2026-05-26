@@ -1,8 +1,8 @@
 # The Shimmy Advantage: "Glass Box" Data & Metrics
 
 **Date:** January 25, 2026  
-**Context:** `libshimmy` v0.1.0 Pivot to "Mean Machine" (Compliance Processing Unit)  
-**Objective:** Define the proprietary data streams available only through `libshimmy`'s stateful, deterministic Rust architecture.
+**Context:** `airframe` v0.1.0 Pivot to "Mean Machine" (Compliance Processing Unit)  
+**Objective:** Define the proprietary data streams available only through `airframe`'s stateful, deterministic Rust architecture.
 
 ---
 

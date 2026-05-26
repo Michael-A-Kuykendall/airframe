@@ -43,7 +43,7 @@ To use Airframe as a library:
 
 ```toml
 [dependencies]
-airframe = "0.0.1"
+airframe = "0.1"
 ```
 
 ```rust
