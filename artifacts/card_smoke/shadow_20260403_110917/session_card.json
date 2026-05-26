@@ -1,9 +1,0 @@
-{
-    "session_id":  "card-smoke-default",
-    "token_window_len":  334,
-    "active_card":  null,
-    "card_history":  [
-
-                     ],
-    "last_card_error":  "card_bootstrap_failed:developer grammar parse failed: parse error: expecting newline or end at position 24"
-}

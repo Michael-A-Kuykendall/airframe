@@ -8,13 +8,15 @@ members = ["crates/libfse"]
 name = "airframe"
 version = "0.0.1"
 edition = "2021"
-description = "FP32-first inference core for Llama-family models. Pure Rust physics engine."
+description = "FP32-first inference core for Llama-family models. Pure Rust WebGPU engine."
 license = "MIT"
-repository = "https://github.com/Michael-A-Kuykendall/libshimmy"
+repository = "https://github.com/Michael-A-Kuykendall/airframe"
+homepage = "https://github.com/Michael-A-Kuykendall/airframe"
+readme = "README.md"
 authors = ["Michael A. Kuykendall"]
-keywords = ["llm", "inference", "llama", "gguf", "rust"]
+keywords = ["llm", "inference", "llama", "gguf", "wgpu"]
 categories = ["science", "simulation"]
-publish = false
+publish = true
 
 [dependencies]
 # Dependencies moved from libshimmy core

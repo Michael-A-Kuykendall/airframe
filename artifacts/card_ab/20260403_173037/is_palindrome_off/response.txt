@@ -1,7 +1,0 @@
-fn is_palindrome(s: &str) -> bool {
-    let mut s = s.to_lowercase();
-    s.chars().for_each(|c| c.unsafe_cast_ref().to_ascii_lowercase());
-    s.chars().all(|c| c.to_ascii_lowercase() == c)
-}
-
-// END_RUST_FILE

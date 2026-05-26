@@ -1,1 +1,0 @@
-{"task_id": "HumanEval/0", "completion": "    if len(numbers) < 2:\n        return False\n    for I in range(1, len(numbers)):\n        if abs(numbers[i] - numbers[i-1]) < threshold:\n            return False\n    return True\n", "result": "failed: module 'signal' has no attribute 'setitimer'", "passed": false}
