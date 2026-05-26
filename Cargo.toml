@@ -6,7 +6,7 @@ members = ["crates/libfse"]
 
 [package]
 name = "airframe"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 description = "FP32-first inference core for Llama-family models. Pure Rust WebGPU engine."
 license = "MIT"
