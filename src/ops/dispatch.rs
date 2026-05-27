@@ -4,7 +4,7 @@
 //! for matrix operations, normalization, attention, and activations.
 
 use crate::core::{error::Result, tensor::Tensor};
-use crate::ops::reference::{activations, attention, ffn, matmul, rmsnorm, rope, softmax};
+use crate::ops::reference::{activations, attention, ffn, matmul, rmsnorm, rope, softmax, vision};
 use crate::runtime::kvcache::KvCache;
 
 /// Dispatcher for all tensor operations.
@@ -157,6 +157,54 @@ impl OpDispatcher {
     /// Element-wise addition (for residual connections)
     pub fn add(&self, a: &Tensor, b: &Tensor) -> Result<Tensor> {
         activations::add_f32(a, b)
+    }
+
+    /// Element-wise addition with broadcasting (squeezes leading size-1 dims).
+    ///
+    /// Handles the ViT case: positional embedding `[1, N, D]` + patch features
+    /// `[N, D]` → `[N, D]`.  Both inputs must have identical element counts
+    /// after stripping leading ones.
+    pub fn add_broadcast(&self, a: &Tensor, b: &Tensor) -> Result<Tensor> {
+        activations::add_broadcast_f32(a, b)
+    }
+
+    /// Layer Normalization over the last dimension.
+    ///
+    /// Used by the SigLIP ViT encoder (every block has two LayerNorms).
+    /// `bias` is optional; pass `None` when the model has no bias term.
+    pub fn layernorm(
+        &self,
+        input: &Tensor,
+        weight: &Tensor,
+        bias: Option<&Tensor>,
+        eps: f32,
+    ) -> Result<Tensor> {
+        activations::layernorm_f32(input, weight, bias, eps)
+    }
+
+    /// GELU activation (tanh approximation, matches PyTorch default).
+    ///
+    /// Used in ViT FFN blocks.  SigLIP uses GELU, not SwiGLU.
+    pub fn gelu(&self, input: &Tensor) -> Result<Tensor> {
+        activations::gelu_f32(input)
+    }
+
+    /// Patch embedding: image → token sequence via strided 2-D conv.
+    ///
+    /// * `image`  – `[C, H, W]` float32, values already normalised.
+    /// * `weight` – `[out_ch, C, patch, patch]` conv kernel.
+    /// * `bias`   – `[out_ch]`.
+    /// * `patch`  – Patch size in pixels (14 for SigLIP-So400M).
+    ///
+    /// Returns `[n_patches, out_ch]`.
+    pub fn patch_embed(
+        &self,
+        image: &Tensor,
+        weight: &Tensor,
+        bias: &Tensor,
+        patch: usize,
+    ) -> Result<Tensor> {
+        vision::patch_embed_f32(image, weight, bias, patch)
     }
 }
 
