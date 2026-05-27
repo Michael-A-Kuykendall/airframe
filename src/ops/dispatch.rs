@@ -168,6 +168,14 @@ impl OpDispatcher {
         activations::add_broadcast_f32(a, b)
     }
 
+    /// Add a 1-D bias to every row of a 2-D activation tensor.
+    ///
+    /// `input`: `[seq, d]`, `bias`: `[d]` → `[seq, d]`.
+    /// Use this for all linear layer bias additions in ViT / Resampler.
+    pub fn add_bias(&self, input: &Tensor, bias: &Tensor) -> Result<Tensor> {
+        activations::add_bias_f32(input, bias)
+    }
+
     /// Layer Normalization over the last dimension.
     ///
     /// Used by the SigLIP ViT encoder (every block has two LayerNorms).
@@ -205,6 +213,29 @@ impl OpDispatcher {
         patch: usize,
     ) -> Result<Tensor> {
         vision::patch_embed_f32(image, weight, bias, patch)
+    }
+
+    /// Scaled dot-product multi-head attention for ViT encoders.
+    ///
+    /// Takes **pre-projected** Q, K, V (bias already added by caller).
+    /// No RoPE. Always bidirectional. Used by SigLIP-So400M blocks.
+    ///
+    /// * `q`, `k`, `v` – `[seq, n_head * head_dim]`
+    /// * `o_weight`    – `[n_head * head_dim, out_dim]`
+    /// * `o_bias`      – `[out_dim]`
+    ///
+    /// Returns `[seq, out_dim]`.
+    pub fn vit_attention(
+        &self,
+        q: &Tensor,
+        k: &Tensor,
+        v: &Tensor,
+        o_weight: &Tensor,
+        o_bias: &Tensor,
+        n_head: usize,
+        head_dim: usize,
+    ) -> Result<Tensor> {
+        vision::vit_mha_f32(q, k, v, o_weight, o_bias, n_head, head_dim)
     }
 }
 

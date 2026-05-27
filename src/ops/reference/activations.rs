@@ -61,6 +61,29 @@ pub fn add_broadcast_f32(a: &Tensor, b: &Tensor) -> Result<Tensor> {
     Tensor::new(output_data, a_sq.shape.clone())
 }
 
+/// Add a 1-D bias to every row of a 2-D tensor.
+///
+/// `input`: `[rows, d]`, `bias`: `[d]` → returns `[rows, d]`.
+/// Also handles the degenerate 1-D case `[d] + [d]`.
+pub fn add_bias_f32(input: &Tensor, bias: &Tensor) -> Result<Tensor> {
+    let ndim = input.ndim();
+    let d = *input.shape.last().unwrap();
+    if bias.shape != vec![d] {
+        return Err(LibshimmyError::ShapeMismatch {
+            tensor: "add_bias".to_string(),
+            expected: vec![d],
+            got: bias.shape.clone(),
+        });
+    }
+    let mut out = input.data.clone();
+    for row_start in (0..out.len()).step_by(d) {
+        for j in 0..d {
+            out[row_start + j] += bias.data[j];
+        }
+    }
+    Tensor::new(out, input.shape.clone())
+}
+
 /// Layer Normalization: `(x - mean) / sqrt(var + eps) * weight + bias`.
 ///
 /// Normalizes over the last dimension.  Supports 1-D `[D]` and 2-D `[N, D]`

@@ -228,3 +228,104 @@ fn vision_bidirectional_attn_dispatcher_path() {
         .sum();
     assert!(diff > 1e-4, "tok-0 output unchanged (diff={diff}) — causal mask may be stuck ON");
 }
+
+// ─── Phase 2: vit_mha (bidirectional, no RoPE) ───────────────────────────────
+
+/// vit_mha: output shape matches [seq, out_dim].
+#[test]
+fn vision_vit_mha_output_shape() {
+    let seq = 6; let d = 8; let out = 8;
+    let q  = t(vec![0.0; seq * d], vec![seq, d]);
+    let k  = t(vec![0.0; seq * d], vec![seq, d]);
+    let v  = t(vec![0.0; seq * d], vec![seq, d]);
+    let ow = t(vec![0.0; d * out], vec![d, out]);
+    let ob = t(vec![0.0; out],     vec![out]);
+    let result = ops().vit_attention(&q, &k, &v, &ow, &ob, 2, 4).unwrap();
+    assert_eq!(result.shape, vec![seq, out]);
+}
+
+/// vit_mha: all tokens receive signal from a future token (truly bidirectional).
+/// ANALYTIC: Q=K=[1,0,…] uniform attention → all tokens average V equally.
+/// Token-1 has V spike at dim-1.  Token-0 should see a non-zero contribution.
+#[test]
+fn vision_vit_mha_bidirectional_signal() {
+    let seq = 3; let hd = 2;
+    let q = t(vec![1.,0., 1.,0., 1.,0.], vec![seq, hd]);
+    let k = t(vec![1.,0., 1.,0., 1.,0.], vec![seq, hd]);
+    // Token-1 has a spike at dim-1 of V
+    let v = t(vec![0.,0., 0.,7., 0.,0.], vec![seq, hd]);
+    let ow = t(vec![1.,0., 0.,1.], vec![hd, hd]);  // identity
+    let ob = t(vec![0.,0.], vec![hd]);
+    let out = ops().vit_attention(&q, &k, &v, &ow, &ob, 1, hd).unwrap();
+    // Token-0 should pick up the spike (uniform attention, 1/3 weight on token-1)
+    assert!(out.data[1] > 0.5, "tok-0 dim-1 expected > 0.5, got {}", out.data[1]);
+    // All tokens should produce identical output (equal Q rows → same attn weights)
+    assert!((out.data[0] - out.data[2]).abs() < 1e-5);
+    assert!((out.data[1] - out.data[3]).abs() < 1e-5);
+}
+
+// ─── Phase 2: SigLipBlock ─────────────────────────────────────────────────────
+
+/// SigLipBlock forward: output has correct shape.
+#[test]
+fn vision_siglip_block_shape() {
+    use airframe::family::vit::{zero_block, SigLipConfig};
+    let cfg = SigLipConfig { hidden_dim: 8, n_heads: 2, head_dim: 4, mlp_dim: 16, ..SigLipConfig::default() };
+    let block = zero_block(cfg.hidden_dim, cfg.mlp_dim);
+    let x = t(vec![0.0; 5 * 8], vec![5, 8]);
+    let out = block.forward(&x, &ops(), &cfg).unwrap();
+    assert_eq!(out.shape, vec![5, 8]);
+}
+
+/// SigLipBlock forward: output is finite even with random-ish inputs.
+#[test]
+fn vision_siglip_block_finite_output() {
+    use airframe::family::vit::{zero_block, SigLipConfig};
+    let cfg = SigLipConfig { hidden_dim: 4, n_heads: 1, head_dim: 4, mlp_dim: 8, ..SigLipConfig::default() };
+    let block = zero_block(cfg.hidden_dim, cfg.mlp_dim);
+    let x = t((0..8).map(|i| i as f32 * 0.5).collect(), vec![2, 4]);
+    let out = block.forward(&x, &ops(), &cfg).unwrap();
+    assert_eq!(out.shape, vec![2, 4]);
+    assert!(out.data.iter().all(|v| v.is_finite()),
+        "SigLipBlock output is non-finite: {:?}", out.data);
+}
+
+// ─── Phase 2: Resampler ───────────────────────────────────────────────────────
+
+/// Resampler: always produces [n_queries, d_model] regardless of ViT token count.
+#[test]
+fn vision_resampler_output_shape() {
+    use airframe::family::resampler::{identity_resampler, ResamplerConfig};
+    let cfg = ResamplerConfig { n_queries: 4, d_model: 8, kv_dim: 6, n_heads: 2, head_dim: 4, layer_norm_eps: 1e-5 };
+    let r = identity_resampler(cfg);
+    let vit = t(vec![0.0; 10 * 6], vec![10, 6]);
+    let out = r.forward(&vit, &ops()).unwrap();
+    assert_eq!(out.shape, vec![4, 8]);
+}
+
+/// Resampler: output is finite with non-trivial input values.
+#[test]
+fn vision_resampler_finite_output() {
+    use airframe::family::resampler::{identity_resampler, ResamplerConfig};
+    let cfg = ResamplerConfig { n_queries: 4, d_model: 8, kv_dim: 6, n_heads: 2, head_dim: 4, layer_norm_eps: 1e-5 };
+    let r = identity_resampler(cfg);
+    let vit = t((0..60).map(|i| i as f32 * 0.1 - 3.0).collect(), vec![10, 6]);
+    let out = r.forward(&vit, &ops()).unwrap();
+    assert!(out.data.iter().all(|v| v.is_finite()),
+        "Resampler output non-finite: {:?}", &out.data[..8]);
+}
+
+/// Resampler: 8-query count is invariant to ViT sequence length.
+#[test]
+fn vision_resampler_query_count_invariant() {
+    use airframe::family::resampler::{identity_resampler, ResamplerConfig};
+    for n_vit in [1usize, 5, 25, 100] {
+        let r = identity_resampler(ResamplerConfig {
+            n_queries: 8, d_model: 4, kv_dim: 4, n_heads: 1, head_dim: 4, layer_norm_eps: 1e-5,
+        });
+        let vit = t(vec![0.0; n_vit * 4], vec![n_vit, 4]);
+        let out = r.forward(&vit, &ops()).unwrap();
+        assert_eq!(out.shape[0], 8, "n_vit={n_vit}: expected 8 queries, got {}", out.shape[0]);
+    }
+}
+

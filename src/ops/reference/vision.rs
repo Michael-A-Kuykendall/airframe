@@ -177,3 +177,149 @@ mod tests {
         assert!(patch_embed_f32(&image, &weight, &bias, 14).is_err());
     }
 }
+
+// ─── ViT Multi-Head Attention (no RoPE) ──────────────────────────────────────
+
+/// Scaled dot-product multi-head attention for ViT encoders.
+///
+/// Unlike the LLM `attention_f32`, this variant:
+///   - Takes **pre-projected** Q, K, V tensors (bias already added by caller)
+///   - Does **not** apply RoPE (SigLIP uses learned positional embeddings instead)
+///   - Is always **bidirectional** (no causal mask)
+///
+/// # Arguments
+/// * `q` – `[seq, n_head * head_dim]` pre-projected queries
+/// * `k` – `[seq, n_head * head_dim]` pre-projected keys
+/// * `v` – `[seq, n_head * head_dim]` pre-projected values
+/// * `o_weight` – `[n_head * head_dim, out_dim]` output projection weight
+/// * `o_bias`   – `[out_dim]` output projection bias
+/// * `n_head`   – number of attention heads
+/// * `head_dim` – dimension per head
+///
+/// Returns `[seq, out_dim]`.
+pub fn vit_mha_f32(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    o_weight: &Tensor,
+    o_bias: &Tensor,
+    n_head: usize,
+    head_dim: usize,
+) -> Result<Tensor> {
+    let seq = q.shape[0];
+    let d_model = n_head * head_dim;
+    let scale = 1.0 / (head_dim as f32).sqrt();
+
+    if q.shape != vec![seq, d_model] || k.shape != vec![seq, d_model] || v.shape != vec![seq, d_model] {
+        return Err(LibshimmyError::ShapeMismatch {
+            tensor: "vit_mha_qkv".to_string(),
+            expected: vec![seq, d_model],
+            got: q.shape.clone(),
+        });
+    }
+
+    // ── Per-head attention ────────────────────────────────────────────────────
+    let mut out = vec![0.0f32; seq * d_model];
+
+    for h in 0..n_head {
+        let h_offset = h * head_dim;
+
+        // Extract head slices: [seq, head_dim]
+        let q_h: Vec<f32> = (0..seq)
+            .flat_map(|s| q.data[s * d_model + h_offset..s * d_model + h_offset + head_dim].iter().copied())
+            .collect();
+        let k_h: Vec<f32> = (0..seq)
+            .flat_map(|s| k.data[s * d_model + h_offset..s * d_model + h_offset + head_dim].iter().copied())
+            .collect();
+        let v_h: Vec<f32> = (0..seq)
+            .flat_map(|s| v.data[s * d_model + h_offset..s * d_model + h_offset + head_dim].iter().copied())
+            .collect();
+
+        // Attention scores: [seq, seq] = Q_h @ K_h^T * scale
+        let mut scores = vec![0.0f32; seq * seq];
+        for i in 0..seq {
+            for j in 0..seq {
+                let dot: f32 = (0..head_dim)
+                    .map(|d| q_h[i * head_dim + d] * k_h[j * head_dim + d])
+                    .sum();
+                scores[i * seq + j] = dot * scale;
+            }
+        }
+
+        // Softmax over each row (bidirectional — no mask)
+        for i in 0..seq {
+            let row = &mut scores[i * seq..(i + 1) * seq];
+            let max = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let sum: f32 = row.iter().map(|&x| (x - max).exp()).sum();
+            for x in row.iter_mut() {
+                *x = (*x - max).exp() / sum;
+            }
+        }
+
+        // Context: [seq, head_dim] = softmax(scores) @ V_h
+        for i in 0..seq {
+            for d in 0..head_dim {
+                let val: f32 = (0..seq)
+                    .map(|j| scores[i * seq + j] * v_h[j * head_dim + d])
+                    .sum();
+                out[i * d_model + h_offset + d] = val;
+            }
+        }
+    }
+
+    // ── Output projection: [seq, d_model] @ [d_model, out_dim] + bias ────────
+    let out_dim = o_weight.shape[1];
+    let mut projected = vec![0.0f32; seq * out_dim];
+    for i in 0..seq {
+        for j in 0..out_dim {
+            let dot: f32 = (0..d_model)
+                .map(|k_| out[i * d_model + k_] * o_weight.data[k_ * out_dim + j])
+                .sum();
+            projected[i * out_dim + j] = dot + o_bias.data[j];
+        }
+    }
+
+    Tensor::new(projected, vec![seq, out_dim])
+}
+
+#[cfg(test)]
+mod vit_mha_tests {
+    use super::*;
+
+    #[test]
+    fn test_vit_mha_output_shape() {
+        // 5 tokens, 2 heads, head_dim=4, d_model=8
+        let seq = 5; let d_model = 8; let out_dim = 8;
+        let q = Tensor::zeros(vec![seq, d_model]);
+        let k = Tensor::zeros(vec![seq, d_model]);
+        let v = Tensor::zeros(vec![seq, d_model]);
+        let o_w = Tensor::zeros(vec![d_model, out_dim]);
+        let o_b = Tensor::zeros(vec![out_dim]);
+        let out = vit_mha_f32(&q, &k, &v, &o_w, &o_b, 2, 4).unwrap();
+        assert_eq!(out.shape, vec![seq, out_dim]);
+    }
+
+    #[test]
+    fn test_vit_mha_all_tokens_receive_signal() {
+        // 3-token seq, 1 head, head_dim=2, identity-like setup
+        // If token-2 has a distinct V value, all tokens should see it
+        // (bidirectional — no causal mask)
+        let seq = 3; let hd = 2; let d = seq * hd;
+        // Q = K = identity rows, so uniform attention
+        let q = Tensor::new(vec![1.,0., 1.,0., 1.,0.], vec![seq, hd]).unwrap();
+        let k = Tensor::new(vec![1.,0., 1.,0., 1.,0.], vec![seq, hd]).unwrap();
+        // V: token-2 has a spike
+        let v = Tensor::new(vec![0.,0., 0.,0., 0.,9.], vec![seq, hd]).unwrap();
+        let o_w = Tensor::new(vec![1.,0., 0.,1.], vec![hd, hd]).unwrap(); // identity
+        let o_b = Tensor::zeros(vec![hd]);
+        let out = vit_mha_f32(&q, &k, &v, &o_w, &o_b, 1, hd).unwrap();
+        // Token-0 should pick up some signal from token-2's spike via attention
+        assert!(out.data[1] > 0.0, "tok-0 dim-1 should be nonzero (sees tok-2 spike): {}", out.data[1]);
+        // All three tokens should produce identical output (all Q rows are equal → same attn weights)
+        let _ = d;
+        for i in 0..hd {
+            assert!((out.data[i] - out.data[hd + i]).abs() < 1e-5,
+                "tok-0 and tok-1 differ at dim {i}");
+        }
+    }
+}
