@@ -22,6 +22,7 @@ use memmap2::Mmap;
 use schoolmarm::{Grammar, GrammarState};
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
+use shimmyjinja;
 use std::fs;
 use std::io::Write;
 use std::net::TcpStream;
@@ -203,24 +204,88 @@ fn chat_template_family_for_model(spec: &ModelSpec) -> ChatTemplateFamily {
     classify_template(&lower).unwrap_or(ChatTemplateFamily::ChatML)
 }
 
-fn chat_template_family_from_metadata(
-    metadata: &std::collections::HashMap<String, GgufValue>,
-    spec: &ModelSpec,
-) -> ChatTemplateFamily {
-    if let Some(GgufValue::String(chat_template)) = metadata.get("tokenizer.chat_template") {
-        if let Some(family) = classify_template(chat_template) {
-            return family;
+/// Decides how to render chat prompts for a loaded model.
+///
+/// Built once at model-load time. If the GGUF contains an embedded Jinja2
+/// `tokenizer.chat_template`, shimmyjinja is used for rendering. Otherwise
+/// we fall back to the fast, hard-coded per-family renderer.
+#[derive(Clone)]
+enum PromptRenderer {
+    /// Embedded Jinja2 template — rendered by shimmyjinja.
+    Jinja {
+        template: Arc<str>,
+        bos: String,
+        eos: String,
+    },
+    /// No embedded template — use the hard-coded family renderer.
+    Family(ChatTemplateFamily),
+}
+
+impl PromptRenderer {
+    fn render(&self, messages: &[ChatMessage]) -> String {
+        match self {
+            PromptRenderer::Jinja { template, bos, eos } => {
+                let shimmy_msgs: Vec<shimmyjinja::ChatMessage> = messages
+                    .iter()
+                    .map(|m| shimmyjinja::ChatMessage {
+                        role: m.role.clone(),
+                        content: m.content.clone(),
+                    })
+                    .collect();
+                let mut ctx = shimmyjinja::RenderContext::new();
+                ctx.set_var("bos_token", bos.as_str());
+                ctx.set_var("eos_token", eos.as_str());
+                ctx.set_flag("add_generation_prompt", true);
+                // catch_unwind guards against unsupported template constructs
+                // that slip through; falls back to ChatML on failure.
+                let tmpl = template.clone();
+                let result = std::panic::catch_unwind(move || {
+                    shimmyjinja::render_chat_template_with_context(&tmpl, &shimmy_msgs, &ctx)
+                });
+                result.unwrap_or_else(|_| {
+                    eprintln!("[PromptRenderer] shimmyjinja panic; falling back to ChatML");
+                    ChatTemplateFamily::ChatML.render_messages(messages)
+                })
+            }
+            PromptRenderer::Family(family) => family.render_messages(messages),
         }
     }
-    chat_template_family_for_model(spec)
+}
+
+/// Build a `PromptRenderer` from a loaded model.
+///
+/// Prefers the embedded Jinja2 template; falls back to name-based family
+/// detection for models that don't include one.
+fn make_prompt_renderer(
+    metadata: &std::collections::HashMap<String, GgufValue>,
+    spec: &ModelSpec,
+    tokenizer: &Tokenizer,
+) -> PromptRenderer {
+    if let Some(GgufValue::String(template)) = metadata.get("tokenizer.chat_template") {
+        let bos_id = tokenizer.bos_token();
+        let eos_id = tokenizer.eos_token();
+        let bos = tokenizer
+            .token_to_piece(bos_id)
+            .unwrap_or_else(|_| "<s>".to_string());
+        let eos = tokenizer
+            .token_to_piece(eos_id)
+            .unwrap_or_else(|_| "</s>".to_string());
+        PromptRenderer::Jinja {
+            template: template.as_str().into(),
+            bos,
+            eos,
+        }
+    } else {
+        PromptRenderer::Family(chat_template_family_for_model(spec))
+    }
 }
 
 impl ChatCompletionRequest {
     /// Convert messages into a model-appropriate prompt and return an
     /// `InferenceRequest` with `prompt_mode = "raw"` so the assembled text is
     /// passed verbatim to the inference engine.
-    fn into_inference_request(self, template_family: ChatTemplateFamily) -> InferenceRequest {
-        let prompt = template_family.render_messages(&self.messages);
+    fn into_inference_request(self, renderer: &PromptRenderer) -> InferenceRequest {
+        let prompt = renderer.render(&self.messages);
         InferenceRequest {
             task: Some("chat".to_string()),
             prompt: Some(prompt),
@@ -557,7 +622,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let http_bind_addr = shimmy_bind_addr.clone();
     let listener = tokio::net::TcpListener::bind(&http_bind_addr).await?;
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
-    let chat_template_family = chat_template_family_from_metadata(&gpu_model.metadata.gguf_metadata, &spec);
+    let prompt_renderer = make_prompt_renderer(&gpu_model.metadata.gguf_metadata, &spec, &tokenizer);
     let models_for_http = Arc::clone(&discovered_models);
     tokio::spawn(async move {
         loop {
@@ -567,9 +632,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 let sessions = Arc::clone(&sessions_for_http);
                 let streams = Arc::clone(&streams_for_http);
                 let models = Arc::clone(&models_for_http);
-                let chat_template_family = chat_template_family;
+                let prompt_renderer = prompt_renderer.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, models, chat_template_family).await {
+                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, models, prompt_renderer).await {
                         eprintln!("[HTTP] Connection error: {}", e);
                     }
                 });
@@ -718,7 +783,7 @@ async fn handle_http_connection(
     _session_states: Arc<Mutex<std::collections::HashMap<String, SessionState>>>,
     stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
     discovered_models: std::sync::Arc<Vec<(String, String)>>,
-    chat_template_family: ChatTemplateFamily,
+    prompt_renderer: PromptRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::AsyncWriteExt;
     let request_bytes = read_http_request(&mut stream).await?;
@@ -878,7 +943,7 @@ async fn handle_http_connection(
         // native InferenceRequest parser unchanged.
         let req: InferenceRequest = if path == "/v1/chat/completions" {
             match serde_json::from_str::<ChatCompletionRequest>(body_clean) {
-                Ok(cc) => cc.into_inference_request(chat_template_family),
+                Ok(cc) => cc.into_inference_request(&prompt_renderer),
                 Err(_) => {
                     let _ = stream
                         .write_all(b"HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: *\r\n\r\nInvalid JSON for /v1/chat/completions")
