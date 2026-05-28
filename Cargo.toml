@@ -8,14 +8,14 @@ members = ["crates/libfse"]
 name = "airframe"
 version = "0.1.0"
 edition = "2021"
-description = "FP32-first inference core for Llama-family models. Pure Rust WebGPU engine."
+description = "Pure-Rust WebGPU inference engine for GGUF models. No C++ toolchain, no llama.cpp. Runs on NVIDIA, AMD, Intel, and Apple Silicon via wgpu."
 license = "MIT"
 repository = "https://github.com/Michael-A-Kuykendall/airframe"
 homepage = "https://github.com/Michael-A-Kuykendall/airframe"
 readme = "README.md"
-authors = ["Michael A. Kuykendall"]
-keywords = ["llm", "inference", "llama", "gguf", "wgpu"]
-categories = ["science", "simulation"]
+authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
+keywords = ["llm", "inference", "gguf", "wgpu", "webgpu"]
+categories = ["science", "simulation", "graphics"]
 publish = true
 
 [dependencies]
