@@ -1,7 +1,8 @@
-# LibFSE: Fused Semantic Execution Kernel
+# libfse — Fused Semantic Execution Kernel
 
-**Proprietary & Confidential** - Internal Use Only
-Copyright (c) 2026 AI State Pilot. All Rights Reserved.
+> **Patent Notice**: This crate implements inventions covered by a pending US patent application for Fail-Closed Semantic Enforcement methods. Commercial use, embedding in products, or creation of derivative works requires a separate commercial license from the author. Open-source use is permitted under the MIT license for non-commercial, evaluation, or internal research purposes only. Contact michaelallenkuykendall@gmail.com for licensing inquiries.
+
+Copyright © 2026 Michael Kuykendall / DZERO. All rights reserved.
 
 ## Overview
 LibFSE is a "Fail-Closed" policy enforcement engine designed for high-security stream scanning. Unlike traditional regex engines (`aho-corasick`) that return matches for the caller to handle, FSE *inverts* this relationship: the scanning kernel itself executes policy opcodes (Record, Reject, Ignore) inside the hot loop.
