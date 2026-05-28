@@ -186,6 +186,14 @@ impl Engine {
                         text_buffer.push_str(&dec.decode_single(next_token));
                     }
                 }
+                ControlDecision::ForceToken(forced) => {
+                    if let Some(dec) = decoder {
+                        text_buffer.push_str(&dec.decode_single(forced));
+                    }
+                    generated_ids.push(forced);
+                    last_logits = self.decode(forced, weights)?;
+                    continue;
+                }
                 ControlDecision::EarlyExit => break,
                 ControlDecision::BlockAndTerminate(reason) => {
                     return Err(crate::core::error::LibshimmyError::Unsupported(format!(

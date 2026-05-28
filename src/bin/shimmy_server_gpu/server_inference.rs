@@ -337,6 +337,19 @@ fn run_inference_completion(
             .collect();
     }
 
+    // Math bypass: pre-compute arithmetic answers and force their tokens.
+    let math_bypass_tokens =
+        airframe::math_bypass_control::compute_bypass_tokens(user_prompt, tokenizer);
+    let math_bypass_was_active = !math_bypass_tokens.is_empty();
+    let mut math_bypass_queue: std::collections::VecDeque<u32> =
+        math_bypass_tokens.into_iter().collect();
+    if math_bypass_was_active {
+        eprintln!(
+            "[MathBypass] Detected arithmetic in prompt — forcing {} token(s) instead of sampling",
+            math_bypass_queue.len()
+        );
+    }
+
     let eos = tokenizer.eos_token();
     let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
         if v.len() == 1 {
@@ -715,7 +728,10 @@ fn run_inference_completion(
 
         let is_unsafe = perplexity > 500.0 || norm > 1e5;
 
-        let next_token = if is_unsafe {
+        let next_token = if let Some(forced) = math_bypass_queue.pop_front() {
+            eprintln!("[MathBypass] Step {}: forcing token {}", generated_count, forced);
+            forced
+        } else if is_unsafe {
             eprintln!(
                 "[REDO] Metric Violation (PPL={:.2}, Norm={:.2}). Falling back to greedy.",
                 perplexity, norm
@@ -768,6 +784,12 @@ fn run_inference_completion(
         );
         generated_text.push_str(&piece);
         generated_count += 1;
+
+        // Math bypass: stop cleanly once the forced-answer queue is drained.
+        if math_bypass_was_active && math_bypass_queue.is_empty() {
+            stop_reason = "math_bypass";
+            break;
+        }
 
         if let Some(tx) = stream_tx {
             let _ = tx.send(piece.clone());

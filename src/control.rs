@@ -35,6 +35,9 @@ pub enum ControlDecision {
 
     /// Fail closed with a reason.
     BlockAndTerminate(String),
+
+    /// Discard the sampler's candidate and emit this token ID instead.
+    ForceToken(usize),
 }
 
 /// Interface for converting token IDs to text for the control loop.
