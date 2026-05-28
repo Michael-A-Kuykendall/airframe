@@ -187,6 +187,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 | [**Shimmy**](https://github.com/Michael-A-Kuykendall/shimmy) | OpenAI-compatible inference server — powered by Airframe |
 | [**libfse**](https://crates.io/crates/libfse) | Fused Semantic Execution policy engine — ships as part of this repo |
 | [**shimmytok**](https://crates.io/crates/shimmytok) | GGUF-native tokenizer used by both Airframe and Shimmy |
+| [**shimmyjinja**](https://github.com/Michael-A-Kuykendall/shimmyjinja) | Minimal Jinja engine for HuggingFace `chat_template` strings — roadmap: replace hardcoded template classifier in server |
 
 ---
 
