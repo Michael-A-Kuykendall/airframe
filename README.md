@@ -1,5 +1,7 @@
 # Airframe
 
+> **Patent Notice**: The Fused Semantic Execution (FSE) architecture implemented in this repository is covered by a pending US patent. Commercial use, embedding in products, or creation of derivative works of the FSE components requires a separate commercial license from the author. Open-source use is permitted under the MIT license for non-commercial, evaluation, or internal research purposes. Contact michaelallenkuykendall@gmail.com for licensing inquiries.
+
 **Pure-Rust WebGPU inference engine for Llama-family GGUF models.**
 
 Airframe is the GPU inference core powering [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy). It runs transformer inference directly on the GPU via WGSL compute shaders — no C++ toolchain, no Python, no llama.cpp.
@@ -62,6 +64,8 @@ The FSE execution architecture is described in [`fused_semantic_execution_full_m
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The WebGPU inference runtime (attention kernels, GGUF loader, quantization) is unencumbered MIT. The Fused Semantic Execution (FSE) subsystem (`crates/libfse`) is subject to a pending US patent — see patent notice above and the [libfse README](crates/libfse/README.md) for full terms.
 
 ## Related
 
