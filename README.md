@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://github.com/Michael-A-Kuykendall/airframe/blob/e2eae662a6ac26c70e5de85d0c01e5664cbdee39/assets/airframe-logo.png?raw=true" alt="Airframe" width="480" height="auto" />
+  <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/airframe/master/assets/airframe-logo.png" alt="Airframe" width="480" height="auto" />
 
   ### Pure-Rust WebGPU Inference Engine for GGUF Models
 
