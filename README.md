@@ -1,17 +1,15 @@
 <div align="center">
+  <img src="assets/airframe-logo.png" alt="Airframe" width="480" height="auto" />
 
-# Airframe
+  ### Pure-Rust WebGPU Inference Engine for GGUF Models
 
-### Pure-Rust WebGPU Inference Engine for GGUF Models
+  [![Crates.io](https://img.shields.io/crates/v/airframe.svg)](https://crates.io/crates/airframe)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+  [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://rustup.rs/)
+  [![GitHub Stars](https://img.shields.io/github/stars/Michael-A-Kuykendall/airframe?style=social)](https://github.com/Michael-A-Kuykendall/airframe/stargazers)
+  [![Powered by Shimmy](https://img.shields.io/badge/powers-Shimmy-blueviolet)](https://github.com/Michael-A-Kuykendall/shimmy)
 
-[![Crates.io](https://img.shields.io/crates/v/airframe.svg)](https://crates.io/crates/airframe)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://rustup.rs/)
-[![GitHub Stars](https://img.shields.io/github/stars/Michael-A-Kuykendall/airframe?style=social)](https://github.com/Michael-A-Kuykendall/airframe/stargazers)
-[![Powered by Shimmy](https://img.shields.io/badge/powers-Shimmy-blueviolet)](https://github.com/Michael-A-Kuykendall/shimmy)
-
-**No C++ toolchain. No Python. No llama.cpp. Just Rust and your GPU.**
-
+  **No C++ toolchain. No Python. No llama.cpp. Just Rust and your GPU.**
 </div>
 
 ---
