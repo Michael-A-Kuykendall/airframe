@@ -1,6 +1,6 @@
 [package]
 name = "libfse"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Fused Semantic Execution: fail-closed policy engine with O(1)-in-rule-count scanning, zero-allocation hot path, and guaranteed enforcement semantics."
 publish = true
