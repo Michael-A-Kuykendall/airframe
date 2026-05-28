@@ -1,16 +1,14 @@
 <div align="center">
+  <img src="https://github.com/Michael-A-Kuykendall/airframe/blob/baf1f8ce3060c2751a5221e35b8c2ec76612ec8f/assets/libfse-logo.png?raw=true" alt="libfse" width="480" height="auto" />
 
-# libfse
+  ### Fused Semantic Execution — Fail-Closed Policy Engine
 
-### Fused Semantic Execution — Fail-Closed Policy Engine
+  [![Crates.io](https://img.shields.io/crates/v/libfse.svg)](https://crates.io/crates/libfse)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
+  [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://rustup.rs/)
+  [![Part of Airframe](https://img.shields.io/badge/part%20of-Airframe-blueviolet)](https://github.com/Michael-A-Kuykendall/airframe)
 
-[![Crates.io](https://img.shields.io/crates/v/libfse.svg)](https://crates.io/crates/libfse)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
-[![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://rustup.rs/)
-[![Part of Airframe](https://img.shields.io/badge/part%20of-Airframe-blueviolet)](https://github.com/Michael-A-Kuykendall/airframe)
-
-**Policy is data. Decisions are fused. No evaluation logic can be skipped.**
-
+  **Policy is data. Decisions are fused. No evaluation logic can be skipped.**
 </div>
 
 ---
