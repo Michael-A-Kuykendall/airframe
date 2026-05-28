@@ -27,3 +27,23 @@ vendor/human-eval/
 # Smoke test run artifacts (timestamped CSVs and logs)
 artifacts/model_smoke/smoke_*.csv
 artifacts/model_smoke/smoke_*.log
+
+# Internal spike / planning docs (never commit to public repo)
+SPIKE_*.md
+VISION_OPTION_*.md
+docs/vision-task-breakdown.md
+
+# Vision work-in-progress (unshipped, kept local until branch is ready)
+src/family/resampler.rs
+src/family/vit.rs
+src/ops/reference/vision.rs
+tests/vision_math.rs
+
+# Internal libfse docs (patent/strategy materials)
+crates/libfse/STRATEGY.md
+crates/libfse/AUDIT_INFO.md
+crates/libfse/docs/PROMPT_FOR_LIBFSE_GENERATION.md
+crates/libfse/docs/NAMING_CONVENTION_MILITARY.md
+crates/libfse/docs/COMMERCIAL_VALUE_PROP.md
+crates/libfse/docs/patent_materials/
+fused_semantic_execution_full_markdown_reconstruction.md
