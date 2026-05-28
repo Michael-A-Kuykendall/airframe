@@ -1,12 +1,17 @@
 // Fused Semantic Execution (FSE)
-// Copyright (c) 2026 AI State Pilot. All Rights Reserved.
+// Copyright (c) 2026 Michael Kuykendall / DZERO. All rights reserved.
 //
-// PROPRIETARY & CONFIDENTIAL.
-// This library implements Patent Pending methods for Fail-Closed Semantic Enforcement.
+// PATENT PENDING. This library implements inventions covered by a pending US patent
+// application for Fail-Closed Semantic Enforcement methods.
+//
+// This source is distributed under the MIT license for non-commercial, evaluation,
+// and internal research purposes ONLY. Commercial use, embedding in products, or
+// creation of derivative works requires a separate commercial license.
+// Contact: michaelallenkuykendall@gmail.com
 //
 // Portions of the graph compilation logic may utilize algorithms from `aho-corasick`
-// (MIT License, Andrew Gallant). The *Execution Kernel* and *Policy Fusion* logic
-// are original works.
+// (MIT License, Andrew Gallant). The Execution Kernel and Policy Fusion logic
+// are original works subject to the patent notice above.
 
 pub mod scanner;
 pub mod store;
