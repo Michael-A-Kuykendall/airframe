@@ -1,0 +1,181 @@
+{
+  "model": "TinyLlama-1.1B-Chat-v1.0.Q4_0",
+  "results": [
+    {
+      "desc": "1d\u00d71d  2\u00d73",
+      "expected": 6,
+      "raw": "2 * 3 = 6\n6 is the only number that can be",
+      "parsed": 6,
+      "ok": true,
+      "ms": 4641
+    },
+    {
+      "desc": "1d\u00d71d  4\u00d77",
+      "expected": 28,
+      "raw": "4 times 7 is:\n\nAnswer: 21",
+      "parsed": 21,
+      "ok": false,
+      "ms": 4328
+    },
+    {
+      "desc": "1d\u00d71d  8\u00d79",
+      "expected": 72,
+      "raw": "8 * 9 = 72\nReply with only the number:",
+      "parsed": 72,
+      "ok": true,
+      "ms": 4610
+    },
+    {
+      "desc": "1d\u00d71d  6\u00d76",
+      "expected": 36,
+      "raw": "6 times 6 = 30\n\nAnswer: 30",
+      "parsed": 30,
+      "ok": false,
+      "ms": 4531
+    },
+    {
+      "desc": "2d\u00d71d  17\u00d73",
+      "expected": 51,
+      "raw": "17 * 3 = 45\n45 is the only number",
+      "parsed": 45,
+      "ok": false,
+      "ms": 4609
+    },
+    {
+      "desc": "2d\u00d71d  24\u00d75",
+      "expected": 120,
+      "raw": "24 times 5 = 108\nAnswer: 10",
+      "parsed": 10,
+      "ok": false,
+      "ms": 4610
+    },
+    {
+      "desc": "2d\u00d71d  37\u00d74",
+      "expected": 148,
+      "raw": "37 * 4 = 152\n152 is the",
+      "parsed": 152,
+      "ok": false,
+      "ms": 4640
+    },
+    {
+      "desc": "2d\u00d71d  99\u00d72",
+      "expected": 198,
+      "raw": "99 * 2 = 198\n198 is the",
+      "parsed": 198,
+      "ok": true,
+      "ms": 4625
+    },
+    {
+      "desc": "2d\u00d72d  12\u00d715",
+      "expected": 180,
+      "raw": "12 * 15 = 18",
+      "parsed": 18,
+      "ok": false,
+      "ms": 4047
+    },
+    {
+      "desc": "2d\u00d72d  17\u00d723",
+      "expected": 391,
+      "raw": "17 * 23 = 34\nThe number is 3",
+      "parsed": 3,
+      "ok": false,
+      "ms": 4641
+    },
+    {
+      "desc": "2d\u00d72d  24\u00d725",
+      "expected": 600,
+      "raw": "24 times 25 = 50\n\nAnswer: 5",
+      "parsed": 5,
+      "ok": false,
+      "ms": 4687
+    },
+    {
+      "desc": "2d\u00d72d  33\u00d733",
+      "expected": 1089,
+      "raw": "33 times 33 = 1,096\nThe answer",
+      "parsed": 1096,
+      "ok": false,
+      "ms": 4641
+    },
+    {
+      "desc": "2d\u00d72d  48\u00d752",
+      "expected": 2496,
+      "raw": "48 times 52 = 264\nThe answer is:",
+      "parsed": 264,
+      "ok": false,
+      "ms": 4640
+    },
+    {
+      "desc": "add  127+456",
+      "expected": 583,
+      "raw": "127 + 456 = 173\nThe answer",
+      "parsed": 173,
+      "ok": false,
+      "ms": 4797
+    },
+    {
+      "desc": "add  999+1",
+      "expected": 1000,
+      "raw": "To calculate 999 plus 1, you need to add one to",
+      "parsed": 1,
+      "ok": false,
+      "ms": 4610
+    },
+    {
+      "desc": "add  38+47",
+      "expected": 85,
+      "raw": "38 + 47 = 85\nThe answer is:",
+      "parsed": 85,
+      "ok": true,
+      "ms": 4609
+    },
+    {
+      "desc": "sub  100-37",
+      "expected": 63,
+      "raw": "100 - 37 = 63",
+      "parsed": 63,
+      "ok": true,
+      "ms": 4125
+    },
+    {
+      "desc": "sub  1000-1",
+      "expected": 999,
+      "raw": "1000 - 1 = 999",
+      "parsed": 999,
+      "ok": true,
+      "ms": 4328
+    },
+    {
+      "desc": "div  144\u00f712",
+      "expected": 12,
+      "raw": "144 divided by 12 is:\n\nAnswer: 1",
+      "parsed": 1,
+      "ok": false,
+      "ms": 4766
+    },
+    {
+      "desc": "div  81\u00f79",
+      "expected": 9,
+      "raw": "81 is not divisible by 9, so the answer is:",
+      "parsed": 9,
+      "ok": true,
+      "ms": 4672
+    },
+    {
+      "desc": "carry  19\u00d719",
+      "expected": 361,
+      "raw": "19 * 19 = 38\n38 is the number",
+      "parsed": 38,
+      "ok": false,
+      "ms": 4687
+    },
+    {
+      "desc": "carry  77\u00d777",
+      "expected": 5929,
+      "raw": "77 times 77 = 5,040\n\nAnswer",
+      "parsed": 5040,
+      "ok": false,
+      "ms": 4610
+    }
+  ]
+}

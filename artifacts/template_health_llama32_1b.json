@@ -1,0 +1,61 @@
+{
+  "model": "Llama-3.2-1B-Instruct-Q4_K_M",
+  "results": [
+    {
+      "test": "no-template-tags-leak",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "Hello",
+      "ms": 39546
+    },
+    {
+      "test": "assistant-role-assumed",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "READY",
+      "ms": 39891
+    },
+    {
+      "test": "system-message-injected",
+      "ok": false,
+      "note": "system message ignored \u2014 'GEOGRAPHY' not found in: \"{#- The world's largest desert is the Sahara, covering over 9 million square kil\"",
+      "raw": "{#- The world's largest desert is the Sahara, covering over 9 million square kilometers in North Africa. It spans across several countries, including Algeria, Chad, Egypt, Libya, Mali , Mauritania , Morocco and Tunisia. #}",
+      "ms": 60859
+    },
+    {
+      "test": "multi-turn-context-preserved",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "The secret word you told me was BANANA.",
+      "ms": 53641
+    },
+    {
+      "test": "no-user-turn-continuation",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "The color of the sky can vary depending on the time of day and atmospheric conditions. At sunrise and sunset, the sky often appears pinkish or orange",
+      "ms": 49343
+    },
+    {
+      "test": "factual-recall-coherent",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "Tokyo",
+      "ms": 41125
+    },
+    {
+      "test": "instruction-format-obedience",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "1. Red\n2. Blue",
+      "ms": 45969
+    },
+    {
+      "test": "eos-stops-generation",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "YES",
+      "ms": 43156
+    }
+  ]
+}

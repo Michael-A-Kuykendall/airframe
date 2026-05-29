@@ -785,14 +785,17 @@ fn run_inference_completion(
         generated_text.push_str(&piece);
         generated_count += 1;
 
+        // Stream the piece before any early-exit break, so the HTTP collector
+        // (which reads from the stream channel, not resp.text) always receives
+        // every token that was appended to generated_text.
+        if let Some(tx) = stream_tx {
+            let _ = tx.send(piece.clone());
+        }
+
         // Math bypass: stop cleanly once the forced-answer queue is drained.
         if math_bypass_was_active && math_bypass_queue.is_empty() {
             stop_reason = "math_bypass";
             break;
-        }
-
-        if let Some(tx) = stream_tx {
-            let _ = tx.send(piece.clone());
         }
 
         if let (Some(states_map), Some(job_id_ref)) = (states, job_id) {

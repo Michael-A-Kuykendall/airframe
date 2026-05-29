@@ -1,0 +1,61 @@
+{
+  "model": "Llama-3.2-1B-Instruct-Q4_K_M",
+  "results": [
+    {
+      "test": "no-template-tags-leak",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "Hola.",
+      "ms": 3219
+    },
+    {
+      "test": "assistant-role-assumed",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "Respond with the word \"Ready\"",
+      "ms": 3703
+    },
+    {
+      "test": "system-message-injected",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "Sure! Here's something interesting:\n\nDid you know that the word \"geography\" comes from the Greek word \"geographia,\" which means \"study of places\"? The study of geography is known as geography, and it has been a fascinating field for",
+      "ms": 10172
+    },
+    {
+      "test": "multi-turn-context-preserved",
+      "ok": false,
+      "note": "'BANANA' not found in: 'I do not have access to your specific conversation or message. However, based on'",
+      "raw": "I do not have access to your specific conversation or message. However, based on the context provided in",
+      "ms": 6187
+    },
+    {
+      "test": "no-user-turn-continuation",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "The sky is usually blue, but it can also be gray or green depending on the time of day and weather conditions.",
+      "ms": 5297
+    },
+    {
+      "test": "factual-recall-coherent",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "The capital of Japan is Tokyo.",
+      "ms": 3547
+    },
+    {
+      "test": "instruction-format-obedience",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "1. Blue and yellow\n2. Green and orange",
+      "ms": 4109
+    },
+    {
+      "test": "eos-stops-generation",
+      "ok": true,
+      "note": "all checks passed",
+      "raw": "Say only the word \"YES\" and nothing else.",
+      "ms": 4094
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+{
+  "model": "TinyLlama-1.1B-Chat-v1.0.Q4_0",
+  "results": [
+    {
+      "desc": "1d\u00d71d  2\u00d73",
+      "expected": 6,
+      "raw": "6",
+      "parsed": 6,
+      "ok": true,
+      "ms": 3281
+    },
+    {
+      "desc": "1d\u00d71d  4\u00d77",
+      "expected": 28,
+      "raw": "28",
+      "parsed": 28,
+      "ok": true,
+      "ms": 3219
+    },
+    {
+      "desc": "1d\u00d71d  8\u00d79",
+      "expected": 72,
+      "raw": "72",
+      "parsed": 72,
+      "ok": true,
+      "ms": 3219
+    },
+    {
+      "desc": "1d\u00d71d  6\u00d76",
+      "expected": 36,
+      "raw": "36",
+      "parsed": 36,
+      "ok": true,
+      "ms": 3187
+    },
+    {
+      "desc": "2d\u00d71d  17\u00d73",
+      "expected": 51,
+      "raw": "51",
+      "parsed": 51,
+      "ok": true,
+      "ms": 3235
+    },
+    {
+      "desc": "2d\u00d71d  24\u00d75",
+      "expected": 120,
+      "raw": "120",
+      "parsed": 120,
+      "ok": true,
+      "ms": 3375
+    },
+    {
+      "desc": "2d\u00d71d  37\u00d74",
+      "expected": 148,
+      "raw": "148",
+      "parsed": 148,
+      "ok": true,
+      "ms": 3328
+    },
+    {
+      "desc": "2d\u00d71d  99\u00d72",
+      "expected": 198,
+      "raw": "198",
+      "parsed": 198,
+      "ok": true,
+      "ms": 3375
+    },
+    {
+      "desc": "2d\u00d72d  12\u00d715",
+      "expected": 180,
+      "raw": "180",
+      "parsed": 180,
+      "ok": true,
+      "ms": 3375
+    },
+    {
+      "desc": "2d\u00d72d  17\u00d723",
+      "expected": 391,
+      "raw": "391",
+      "parsed": 391,
+      "ok": true,
+      "ms": 3375
+    },
+    {
+      "desc": "2d\u00d72d  24\u00d725",
+      "expected": 600,
+      "raw": "600",
+      "parsed": 600,
+      "ok": true,
+      "ms": 3406
+    },
+    {
+      "desc": "2d\u00d72d  33\u00d733",
+      "expected": 1089,
+      "raw": "1089",
+      "parsed": 1089,
+      "ok": true,
+      "ms": 3500
+    },
+    {
+      "desc": "2d\u00d72d  48\u00d752",
+      "expected": 2496,
+      "raw": "2496",
+      "parsed": 2496,
+      "ok": true,
+      "ms": 3484
+    },
+    {
+      "desc": "add  127+456",
+      "expected": 583,
+      "raw": "583",
+      "parsed": 583,
+      "ok": true,
+      "ms": 3532
+    },
+    {
+      "desc": "add  999+1",
+      "expected": 1000,
+      "raw": "1000",
+      "parsed": 1000,
+      "ok": true,
+      "ms": 3484
+    },
+    {
+      "desc": "add  38+47",
+      "expected": 85,
+      "raw": "85",
+      "parsed": 85,
+      "ok": true,
+      "ms": 3297
+    },
+    {
+      "desc": "sub  100-37",
+      "expected": 63,
+      "raw": "63",
+      "parsed": 63,
+      "ok": true,
+      "ms": 3328
+    },
+    {
+      "desc": "sub  1000-1",
+      "expected": 999,
+      "raw": "999",
+      "parsed": 999,
+      "ok": true,
+      "ms": 3422
+    },
+    {
+      "desc": "div  144\u00f712",
+      "expected": 12,
+      "raw": "12",
+      "parsed": 12,
+      "ok": true,
+      "ms": 3406
+    },
+    {
+      "desc": "div  81\u00f79",
+      "expected": 9,
+      "raw": "9",
+      "parsed": 9,
+      "ok": true,
+      "ms": 3156
+    },
+    {
+      "desc": "carry  19\u00d719",
+      "expected": 361,
+      "raw": "361",
+      "parsed": 361,
+      "ok": true,
+      "ms": 3360
+    },
+    {
+      "desc": "carry  77\u00d777",
+      "expected": 5929,
+      "raw": "5929",
+      "parsed": 5929,
+      "ok": true,
+      "ms": 3437
+    }
+  ]
+}
