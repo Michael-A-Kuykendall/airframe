@@ -339,20 +339,39 @@ impl GpuRuntime {
                     let keep_sink = 4;
                     let shift_amt = cache.max_len() / 4;
                     for layer_idx in 0..self.spec.n_layer {
-                        self.shift_pipeline.execute(
-                            &self.device,
-                            &self.queue,
-                            cache.get_k_buffer(layer_idx),
-                            cache.get_v_buffer(layer_idx),
-                            keep_sink,
-                            shift_amt,
-                            current_len,
-                            self.spec.n_head_kv as u32,
-                            self.spec.head_dim as u32,
-                            self.spec.rope_dim as u32,
-                            self.spec.rope_base,
-                            cache.max_len(),
-                        );
+                        if cache.is_int4() {
+                            self.shift_pipeline.execute_int4(
+                                &self.device,
+                                &self.queue,
+                                cache.get_k_buffer(layer_idx),
+                                cache.get_v_buffer(layer_idx),
+                                cache.get_k_packed_buffer(layer_idx),
+                                cache.get_v_packed_buffer(layer_idx),
+                                cache.get_k_scale_buffer(layer_idx),
+                                cache.get_v_scale_buffer(layer_idx),
+                                keep_sink,
+                                shift_amt,
+                                current_len,
+                                self.spec.n_head_kv as u32,
+                                self.spec.head_dim as u32,
+                                cache.max_len(),
+                            );
+                        } else {
+                            self.shift_pipeline.execute(
+                                &self.device,
+                                &self.queue,
+                                cache.get_k_buffer(layer_idx),
+                                cache.get_v_buffer(layer_idx),
+                                keep_sink,
+                                shift_amt,
+                                current_len,
+                                self.spec.n_head_kv as u32,
+                                self.spec.head_dim as u32,
+                                self.spec.rope_dim as u32,
+                                self.spec.rope_base,
+                                cache.max_len(),
+                            );
+                        }
                     }
                     cache.set_seq_len(current_len - shift_amt);
                     cache.advance_window_base(shift_amt);
