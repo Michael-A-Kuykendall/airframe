@@ -548,13 +548,28 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let embd_table_cpu = Arc::new(load_token_embd_cpu(&model_path, &gpu_model, &spec)?);
 
     // === Initialize KV Cache (Phase 4D) ===
-    let kv_cache = Arc::new(Mutex::new(KVCache::new(
-        &device,
-        spec.n_layer,
-        spec.n_head_kv as u32,
-        spec.head_dim as u32,
-        max_ctx,
-    )));
+    // SHIMMY_KV_QUANT=int4 enables TurboQuant INT4 KV compression (feat/turboquant-wgsl).
+    let kv_quant_int4 = std::env::var("SHIMMY_KV_QUANT")
+        .map(|v| v.to_lowercase() == "int4")
+        .unwrap_or(false);
+    let kv_cache = Arc::new(Mutex::new(if kv_quant_int4 {
+        eprintln!("[GPU Server] KV cache mode: INT4 (TurboQuant)");
+        KVCache::new_int4(
+            &device,
+            spec.n_layer,
+            spec.n_head_kv as u32,
+            spec.head_dim as u32,
+            max_ctx,
+        )
+    } else {
+        KVCache::new(
+            &device,
+            spec.n_layer,
+            spec.n_head_kv as u32,
+            spec.head_dim as u32,
+            max_ctx,
+        )
+    }));
     let kv_mb =
         (max_ctx as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4 * spec.n_layer as u64)
             / (1024 * 1024);
