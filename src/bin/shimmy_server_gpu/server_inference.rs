@@ -338,8 +338,13 @@ fn run_inference_completion(
     }
 
     // Math bypass: pre-compute arithmetic answers and force their tokens.
-    let math_bypass_tokens =
-        airframe::math_bypass_control::compute_bypass_tokens(user_prompt, tokenizer);
+    // Set SHIMMY_MATH_BYPASS_DISABLE=1 to observe raw model behavior for diagnostics.
+    let bypass_disabled = std::env::var("SHIMMY_MATH_BYPASS_DISABLE").as_deref() == Ok("1");
+    let math_bypass_tokens = if bypass_disabled {
+        vec![]
+    } else {
+        airframe::math_bypass_control::compute_bypass_tokens(user_prompt, tokenizer)
+    };
     let math_bypass_was_active = !math_bypass_tokens.is_empty();
     let mut math_bypass_queue: std::collections::VecDeque<u32> =
         math_bypass_tokens.into_iter().collect();
@@ -628,6 +633,13 @@ fn run_inference_completion(
                 for _ in 0..prompt_tokens.len() {
                     cache.increment().map_err(|e| e)?;
                 }
+                if cache.is_int4() {
+                    pipeline.requantize_all_kv_int4(
+                        device, queue, &cache,
+                        spec.n_head_kv as u32, spec.head_dim as u32,
+                        prompt_tokens.len() as u32, spec.n_layer,
+                    );
+                }
             }
             logits_a
         }
@@ -662,6 +674,13 @@ fn run_inference_completion(
             let mut cache = kv_cache.lock().unwrap();
             for _ in 0..prompt_tokens.len() {
                 cache.increment().map_err(|e| e)?;
+            }
+            if cache.is_int4() {
+                pipeline.requantize_all_kv_int4(
+                    device, queue, &cache,
+                    spec.n_head_kv as u32, spec.head_dim as u32,
+                    prompt_tokens.len() as u32, spec.n_layer,
+                );
             }
         }
         logits_b
@@ -717,7 +736,7 @@ fn run_inference_completion(
             .collect();
         let entropy = shannon_entropy_from_logits(&raw_logits);
         let _variance = logit_variance(&raw_logits);
-        let _max_prob = max_probability_from_logits(&raw_logits);
+        let max_prob = max_probability_from_logits(&raw_logits);
         let norm = logit_l2_norm(&raw_logits);
 
         if ppl_window.len() >= 10 {
@@ -779,8 +798,8 @@ fn run_inference_completion(
 
         let piece = tokenizer.decode_single(next_token, true)?;
         eprintln!(
-            "[TOKEN] Step {}: id={}, text={:?}",
-            generated_count, next_token, piece
+            "[TOKEN] Step {}: id={}, text={:?}, entropy={:.3}, max_prob={:.3}",
+            generated_count, next_token, piece, entropy, max_prob
         );
         generated_text.push_str(&piece);
         generated_count += 1;
@@ -894,10 +913,17 @@ fn run_inference_completion(
 
                 {
                     let mut cache = kv_cache.lock().unwrap();
-                    layer_output = pipeline.run_layer_with_cache(
-                        device, queue, model, &mut cache, layer_idx, &layer_output,
-                        compiled.offsets, layer_params_l,
-                    );
+                    if cache.is_int4() {
+                        layer_output = pipeline.run_layer_with_cache_int4(
+                            device, queue, model, &mut cache, layer_idx, &layer_output,
+                            compiled.offsets, layer_params_l,
+                        );
+                    } else {
+                        layer_output = pipeline.run_layer_with_cache(
+                            device, queue, model, &mut cache, layer_idx, &layer_output,
+                            compiled.offsets, layer_params_l,
+                        );
+                    }
                 }
             }
         }
