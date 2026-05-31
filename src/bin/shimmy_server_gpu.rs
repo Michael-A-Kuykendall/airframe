@@ -477,7 +477,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
     limits.max_buffer_size = adapter_limits.max_buffer_size;
-    limits.max_storage_buffers_per_shader_stage = 8;
+    limits.max_storage_buffers_per_shader_stage = 14; // INT4 KV layout uses 11 storage buffers
     limits.max_compute_invocations_per_workgroup = 256;
 
     let (device, queue) = adapter

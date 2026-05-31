@@ -798,7 +798,8 @@ impl BindlessPipeline {
         });
 
         // INT4 layer bind group (14 bindings: 0-9 same as F32, 10-13 packed+scale read-only)
-        let layer_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        // Used ONLY for main_attn_out_int4 — that pipeline was compiled against layer_layout_int4.
+        let layer_bg_int4 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("Layer {} INT4 BindGroup", layer_idx)),
             layout: &self.layer_layout_int4,
             entries: &[
@@ -816,6 +817,24 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry { binding: 11, resource: kv_cache.get_k_scale_buffer(layer_idx).as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 12, resource: kv_cache.get_v_packed_buffer(layer_idx).as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 13, resource: kv_cache.get_v_scale_buffer(layer_idx).as_entire_binding() },
+            ],
+        });
+
+        // F32 bind group (10 bindings) for all other kernels (compiled against layer_layout).
+        let layer_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("Layer {} INT4 F32BG", layer_idx)),
+            layout: &self.layer_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: model.gpu_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: activation_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: temp_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: offsets_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: model.preflight.as_ref().unwrap().norm_bank_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 7, resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 8, resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 9, resource: cache_params_buffer.as_entire_binding() },
             ],
         });
 
@@ -870,8 +889,8 @@ impl BindlessPipeline {
         // Dispatch (n_head_kv, 1, 1): each invocation handles one head-vector
         { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QuantizeKV"), timestamp_writes: None }); cp.set_bind_group(0, &quant_bg, &[]); cp.set_pipeline(&self.quantize_kv_pipeline); cp.dispatch_workgroups(params.head_count_kv, 1, 1); }
 
-        // Kernel 3: Attention (reads INT4 K/V from packed+scale)
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnOutINT4"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_attn_out_int4); cp.dispatch_workgroups(wg_dim, 1, 1); }
+        // Kernel 3: Attention (reads INT4 K/V from packed+scale) — uses INT4 bind group
+        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnOutINT4"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg_int4, &[]); cp.set_pipeline(&self.layer_pipeline_attn_out_int4); cp.dispatch_workgroups(wg_dim, 1, 1); }
 
         // Kernel 4: Attention output projection
         { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnProj"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_attn_proj); cp.dispatch_workgroups(wg_dim, 1, 1); }

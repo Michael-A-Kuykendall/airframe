@@ -29,19 +29,19 @@ ask() {
     local PROMPT="$1" EXPECT="$2" TAG="$3"
     local SUBMIT JID ANSWER STATUS
 
-    SUBMIT=$(curl -sf -m 10 "http://127.0.0.1:${PORT}/v1/chat/completions" \
+    # Server is synchronous: blocks until generation done. Use 120s timeout.
+    SUBMIT=$(curl -sf -m 120 "http://127.0.0.1:${PORT}/v1/chat/completions" \
         -H 'Content-Type: application/json' \
         -d "{\"model\":\"x\",\"messages\":[{\"role\":\"user\",\"content\":\"${PROMPT}\"}],\"max_tokens\":10}")
-    JID=$(echo "$SUBMIT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('job_id',''))" 2>/dev/null)
 
-    ANSWER=""
-    for i in $(seq 1 20); do
-        sleep 2
-        STATUS=$(curl -sf "http://127.0.0.1:${PORT}/api/repro/job-status?job_id=${JID}" 2>/dev/null)
-        ANSWER=$(echo "$STATUS" | python3 -c "import sys,json; d=json.load(sys.stdin); r=d.get('result'); print(r['text'].strip() if r else '')" 2>/dev/null)
-        [ -n "$ANSWER" ] && break
-        echo "      [${TAG}] polling... (${i})"
-    done
+    ANSWER=$(echo "$SUBMIT" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d['choices'][0]['message']['content'].strip())
+except Exception:
+    print('')
+" 2>/dev/null)
 
     local GOT
     GOT=$(echo "$ANSWER" | tr '\n' ' ' | head -c 80)
@@ -77,14 +77,14 @@ test_model() {
     echo "════════════════════════════════════════════════"
 
     echo "  [1/3] Starting server..."
-    LIBSHIMMY_MODEL_PATH="$GGUF" SHIMMY_PORT=$PORT "$BIN" &
+    LIBSHIMMY_MODEL_PATH="$GGUF" SHIMMY_PORT=$PORT SHIMMY_MAX_CTX=2048 "$BIN" &
     SRV_PID=$!
     echo "        PID=$SRV_PID  port=$PORT"
 
     echo "  [2/3] Waiting for server ready..."
     if ! wait_ready; then
         echo "  ⚠️  TIMEOUT — server did not become ready"
-        kill $SRV_PID 2>/dev/null; wait $SRV_PID 2>/dev/null
+        kill $SRV_PID 2>/dev/null; wait $SRV_PID 2>/dev/null || true
         SCORES["$LABEL"]="TIMEOUT"
         return
     fi
@@ -105,7 +105,7 @@ test_model() {
     SCORES["$LABEL"]="$TOTAL/4"
 
     echo "  Stopping server..."
-    kill $SRV_PID 2>/dev/null; wait $SRV_PID 2>/dev/null
+    kill $SRV_PID 2>/dev/null; wait $SRV_PID 2>/dev/null || true
     sleep 2
 }
 
