@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-05-31T07:53:20.071836",
+  "results": [
+    {
+      "ctx": 180,
+      "depth_pct": 10.0,
+      "run": 0,
+      "needle": "AIRFRAME-180-D10-R0",
+      "est_tokens": 148,
+      "status": "completed",
+      "answer": "AIRFRAME-180-DE10-R0",
+      "pass": false,
+      "elapsed_s": 173.6,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 180,
+      "depth_pct": 25.0,
+      "run": 0,
+      "needle": "AIRFRAME-180-D25-R0",
+      "est_tokens": 148,
+      "status": "completed",
+      "answer": "AIRFRAME-180-DE25-R0",
+      "pass": false,
+      "elapsed_s": 172.5,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 180,
+      "depth_pct": 50.0,
+      "run": 0,
+      "needle": "AIRFRAME-180-D50-R0",
+      "est_tokens": 148,
+      "status": "completed",
+      "answer": "AIRFRAME-180-DR0",
+      "pass": false,
+      "elapsed_s": 185.4,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 180,
+      "depth_pct": 75.0,
+      "run": 0,
+      "needle": "AIRFRAME-180-D75-R0",
+      "est_tokens": 148,
+      "status": "completed",
+      "answer": "AIRFRAME-180-DR0",
+      "pass": false,
+      "elapsed_s": 187.4,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 180,
+      "depth_pct": 90.0,
+      "run": 0,
+      "needle": "AIRFRAME-180-D90-R0",
+      "est_tokens": 148,
+      "status": "completed",
+      "answer": "AIRFRAME-180-DR0",
+      "pass": false,
+      "elapsed_s": 190.3,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    }
+  ]
+}

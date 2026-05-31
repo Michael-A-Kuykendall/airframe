@@ -313,6 +313,12 @@ fn run_inference_completion(
     let rep_penalty = req.repetition_penalty.unwrap_or(1.1);
     let use_stream = req.stream.unwrap_or(false) && stream_tx.is_some();
     let mut rng = Rng::new(req.seed.unwrap_or(42));
+    // SHIMMY_PREFILL_CHUNK defaults to 64 to avoid Windows TDR (each layer's attention
+    // dispatch must complete within ~2s; 512-token batches exceed that on RTX 3060 for 3B+ models).
+    let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(64);
 
     eprintln!(
         "[GPU Server] Sampling: temp={:.2}, top_p={:.2}, rep_penalty={:.2}, stream={}",
@@ -619,9 +625,10 @@ fn run_inference_completion(
                     0,
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     spec,
-                    512,
+                    prefill_chunk,
                 )
             };
+            eprintln!("[GPU Server] Prefill chunks done (path A), {} tokens.", prompt_tokens.len());
             let logits_a = if use_cpu_head {
                 cpu_head_logits(embd_table_cpu, &l21_a, spec.n_vocab, dim as usize, spec.final_logit_softcap)
             } else {
@@ -634,11 +641,14 @@ fn run_inference_completion(
                     cache.increment().map_err(|e| e)?;
                 }
                 if cache.is_int4() {
+                    eprintln!("[GPU Server] Requantize KV start (A), seq_len={}.", prompt_tokens.len());
                     pipeline.requantize_all_kv_int4(
                         device, queue, &cache,
                         spec.n_head_kv as u32, spec.head_dim as u32,
                         prompt_tokens.len() as u32, spec.n_layer,
                     );
+                    device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during requantize poll (A)");
+                    eprintln!("[GPU Server] Requantize KV complete (A).");
                 }
             }
             logits_a
@@ -661,9 +671,10 @@ fn run_inference_completion(
                 0,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 spec,
-                512,
+                prefill_chunk,
             )
         };
+        eprintln!("[GPU Server] Prefill chunks done (path B), {} tokens.", prompt_tokens.len());
         let logits_b = if use_cpu_head {
             cpu_head_logits(embd_table_cpu, &l21_b, spec.n_vocab, dim as usize, spec.final_logit_softcap)
         } else {
@@ -676,11 +687,14 @@ fn run_inference_completion(
                 cache.increment().map_err(|e| e)?;
             }
             if cache.is_int4() {
+                eprintln!("[GPU Server] Requantize KV start (B), seq_len={}.", prompt_tokens.len());
                 pipeline.requantize_all_kv_int4(
                     device, queue, &cache,
                     spec.n_head_kv as u32, spec.head_dim as u32,
                     prompt_tokens.len() as u32, spec.n_layer,
                 );
+                device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during requantize poll (B)");
+                eprintln!("[GPU Server] Requantize KV complete (B).");
             }
         }
         logits_b
