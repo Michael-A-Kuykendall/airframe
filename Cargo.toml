@@ -6,7 +6,7 @@ members = ["crates/libfse"]
 
 [package]
 name = "airframe"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Pure-Rust WebGPU inference engine for GGUF models. No C++ toolchain, no llama.cpp. Runs on NVIDIA, AMD, Intel, and Apple Silicon via wgpu."
 license = "MIT"

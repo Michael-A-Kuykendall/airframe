@@ -639,6 +639,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
     let prompt_renderer = make_prompt_renderer(&gpu_model.metadata.gguf_metadata, &spec, &tokenizer);
     let models_for_http = Arc::clone(&discovered_models);
+    let kv_quant_int4_for_http = kv_quant_int4;
     tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
@@ -648,8 +649,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 let streams = Arc::clone(&streams_for_http);
                 let models = Arc::clone(&models_for_http);
                 let prompt_renderer = prompt_renderer.clone();
+                let kv_int4_flag = kv_quant_int4_for_http;
                 tokio::spawn(async move {
-                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, models, prompt_renderer).await {
+                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, models, prompt_renderer, kv_int4_flag).await {
                         eprintln!("[HTTP] Connection error: {}", e);
                     }
                 });
@@ -799,6 +801,7 @@ async fn handle_http_connection(
     stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
     discovered_models: std::sync::Arc<Vec<(String, String)>>,
     prompt_renderer: PromptRenderer,
+    kv_quant_int4: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::AsyncWriteExt;
     let request_bytes = read_http_request(&mut stream).await?;
@@ -816,6 +819,7 @@ async fn handle_http_connection(
 
     if method == "GET" && path == "/v1/models" {
         // OpenAI-compatible model list — one entry per discovered .gguf
+        let kv_mode = if kv_quant_int4 { "int4" } else { "f32" };
         let mut items = String::from("[");
         for (i, (name, _)) in discovered_models.iter().enumerate() {
             if i > 0 {
@@ -823,8 +827,8 @@ async fn handle_http_connection(
             }
             let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
             items.push_str(&format!(
-                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\"}}",
-                escaped
+                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\",\"kv_mode\":\"{}\"}}",
+                escaped, kv_mode
             ));
         }
         items.push(']');
@@ -1499,7 +1503,7 @@ mod tests {
             }
             let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
             items.push_str(&format!(
-                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\"}}",
+                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\",\"kv_mode\":\"f32\"}}",
                 escaped
             ));
         }
