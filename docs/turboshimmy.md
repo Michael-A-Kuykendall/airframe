@@ -58,7 +58,7 @@ The model itself produces minor garbling of the retrieval codes (inserting chara
 | F32 KV | `AIRFRAME-180-DE10-R0` | `AIRFRAME-180-DE25-R0` | `AIRFRAME-180-DR0` | `AIRFRAME-180-DR0` | `AIRFRAME-180-DR0` | baseline |
 | INT4 KV | `AIRFRAME-180-DE10-R0` | `AIRFRAME-180-DE25-R0` | `AIRFRAME-180-DR0` | `AIRFRAME-180-DR0` | `AIRFRAME-180-DR0` | **identical** |
 
-Context note: the TDR threshold on the Windows/RTX 3060 test machine limits safe prefill to seq_len ≤ 136 tokens per chunk under the current F32 attention kernel dispatch geometry. The needle bench runs at ctx≈130 to stay within that envelope. The INT4 *decode* path is TDR-safe (3-encoder split); the prefill path uses chunked F32 forward passes (controlled by `SHIMMY_PREFILL_CHUNK`, default 8 for safety).
+Context note: the Windows TDR wall (RTX 3060, ~2 s GPU dispatch limit) previously limited safe prefill to seq_len ≤ 136 tokens per chunk. This has been resolved by isolating the O(seq_len) `AttnOut` kernel into its own encoder+poll per layer (inference.rs A2 fix) and requantizing KV cache one layer at a time with an explicit poll (layer.rs A1 fix). Verified: needle bench at ctx=256 (≈224 tokens, seq_len reaching ~224) completes without crashes. The default `SHIMMY_PREFILL_CHUNK` remains 64; the INT4 decode path uses the same 3-encoder per-layer pattern committed earlier.
 
 ---
 
