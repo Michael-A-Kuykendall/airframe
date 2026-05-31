@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-05-31T17:19:52.873983",
+  "results": [
+    {
+      "ctx": 256,
+      "depth_pct": 10.0,
+      "run": 0,
+      "needle": "AIRFRAME-256-D10-R0",
+      "est_tokens": 224,
+      "status": "completed",
+      "answer": "AIRFRAME-256-<s>",
+      "pass": false,
+      "elapsed_s": 293.1,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 256,
+      "depth_pct": 50.0,
+      "run": 0,
+      "needle": "AIRFRAME-256-D50-R0",
+      "est_tokens": 224,
+      "status": "completed",
+      "answer": "AIRFRAME-256-D50-R0",
+      "pass": true,
+      "elapsed_s": 283.1,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 256,
+      "depth_pct": 90.0,
+      "run": 0,
+      "needle": "AIRFRAME-256-D90-R0",
+      "est_tokens": 224,
+      "status": "completed",
+      "answer": "AIRFRAME-256- D90-R0",
+      "pass": true,
+      "elapsed_s": 238.4,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    }
+  ]
+}

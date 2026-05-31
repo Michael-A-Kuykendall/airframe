@@ -313,8 +313,8 @@ fn run_inference_completion(
     let rep_penalty = req.repetition_penalty.unwrap_or(1.1);
     let use_stream = req.stream.unwrap_or(false) && stream_tx.is_some();
     let mut rng = Rng::new(req.seed.unwrap_or(42));
-    // SHIMMY_PREFILL_CHUNK defaults to 64 to avoid Windows TDR (each layer's attention
-    // dispatch must complete within ~2s; 512-token batches exceed that on RTX 3060 for 3B+ models).
+    // SHIMMY_PREFILL_CHUNK: token batch size for chunked prefill. Default 64 is conservative;
+    // with the AttnOut encoder isolation (A2 TDR fix) larger values should also be safe on Windows.
     let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -628,7 +628,7 @@ fn run_inference_completion(
                     prefill_chunk,
                 )
             };
-            eprintln!("[GPU Server] Prefill chunks done (path A), {} tokens.", prompt_tokens.len());
+
             let logits_a = if use_cpu_head {
                 cpu_head_logits(embd_table_cpu, &l21_a, spec.n_vocab, dim as usize, spec.final_logit_softcap)
             } else {
@@ -641,14 +641,12 @@ fn run_inference_completion(
                     cache.increment().map_err(|e| e)?;
                 }
                 if cache.is_int4() {
-                    eprintln!("[GPU Server] Requantize KV start (A), seq_len={}.", prompt_tokens.len());
                     pipeline.requantize_all_kv_int4(
                         device, queue, &cache,
                         spec.n_head_kv as u32, spec.head_dim as u32,
                         prompt_tokens.len() as u32, spec.n_layer,
                     );
                     device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during requantize poll (A)");
-                    eprintln!("[GPU Server] Requantize KV complete (A).");
                 }
             }
             logits_a
@@ -674,7 +672,7 @@ fn run_inference_completion(
                 prefill_chunk,
             )
         };
-        eprintln!("[GPU Server] Prefill chunks done (path B), {} tokens.", prompt_tokens.len());
+
         let logits_b = if use_cpu_head {
             cpu_head_logits(embd_table_cpu, &l21_b, spec.n_vocab, dim as usize, spec.final_logit_softcap)
         } else {
@@ -687,20 +685,18 @@ fn run_inference_completion(
                 cache.increment().map_err(|e| e)?;
             }
             if cache.is_int4() {
-                eprintln!("[GPU Server] Requantize KV start (B), seq_len={}.", prompt_tokens.len());
                 pipeline.requantize_all_kv_int4(
                     device, queue, &cache,
                     spec.n_head_kv as u32, spec.head_dim as u32,
                     prompt_tokens.len() as u32, spec.n_layer,
                 );
                 device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during requantize poll (B)");
-                eprintln!("[GPU Server] Requantize KV complete (B).");
             }
         }
         logits_b
     };
 
-    eprintln!("[GPU Server] Prefill complete. Cache info updated.");
+
 
     let mut logits_vec = prefill_logits_f32;
 
@@ -962,18 +958,6 @@ fn run_inference_completion(
                 dim,
             )
         };
-
-        // Debug: show top-5 logits for first decode step
-        if generated_count == 0 {
-            let mut indexed: Vec<(usize, f32)> = logits_vec.iter().copied().enumerate().collect();
-            indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            eprintln!("[DEBUG-DECODE0] normed_output L2={:.4}", normed_output.iter().map(|x| x*x).sum::<f32>().sqrt());
-            eprintln!("[DEBUG-DECODE0] Top-5 pre-cap decode logits:");
-            for (tok_id, logit) in indexed.iter().take(5) {
-                let piece = tokenizer.decode_single(*tok_id as u32, false).unwrap_or_default();
-                eprintln!("  id={} logit={:.4} text={:?}", tok_id, logit, piece);
-            }
-        }
 
         let (cache_len_after_step, window_base_after_step) = {
             let cache = kv_cache.lock().unwrap();
