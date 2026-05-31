@@ -872,49 +872,51 @@ impl BindlessPipeline {
         let wg_ffn  = (params.ffn_dim * 2 + 255) / 256;
         let wg_qknorm = (q_len + kv_len + 255) / 256;
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some(&format!("Layer {} INT4 Encoder", layer_idx)),
-        });
+        // --- Submit group 1: AttnNorm + QKV + QKNorm + QuantizeKV ---
+        // These are all O(dim) or O(n_heads) and finish well within the TDR window.
+        {
+            let mut enc1 = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("Layer {} INT4 Enc1", layer_idx)),
+            });
+            { let mut cp = enc1.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_attn_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
+            { let mut cp = enc1.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QKV"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_qkv); cp.dispatch_workgroups(wg_qkv, 1, 1); }
+            { let mut cp = enc1.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QKNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_qk_norm); cp.dispatch_workgroups(wg_qknorm, 1, 1); }
+            { let mut cp = enc1.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QuantizeKV"), timestamp_writes: None }); cp.set_bind_group(0, &quant_bg, &[]); cp.set_pipeline(&self.quantize_kv_pipeline); cp.dispatch_workgroups(params.head_count_kv, 1, 1); }
+            queue.submit(Some(enc1.finish()));
+            device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost in INT4 enc1 poll");
+        }
 
-        // Kernel 1: Attention norm
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_attn_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
+        // --- Submit group 2: AttnOutINT4 alone ---
+        // This kernel scales with seq_len and is the primary TDR risk at larger contexts.
+        // Isolated in its own submit so the TDR watchdog resets between group 1 and group 3.
+        {
+            let mut enc2 = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("Layer {} INT4 Enc2 AttnOut", layer_idx)),
+            });
+            { let mut cp = enc2.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnOutINT4"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg_int4, &[]); cp.set_pipeline(&self.layer_pipeline_attn_out_int4); cp.dispatch_workgroups(wg_dim, 1, 1); }
+            queue.submit(Some(enc2.finish()));
+            device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost in INT4 enc2 poll");
+        }
 
-        // Kernel 2: QKV → writes F32 K/V to staging (bindings 7/8)
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QKV"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_qkv); cp.dispatch_workgroups(wg_qkv, 1, 1); }
-
-        // Kernel 2.5: QK Norm (Qwen3; no-op when disabled)
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QKNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_qk_norm); cp.dispatch_workgroups(wg_qknorm, 1, 1); }
-
-        // Quantize KV: F32 staging → INT4 packed+scale at current_pos
-        // Dispatch (n_head_kv, 1, 1): each invocation handles one head-vector
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QuantizeKV"), timestamp_writes: None }); cp.set_bind_group(0, &quant_bg, &[]); cp.set_pipeline(&self.quantize_kv_pipeline); cp.dispatch_workgroups(params.head_count_kv, 1, 1); }
-
-        // Kernel 3: Attention (reads INT4 K/V from packed+scale) — uses INT4 bind group
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnOutINT4"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg_int4, &[]); cp.set_pipeline(&self.layer_pipeline_attn_out_int4); cp.dispatch_workgroups(wg_dim, 1, 1); }
-
-        // Kernel 4: Attention output projection
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnProj"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_attn_proj); cp.dispatch_workgroups(wg_dim, 1, 1); }
-
-        // Kernel 4.5: Post-attention norm (Gemma-2; no-op otherwise)
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("PostAttnNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_post_attn_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
-
-        // Kernel 5: FFN gate/up + SiLU
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("FFNProj"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_ffn_proj); cp.dispatch_workgroups(wg_ffn, 1, 1); }
-
-        // Kernel 6: FFN down + residual
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("FFNDown"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_ffn_down); cp.dispatch_workgroups(wg_dim, 1, 1); }
-
-        // Kernel 6.5: Post-FFW norm (Gemma-2; no-op otherwise)
-        { let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("PostFfwNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_post_ffw_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
-
+        // --- Submit group 3: AttnProj + PostAttnNorm + FFNProj + FFNDown + PostFfwNorm + copy ---
         let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Staging Buffer INT4"),
             size: dim * 4,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        encoder.copy_buffer_to_buffer(&activation_buffer, 0, &staging_buffer, 0, dim * 4);
-        queue.submit(Some(encoder.finish()));
+        {
+            let mut enc3 = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("Layer {} INT4 Enc3", layer_idx)),
+            });
+            { let mut cp = enc3.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnProj"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_attn_proj); cp.dispatch_workgroups(wg_dim, 1, 1); }
+            { let mut cp = enc3.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("PostAttnNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_post_attn_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
+            { let mut cp = enc3.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("FFNProj"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_ffn_proj); cp.dispatch_workgroups(wg_ffn, 1, 1); }
+            { let mut cp = enc3.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("FFNDown"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_ffn_down); cp.dispatch_workgroups(wg_dim, 1, 1); }
+            { let mut cp = enc3.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("PostFfwNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_post_ffw_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
+            enc3.copy_buffer_to_buffer(&activation_buffer, 0, &staging_buffer, 0, dim * 4);
+            queue.submit(Some(enc3.finish()));
+        }
 
         self.readback_helper(device, &staging_buffer)
     }
