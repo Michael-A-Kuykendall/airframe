@@ -5,4 +5,5 @@ pub mod ggml_types;
 pub mod model;
 pub mod spec;
 pub mod tensor;
+pub mod vision_model;
 pub mod weight_id;

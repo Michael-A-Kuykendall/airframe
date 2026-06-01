@@ -7,7 +7,7 @@
         "C:\\Users\\micha\\repos\\chat-chronicle\\dist\\mcp-server.js"
       ],
       "env": {
-        "CHAT_CHRONICLE_VAULT_PATH": "${env:APPDATA}/Code/User/globalStorage/chat-chronicle-local.chat-chronicle/chat-chronicle-vault.arrow"
+        "CHAT_CHRONICLE_VAULT_PATH": "${env:APPDATA}/Code/User/globalStorage/deltazerolabs.chat-chronicle/chat-chronicle-vault.arrow"
       }
     }
   }

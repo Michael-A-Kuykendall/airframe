@@ -1,4 +1,5 @@
 use crate::core::dequant::{dequantize_q4_k, dequantize_q6_k};
+use half::f16;
 use crate::core::ggml_types::{ggml_type_bytes_per_tensor, ggml_type_name, validate_tensor_bounds};
 use crate::core::{
     error::{LibshimmyError, Result},
@@ -190,6 +191,51 @@ impl Model {
 
         Ok(model)
     }
+}
+
+/// Parse a GGUF file that has no LLM metadata (e.g. mmproj vision encoder).
+///
+/// Returns `(tensor_infos, mmap, tensor_data_base_offset)` so callers can load
+/// individual tensors without needing `model_spec_from_metadata`.
+///
+/// Public so that `vision_model.rs` can use it.
+pub fn load_mmproj_gguf_raw<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Result<(Vec<GgufTensorInfo>, Mmap, u64)> {
+    let file = std::fs::File::open(&path).map_err(LibshimmyError::Io)?;
+    let file_len = file.metadata().map_err(LibshimmyError::Io)?.len();
+    let mmap = unsafe { Mmap::map(&file) }.map_err(|e| {
+        LibshimmyError::Io(std::io::Error::other(format!("mmap failed: {}", e)))
+    })?;
+
+    let mut cursor = std::io::Cursor::new(&mmap[..]);
+    let header = parse_gguf_header(&mut cursor)?;
+
+    println!(
+        "📁 mmproj: {} bytes ({:.1} MB), {} tensors",
+        file_len, file_len as f64 / 1_048_576.0, header.tensor_count
+    );
+
+    let metadata = parse_metadata(&mut cursor, header.metadata_kv_count)?;
+    let tensor_infos =
+        parse_tensor_infos_with_validation(&mut cursor, header.tensor_count, file_len)?;
+
+    let alignment = get_general_alignment(&metadata, None).unwrap_or(32);
+    let raw_offset = cursor.position();
+    let tensor_data_base_offset = align_up(raw_offset, alignment)?;
+
+    Ok((tensor_infos, mmap, tensor_data_base_offset))
+}
+
+/// Load (and dequantize / convert) a single tensor from an mmapped GGUF.
+///
+/// Public so that `vision_model.rs` can load individual vision tensors.
+pub fn load_vision_tensor(
+    tensor_info: &GgufTensorInfo,
+    mmap: &Mmap,
+    tensor_data_base_offset: u64,
+) -> Result<Tensor> {
+    load_tensor_by_type(tensor_info, mmap, tensor_data_base_offset)
 }
 
 /// Parse GGUF file header
@@ -1106,7 +1152,7 @@ fn load_tensor_by_type(
     tensor_data_base_offset: u64,
 ) -> Result<Tensor> {
     match tensor_info.ggml_type {
-        0 => {
+        0 => { // F32
             // F32: raw little-endian floats
             let total_elements: usize = tensor_info.dimensions.iter().product();
             let byte_len =
@@ -1133,6 +1179,24 @@ fn load_tensor_by_type(
             for chunk in bytes.chunks_exact(4) {
                 out.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
             }
+            Tensor::new(out, tensor_info.dimensions.clone())
+        }
+        1 => { // F16 — convert IEEE 754 half-precision to f32
+            let total_elements: usize = tensor_info.dimensions.iter().product();
+            let byte_len = total_elements.checked_mul(2).ok_or_else(|| LibshimmyError::FixtureError {
+                msg: format!("F16 byte length overflow for tensor '{}': {:?}", tensor_info.name, tensor_info.dimensions),
+            })?;
+            let data_start = (tensor_data_base_offset + tensor_info.offset) as usize;
+            let data_end = data_start + byte_len;
+            ensure!(
+                data_end <= mmap.len(),
+                "Tensor '{}' extends beyond file (F16): end={} > file_len={}",
+                tensor_info.name, data_end, mmap.len()
+            );
+            let bytes = &mmap[data_start..data_end];
+            let out: Vec<f32> = bytes.chunks_exact(2)
+                .map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32())
+                .collect();
             Tensor::new(out, tensor_info.dimensions.clone())
         }
         2 => dequantize_q4_0(tensor_info, mmap, tensor_data_base_offset),

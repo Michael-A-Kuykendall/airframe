@@ -1,21 +1,23 @@
 //! SigLIP-So400M Vision Transformer encoder for MiniCPM-V-2.6.
 //!
-//! Architecture (from `config.json` on HuggingFace):
+//! Architecture (from GGUF tensor map — `mmproj-model-f16.gguf`):
 //!   hidden_dim  = 1152
 //!   n_layers    = 27
 //!   n_heads     = 16   (head_dim = 72)
-//!   mlp_dim     = 4304 (intermediate_size)
+//!   mlp_dim     = 4304
 //!   patch_size  = 14
 //!   image_size  = 448
 //!   n_patches   = (448/14)^2 = 1024
-//!   pos_embed   = [1, 1025, 1152]  (CLS + 1024 patches)
+//!   pos_embed   = [4900, 1152]  (NO CLS; sliced to n_patches at runtime)
 //!
 //! Key differences from the LLM (LlamaModel):
 //!   - LayerNorm (not RMSNorm)
 //!   - GELU activation (not SwiGLU)
 //!   - Q/K/V projections have bias terms
 //!   - Bidirectional attention (no causal mask)
-//!   - No RoPE (positional info via learned pos_embed added before blocks)
+//!   - NO CLS token — SigLIP uses all patch features
+//!   - NO pre-encoder LayerNorm (only v.post_ln applied after blocks)
+//!   - Positional embedding via learned `v.position_embd.weight` [4900, 1152]
 
 use crate::core::{error::Result, tensor::Tensor};
 use crate::ops::dispatch::OpDispatcher;
@@ -130,29 +132,29 @@ impl SigLipBlock {
 
 /// SigLIP-So400M image encoder.
 ///
-/// Processes one 448×448 image tile into a sequence of 1025 feature vectors
-/// ([CLS, patch_0, …, patch_1023], shape [1025, 1152]).
+/// Processes one 448×448 image tile into a sequence of 1024 feature vectors
+/// (patch_0, …, patch_1023), shape [1024, 1152].
+///
+/// Key differences from the HuggingFace config assumption:
+///   - No CLS token — SigLIP uses all patch features directly
+///   - Positional embedding is [4900, 1152] (supports up to 70×70 tiles);
+///     sliced to n_patches at runtime
+///   - No pre-encoder LayerNorm; only post-encoder LayerNorm (v.post_ln)
 ///
 /// Multiple tiles are processed independently; the Resampler then aggregates
 /// them into 64 visual tokens per tile.
 pub struct SigLipEncoder {
     // Patch embedding
-    pub patch_weight: Tensor,  // [1152, 3, 14, 14]
-    pub patch_bias:   Tensor,  // [1152]
+    pub patch_weight: Tensor,  // [1152, 3, 14, 14] — v.patch_embd.weight
 
-    // CLS token (learned, prepended before position embedding)
-    pub cls_token: Tensor,     // [1, 1152]
+    pub patch_bias:   Tensor,  // [1152]            — v.patch_embd.bias
 
-    // Learned positional embedding
-    pub pos_embed: Tensor,     // [1, 1025, 1152]
+    // Learned positional embedding — sliced to [n_patches, 1152] at runtime
+    pub pos_embed: Tensor,     // [4900, 1152]       — v.position_embd.weight
 
-    // Pre-encoder LayerNorm (applied before the 27 blocks)
-    pub pre_ln_weight: Tensor, // [1152]
-    pub pre_ln_bias:   Tensor, // [1152]
-
-    // Post-encoder LayerNorm (applied after all 27 blocks)
-    pub post_ln_weight: Tensor, // [1152]
-    pub post_ln_bias:   Tensor, // [1152]
+    // Post-encoder LayerNorm (no pre-LN in this model)
+    pub post_ln_weight: Tensor, // [1152]            — v.post_ln.weight
+    pub post_ln_bias:   Tensor, // [1152]            — v.post_ln.bias
 
     // Transformer blocks
     pub layers: Vec<SigLipBlock>,
@@ -166,9 +168,14 @@ impl SigLipEncoder {
     /// `image_pixels`: `[3, 448, 448]` float32, normalised to SigLIP mean/std
     /// (mean=0.5, std=0.5 → range ≈ [−1, 1]).
     ///
-    /// Returns `[1025, 1152]` — CLS token + 1024 patch features.
-    /// The Resampler (Phase 2.2) then compresses these 1025 vectors into 64.
+    /// Returns `[n_patches, 1152]` — 1024 patch features (no CLS token).
+    /// The Resampler (Phase 2.2) then compresses these into 64 visual tokens.
     pub fn forward(&self, image_pixels: &Tensor, ops: &OpDispatcher) -> Result<Tensor> {
+        let n_patches = {
+            let h = self.cfg.image_size / self.cfg.patch_size;
+            h * h  // (448/14)^2 = 1024
+        };
+
         // 1. Patch embedding: [3, 448, 448] → [1024, 1152]
         let patches = ops.patch_embed(
             image_pixels,
@@ -177,27 +184,23 @@ impl SigLipEncoder {
             self.cfg.patch_size,
         )?;
 
-        // 2. Prepend CLS token: [1024, 1152] → [1025, 1152]
-        let mut seq_data = Vec::with_capacity(1025 * self.cfg.hidden_dim);
-        seq_data.extend_from_slice(&self.cls_token.data);
-        seq_data.extend_from_slice(&patches.data);
-        let mut x = Tensor::new(seq_data, vec![1025, self.cfg.hidden_dim])?;
+        // 2. Slice positional embedding to [n_patches, hidden_dim] and add
+        //    pos_embed is stored as [4900, 1152]; we take the first n_patches rows.
+        let pos_slice_data = self.pos_embed.data[..n_patches * self.cfg.hidden_dim].to_vec();
+        let pos_slice = Tensor::new(pos_slice_data, vec![n_patches, self.cfg.hidden_dim])?;
+        let mut x = ops.add(&patches, &pos_slice)?;
 
-        // 3. Add positional embedding: [1, 1025, 1152] + [1025, 1152] → [1025, 1152]
-        x = ops.add_broadcast(&self.pos_embed, &x)?;
+        // 3. No pre-encoder LayerNorm in this model (v.post_ln only)
 
-        // 4. Pre-encoder LayerNorm
-        x = ops.layernorm(&x, &self.pre_ln_weight, Some(&self.pre_ln_bias), self.cfg.layer_norm_eps)?;
-
-        // 5. 27 transformer blocks
+        // 4. 27 transformer blocks
         for layer in &self.layers {
             x = layer.forward(&x, ops, &self.cfg)?;
         }
 
-        // 6. Post-encoder LayerNorm
+        // 5. Post-encoder LayerNorm
         x = ops.layernorm(&x, &self.post_ln_weight, Some(&self.post_ln_bias), self.cfg.layer_norm_eps)?;
 
-        Ok(x) // [1025, 1152]
+        Ok(x) // [1024, 1152]
     }
 }
 
