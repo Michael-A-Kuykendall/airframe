@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.1] — 2026-06-02
+
+### Fixed
+
+- **wgpu 27 staging-buffer panic on non-Gemma models** (shimmy#205).  
+  Two root causes:
+  1. `GpuRuntime::load()` set `max_buffer_size` to `max_storage_buffer_binding_size`.
+     On some older GPU/driver stacks (e.g. GTX 1050 Ti) these limits differ, causing
+     a wgpu validation error when the 608 MB model buffer was created. Now uses
+     `adapter_limits.max_buffer_size` instead.
+  2. A pre-flight size guard now returns a clear `Err` if the model file exceeds the
+     GPU's storage-buffer binding limit, instead of letting wgpu defer the error to a
+     later `map_async` call (where it appeared as a cryptic "Staging Buffer is invalid"
+     panic in wgpu 27).
+- **Spurious WARNING logs for standard Llama/Mistral/Phi/Qwen models**.  
+  `post_attention_norm` and `post_ffw_norm` tensors only exist in Gemma / Gemma2
+  architectures. Absence warnings are now suppressed for all other model families.
+- Added `device.on_uncaptured_error` handler so any future wgpu validation errors
+  produce a descriptive `[Airframe] GPU error:` message instead of a fatal panic.
+
+---
+
 ## [0.2.0] — 2026-05-31
 
 ### The headline: TurboShimmy INT4 KV cache

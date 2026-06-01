@@ -104,9 +104,29 @@ impl GpuRuntime {
             .map_err(|e| format!("No GPU adapter found: {}", e))?;
 
         let adapter_limits = adapter.limits();
+
+        // Pre-flight: check that the model file fits within the GPU's storage buffer binding
+        // limit before uploading. Older GPUs (e.g. GTX 1050 Ti on some drivers) may report
+        // a lower limit than the model requires, causing a deferred wgpu validation panic.
+        let model_file_size = std::fs::metadata(model_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let max_binding = adapter_limits.max_storage_buffer_binding_size as u64;
+        if model_file_size > max_binding {
+            return Err(format!(
+                "Model file ({:.0} MB) exceeds this GPU's storage buffer binding limit \
+                 ({:.0} MB). Try a more quantized model or update your GPU drivers.",
+                model_file_size as f64 / 1_048_576.0,
+                max_binding as f64 / 1_048_576.0,
+            ).into());
+        }
+
         let mut limits = wgpu::Limits::downlevel_defaults();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
-        limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
+        // Use the adapter's true max_buffer_size, not max_storage_buffer_binding_size.
+        // On older GPUs these can differ, and capping max_buffer_size to the binding size
+        // causes validation errors when creating large model buffers.
+        limits.max_buffer_size = adapter_limits.max_buffer_size;
         limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
         limits.max_compute_invocations_per_workgroup = 256;
 
@@ -117,6 +137,12 @@ impl GpuRuntime {
                 ..Default::default()
             })
             .await?;
+
+        // Register an error handler so wgpu validation errors surface as descriptive
+        // messages rather than the wgpu 27 default fatal panic.
+        device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
+            eprintln!("[Airframe] GPU error: {}", error);
+        }));
 
         // Load model
         let tokenizer = Tokenizer::from_gguf_file(&model_path_str)?;

@@ -156,8 +156,17 @@ impl PreflightResources {
             total_size as f64 / 1024.0 / 1024.0
         );
 
-        // Helper to copy
-        let mut copy_tensor = |name: &str, dest_offset_bytes: usize| {
+        // post_attention_norm / post_ffw_norm only exist in Gemma / Gemma2 architectures.
+        // For all other models (Llama, Mistral, Phi, Qwen…) their absence is expected and
+        // should not produce a warning.
+        let has_post_norms = matches!(
+            spec.arch,
+            crate::core::spec::ModelArch::Gemma
+                | crate::core::spec::ModelArch::Other(_)
+        );
+
+        // Helper to copy — warn on missing only when `warn` is true.
+        let mut copy_tensor_inner = |name: &str, dest_offset_bytes: usize, warn: bool| {
             if let Some(offset) = metadata.get_tensor_offset(name) {
                 let start = offset as usize;
                 let end = start + (block_size as usize);
@@ -167,7 +176,7 @@ impl PreflightResources {
                     bank[dest_offset_bytes..dest_offset_bytes + (block_size as usize)]
                         .copy_from_slice(&raw_data[start..end]);
                 }
-            } else {
+            } else if warn {
                 eprintln!("WARNING: Missing Norm Tensor {}", name);
             }
         };
@@ -179,15 +188,15 @@ impl PreflightResources {
             let post_ffw_name = format!("blk.{}.post_ffw_norm.weight", i);
 
             let layer_base = i * 4 * (block_size as usize);
-            copy_tensor(&attn_name, layer_base);
-            copy_tensor(&ffn_name, layer_base + (block_size as usize));
-            copy_tensor(&post_attn_name, layer_base + 2 * (block_size as usize));
-            copy_tensor(&post_ffw_name, layer_base + 3 * (block_size as usize));
+            copy_tensor_inner(&attn_name, layer_base, true);
+            copy_tensor_inner(&ffn_name, layer_base + (block_size as usize), true);
+            copy_tensor_inner(&post_attn_name, layer_base + 2 * (block_size as usize), has_post_norms);
+            copy_tensor_inner(&post_ffw_name, layer_base + 3 * (block_size as usize), has_post_norms);
         }
 
         // Final Norm
         let final_base = n_layers * 4 * (block_size as usize);
-        copy_tensor("output_norm.weight", final_base);
+        copy_tensor_inner("output_norm.weight", final_base, true);
 
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Norm Bank"),
