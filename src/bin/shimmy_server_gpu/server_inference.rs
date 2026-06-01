@@ -7,24 +7,15 @@ use super::*;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
-use airframe::core::dequant::{
-    dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0,
-};
-use airframe::core::model::GgufTensorInfo;
-use airframe::core::spec::{GgufValue, ModelSpec};
+use airframe::core::spec::ModelSpec;
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace, TokenTrace,
 };
 use libfse::metrics::{
     logit_l2_norm, logit_variance, max_probability_from_logits, shannon_entropy_from_logits,
 };
-use memmap2::Mmap;
 use schoolmarm::{Grammar, GrammarState};
-use serde::{Deserialize, Serialize};
 use shimmytok::{EncodeOptions, Tokenizer};
-use std::io::Write;
-use std::net::TcpStream;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 struct Rng(u64);

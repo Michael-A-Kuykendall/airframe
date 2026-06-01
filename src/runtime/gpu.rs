@@ -107,7 +107,7 @@ impl GpuRuntime {
         let mut limits = wgpu::Limits::downlevel_defaults();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
         limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
-        limits.max_storage_buffers_per_shader_stage = 14; // INT4 KV layout uses 11 storage buffers
+        limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
         limits.max_compute_invocations_per_workgroup = 256;
 
         let (device, queue) = adapter

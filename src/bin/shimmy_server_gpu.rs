@@ -3,23 +3,13 @@
 
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
-use airframe::backend::bindless::pipeline::{
-    BindlessPipeline, LayerParams, RMSNormParams,
-};
+use airframe::backend::bindless::pipeline::BindlessPipeline;
 use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0};
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
-use airframe::debug_trace::{
-    topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace,
-    TokenTrace,
-};
 use aho_corasick::AhoCorasick;
-use libfse::metrics::{
-    logit_l2_norm, logit_variance, max_probability_from_logits, shannon_entropy_from_logits,
-};
 use std::sync::OnceLock;
 use memmap2::Mmap;
-use schoolmarm::{Grammar, GrammarState};
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
 use shimmyjinja;
@@ -146,11 +136,7 @@ const TM_CHATML_START:  usize = 4; // <|im_start|>
 const TM_CHATML_END:    usize = 5; // <|im_end|>
 const TM_TINY_USER:     usize = 6; // <|user|>
 const TM_TINY_ASST:     usize = 7; // <|assistant|>
-// Model-name markers (TM_LLAMA3_NAME..TM_GEMMA_NAME)
-const TM_LLAMA3_SPACE:  usize = 8;  // "llama 3"
-const TM_LLAMA3_DASH:   usize = 9;  // "llama-3"
-const TM_TINYLLAMA:     usize = 10; // "tinyllama"
-const TM_GEMMA_NAME:    usize = 11; // "gemma"
+
 
 /// Single Aho-Corasick automaton covering all template + model-name markers.
 /// Built once, reused for every model load.
@@ -477,7 +463,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
     limits.max_buffer_size = adapter_limits.max_buffer_size;
-    limits.max_storage_buffers_per_shader_stage = 14; // INT4 KV layout uses 11 storage buffers
+    limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
     limits.max_compute_invocations_per_workgroup = 256;
 
     let (device, queue) = adapter

@@ -117,7 +117,7 @@ $Failed  = 0
 
 for ($i = 0; $i -lt $Requests; $i++) {
     $Prompt = $Prompts[$i % $Prompts.Count]
-    Write-Host "[SOAK] Request $($i+1)/$Requests: `"$Prompt`"" -ForegroundColor Cyan
+    Write-Host "[SOAK] Request $($i+1)/$($Requests): `"$Prompt`"" -ForegroundColor Cyan
 
     $Body = @{
         model    = "airframe"
