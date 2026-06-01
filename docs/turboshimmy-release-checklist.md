@@ -14,8 +14,8 @@
       the largest validated INT4 model; running ctx=512 now.
 - [ ] Write `tests/int4_kv_parity.rs`: requires GPU `BindlessPipeline` in test context;
       skeleton written, GPU init needed — track as separate engineering task
-- [ ] Battery (math_battery.py) on Llama-3.2-3B F32 vs INT4: no regression in pass rate
-      (current F32 baseline: 4/4)
+- [x] Battery (math_battery.py) on Llama-3.2-3B F32 vs INT4: no regression in pass rate
+      F32 baseline: 4/4 | INT4: 4/4 ✅ (battery_int4_20260530_2229.txt — KV INT4 confirmed)
 
 ### Stability
 - [ ] Server survives 10 consecutive requests at ctx=2048 in INT4 mode without crash or hang
@@ -35,8 +35,8 @@
 ### API surface
 - [x] `SHIMMY_KV_QUANT` documented in README under "Memory Optimization" section ✅
 - [x] `SHIMMY_PREFILL_CHUNK` and `SHIMMY_MAX_CTX` documented in README ✅
-- [ ] `SHIMMY_KV_QUANT=int4` emits a clear startup error if model `head_dim` is not a
-      multiple of 2 (nibble packing assumption) — currently silent wrong behavior
+- [x] `SHIMMY_KV_QUANT=int4` emits a clear startup error if model `head_dim` is not a
+      multiple of 2 (nibble packing assumption) ✅ `3f55286`
 - [x] `/v1/models` response includes `"kv_mode": "int4"` or `"f32"` field ✅
 
 ### Observability
@@ -100,11 +100,12 @@
 | Server diagnostic noise removed | ✅ `650652e` |
 | 7B model smoke test | ✅ 10/11 PASS (`smoke_20260531_155033.csv`) |
 | `cargo publish --dry-run` | ✅ `7bcb3cc` |
-| Needle bench ctx=512 on 7B INT4 | ⏳ |
+| Needle bench ctx=512 on Llama-3B INT4 | 🔄 running |
 | INT4 parity unit test | ❌ |
 | Perplexity bench script | ❌ |
 | README TurboShimmy section | ✅ `741a45c` |
 | Startup KV mode log line | ✅ already in `ade5e57` |
 | `/v1/models` kv_mode field | ✅ `741a45c` |
 | Version bump to 0.2.0 | ✅ `741a45c` |
+| P1: head_dim guard (`3f55286`) | ✅ |
 | Master merge + tag | ❌ |
