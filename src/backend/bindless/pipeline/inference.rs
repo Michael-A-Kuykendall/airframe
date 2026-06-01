@@ -48,6 +48,7 @@ impl BindlessPipeline {
             None,
             spec,
         )
+        .expect("GPU forward pass failed")
         .2
     }
 
@@ -62,7 +63,7 @@ impl BindlessPipeline {
         kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
         spec: &ModelSpec,
         chunk_tokens: u32,
-    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
         let dim = spec.n_embd;
         assert!(dim > 0, "spec.n_embd must be > 0");
         assert!(input_embd.len() % dim == 0, "input_embd must align to token rows");
@@ -85,6 +86,7 @@ impl BindlessPipeline {
                 kv_state,
                 spec,
             );
+            // ^ Return type is now Result, so this propagates Ok or Err correctly.
         }
 
         let chunk_rows = chunk_tokens as usize;
@@ -117,7 +119,7 @@ impl BindlessPipeline {
                 chunk_seq_len,
                 kv_state,
                 spec,
-            ));
+            )?);
 
             if trace_chunks {
                 eprintln!("[PREFILL] chunk={} complete", chunk_idx);
@@ -127,7 +129,7 @@ impl BindlessPipeline {
             chunk_idx += 1;
         }
 
-        last_result.expect("chunked prefill should produce at least one chunk result")
+        last_result.ok_or_else(|| "chunked prefill produced no chunks".to_string())
     }
 
     pub fn run_full_model_with_cache_state(
@@ -141,7 +143,7 @@ impl BindlessPipeline {
         seq_len: u32,
         kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
         spec: &ModelSpec,
-    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
         // Derive all constants from ModelSpec
         let dim = spec.n_embd as u32;
         let layer_count = spec.n_layer;
@@ -607,16 +609,6 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             
-            // TDR Mitigation: submit and WAIT for each layer before encoding the next.
-            // poll(Wait) blocks until the GPU finishes this layer's work, guaranteeing no
-            // single GPU timeline slot exceeds Windows' ~2s TDR watchdog window.
-            queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost or TDR timeout during layer wait");
-
-            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Execute Batch Cont"),
-            });
-
             if trace_prefill_layers {
                 eprintln!("[PREFILL-LAYER] complete layer={}", i);
             }
@@ -683,23 +675,24 @@ impl BindlessPipeline {
         let mut main_done = false;
 
         loop {
-            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            device.poll(wgpu::PollType::Poll)
+                .map_err(|_| "GPU device lost during readback poll".to_string())?;
             
             if !pre_done {
                 if let Ok(res) = rx_pre.try_recv() {
-                    res.expect("Pre-norm buffer map failed. Device lost or TDR timeout.");
+                    res.map_err(|_| "Pre-norm buffer map failed. Device lost or TDR timeout.".to_string())?;
                     pre_done = true;
                 }
             }
             if !l21_done {
                 if let Ok(res) = rx_l21.try_recv() {
-                    res.expect("L21 buffer map failed. Device lost or TDR timeout.");
+                    res.map_err(|_| "L21 buffer map failed. Device lost or TDR timeout.".to_string())?;
                     l21_done = true;
                 }
             }
             if !main_done {
                 if let Ok(res) = rx.try_recv() {
-                    res.expect("Buffer map failed. Device lost or TDR timeout.");
+                    res.map_err(|_| "Buffer map failed. Device lost or TDR timeout.".to_string())?;
                     main_done = true;
                 }
             }
@@ -724,6 +717,6 @@ impl BindlessPipeline {
         drop(data);
         staging_buffer.unmap();
 
-        (pre_norm_result, l21_result, result)
+        Ok((pre_norm_result, l21_result, result))
     }
 }

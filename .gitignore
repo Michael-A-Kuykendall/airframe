@@ -24,6 +24,10 @@ vendor/human-eval/
 # Local environment
 .venv/
 
+# bd / beads issue tracker (local-only, never committed)
+.beads/
+AGENTS.md
+
 # Smoke test run artifacts (timestamped CSVs and logs)
 artifacts/model_smoke/smoke_*.csv
 artifacts/model_smoke/smoke_*.log

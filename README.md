@@ -150,6 +150,39 @@ Full architecture reference: [`docs/architecture-map.md`](docs/architecture-map.
 
 ---
 
+## Memory Optimization (TurboShimmy INT4 KV Cache)
+
+Airframe includes an optional INT4 KV cache compression system — **TurboShimmy** — that reduces KV cache VRAM usage by ~7× at the cost of minor numeric rounding during attention. It uses per-head-vector bias-8 nibble encoding and is transparent to callers.
+
+**Enable it** by setting `SHIMMY_KV_QUANT=int4` before starting the server:
+
+```bash
+SHIMMY_KV_QUANT=int4 LIBSHIMMY_MODEL_PATH=/path/to/model.gguf \
+  cargo run --bin shimmy_server_gpu --release
+```
+
+**VRAM savings** (Llama-3.2-3B, `ctx=2048`):
+
+| Mode | KV cache VRAM |
+|---|---|
+| F32 (default) | ~512 MB |
+| INT4 (TurboShimmy) | ~72 MB |
+
+**Quality impact**: needle-in-a-haystack retrieval shows zero degradation at ctx≤256 vs F32 on Llama-3.2-3B (see [`docs/turboshimmy.md`](docs/turboshimmy.md) for full results). Recommended as a memory optimization for short-to-medium context workloads. Leave F32 as default for long-context quality-critical use.
+
+**Server environment variables**:
+
+| Variable | Default | Description |
+|---|---|---|
+| `LIBSHIMMY_MODEL_PATH` | *(required)* | Path to `.gguf` model file |
+| `SHIMMY_PORT` | `8080` | HTTP listener port |
+| `SHIMMY_MAX_CTX` | `2048` | Maximum context window (tokens) |
+| `SHIMMY_PREFILL_CHUNK` | `64` | Prefill batch size; reduce if you see TDR crashes on Windows |
+| `SHIMMY_KV_QUANT` | `f32` | KV cache mode: `f32` or `int4` (TurboShimmy) |
+| `SHIMMY_VRAM_LIMIT_MB` | `10500` | VRAM budget warning threshold (MB); tune for your GPU |
+
+---
+
 ## Benchmarks
 
 Airframe has been validated on standard LLM evaluation benchmarks. Results are tracked in [`artifacts/`](artifacts/).
@@ -176,7 +209,7 @@ cargo test
 cargo run --example simple_flight  # requires LIBSHIMMY_MODEL_PATH
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ---
 

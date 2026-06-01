@@ -6,7 +6,7 @@ members = ["crates/libfse"]
 
 [package]
 name = "airframe"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Pure-Rust WebGPU inference engine for GGUF models. No C++ toolchain, no llama.cpp. Runs on NVIDIA, AMD, Intel, and Apple Silicon via wgpu."
 license = "MIT"
@@ -37,7 +37,7 @@ libfse = { path = "crates/libfse", version = "0.1.3" }
 schoolmarm = "0.1.1"
 sha2 = "0.10"
 aho-corasick = { version = "1.1", features = ["std"] }
-shimmyjinja = { path = "../shimmyjinja" }
+shimmyjinja = { path = "../shimmyjinja", version = "0.5.0" }
 
 [dev-dependencies]
 sha2 = "0.10"

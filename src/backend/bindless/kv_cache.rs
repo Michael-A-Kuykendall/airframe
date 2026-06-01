@@ -1,5 +1,6 @@
 // GPU KV Cache Implementation for Transformer Inference
 // Phase 4A: F32 Cache Architecture (704 MB VRAM)
+// TurboQuant: INT4 packed+scale buffers (feat/turboquant-wgsl)
 
 use wgpu;
 
@@ -20,6 +21,20 @@ pub struct KVCache {
 
     /// V buffers: One per layer [n_head_kv, max_seq, head_dim] in F32
     v_buffers: Vec<wgpu::Buffer>,
+
+    /// INT4 packed K nibbles: One per layer [max_seq, n_head_kv, head_dim/8] in U32
+    /// Each U32 holds 8 nibbles (bias-8 encoded). Allocated only in INT4 mode.
+    k_packed_buffers: Option<Vec<wgpu::Buffer>>,
+
+    /// INT4 packed V nibbles: same layout as k_packed_buffers
+    v_packed_buffers: Option<Vec<wgpu::Buffer>>,
+
+    /// Per-head-vector K scale: One per layer [max_seq, n_head_kv] in F32
+    /// scale = max_abs / 7.0 for the corresponding head-vector.
+    k_scale_buffers: Option<Vec<wgpu::Buffer>>,
+
+    /// Per-head-vector V scale: same layout as k_scale_buffers
+    v_scale_buffers: Option<Vec<wgpu::Buffer>>,
 
     /// Current sequence length (number of tokens cached)
     seq_len: u32,
@@ -66,6 +81,28 @@ impl KVCache {
         head_dim: u32,
         max_seq_len: u32,
     ) -> Self {
+        Self::new_inner(device, n_layers, n_head_kv, head_dim, max_seq_len, false)
+    }
+
+    /// Create KV cache with INT4 packed+scale buffers enabled.
+    pub fn new_int4(
+        device: &wgpu::Device,
+        n_layers: usize,
+        n_head_kv: u32,
+        head_dim: u32,
+        max_seq_len: u32,
+    ) -> Self {
+        Self::new_inner(device, n_layers, n_head_kv, head_dim, max_seq_len, true)
+    }
+
+    fn new_inner(
+        device: &wgpu::Device,
+        n_layers: usize,
+        n_head_kv: u32,
+        head_dim: u32,
+        max_seq_len: u32,
+        enable_int4: bool,
+    ) -> Self {
         // Buffer size per layer: [max_seq, n_head_kv, head_dim] in F32
         // Layout: position-major for cache append efficiency
         let buffer_size = (max_seq_len * n_head_kv * head_dim * 4) as u64;
@@ -107,6 +144,72 @@ impl KVCache {
             })
             .collect();
 
+        // INT4 packed buffers: head_dim elements × 4 bits = head_dim/2 bytes per head-vector.
+        // Stored as U32 arrays: head_dim/8 U32s per head-vector.
+        // Layout per layer: [max_seq_len, n_head_kv, head_dim/8] U32.
+        let (k_packed_buffers, v_packed_buffers, k_scale_buffers, v_scale_buffers) =
+            if enable_int4 {
+                assert!(
+                    head_dim % 8 == 0,
+                    "head_dim must be divisible by 8 for INT4 packing (got {})",
+                    head_dim
+                );
+                // packed: head_dim nibbles per head-vector = head_dim/8 U32s per head-vector
+                let packed_size =
+                    (max_seq_len * n_head_kv * (head_dim / 8) * 4) as u64;
+                // scale: one F32 per head-vector per position
+                let scale_size = (max_seq_len * n_head_kv * 4) as u64;
+
+                eprintln!(
+                    "  INT4 packed buf/layer: {} bytes ({:.2} MB)",
+                    packed_size,
+                    packed_size as f64 / 1_048_576.0
+                );
+                eprintln!(
+                    "  INT4 scale buf/layer:  {} bytes ({:.2} KB)",
+                    scale_size,
+                    scale_size as f64 / 1024.0
+                );
+
+                let mk_packed = |prefix: &str| -> Vec<wgpu::Buffer> {
+                    (0..n_layers)
+                        .map(|i| {
+                            device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some(&format!("KV_Cache_{}_Packed_Layer_{}", prefix, i)),
+                                size: packed_size,
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                                mapped_at_creation: false,
+                            })
+                        })
+                        .collect()
+                };
+                let mk_scale = |prefix: &str| -> Vec<wgpu::Buffer> {
+                    (0..n_layers)
+                        .map(|i| {
+                            device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some(&format!("KV_Cache_{}_Scale_Layer_{}", prefix, i)),
+                                size: scale_size,
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                                mapped_at_creation: false,
+                            })
+                        })
+                        .collect()
+                };
+
+                (
+                    Some(mk_packed("K")),
+                    Some(mk_packed("V")),
+                    Some(mk_scale("K")),
+                    Some(mk_scale("V")),
+                )
+            } else {
+                (None, None, None, None)
+            };
+
         let total_vram = buffer_size * (n_layers as u64) * 2;
         eprintln!(
             "  Total VRAM allocated: {} bytes ({:.2} MB)",
@@ -117,6 +220,10 @@ impl KVCache {
         Self {
             k_buffers,
             v_buffers,
+            k_packed_buffers,
+            v_packed_buffers,
+            k_scale_buffers,
+            v_scale_buffers,
             seq_len: 0,
             window_base: 0,
             max_seq_len,
@@ -200,6 +307,47 @@ impl KVCache {
     /// * `layer` - Layer index (0..n_layers)
     pub fn get_v_buffer(&self, layer: usize) -> &wgpu::Buffer {
         &self.v_buffers[layer]
+    }
+
+    /// Get INT4 packed K buffer for a specific layer. Panics if INT4 mode not enabled.
+    pub fn get_k_packed_buffer(&self, layer: usize) -> &wgpu::Buffer {
+        self.k_packed_buffers
+            .as_ref()
+            .expect("KVCache: get_k_packed_buffer called but INT4 buffers not allocated")
+            .get(layer)
+            .expect("KVCache: layer index out of range for k_packed_buffers")
+    }
+
+    /// Get INT4 packed V buffer for a specific layer. Panics if INT4 mode not enabled.
+    pub fn get_v_packed_buffer(&self, layer: usize) -> &wgpu::Buffer {
+        self.v_packed_buffers
+            .as_ref()
+            .expect("KVCache: get_v_packed_buffer called but INT4 buffers not allocated")
+            .get(layer)
+            .expect("KVCache: layer index out of range for v_packed_buffers")
+    }
+
+    /// Get K scale buffer for a specific layer. Panics if INT4 mode not enabled.
+    pub fn get_k_scale_buffer(&self, layer: usize) -> &wgpu::Buffer {
+        self.k_scale_buffers
+            .as_ref()
+            .expect("KVCache: get_k_scale_buffer called but INT4 buffers not allocated")
+            .get(layer)
+            .expect("KVCache: layer index out of range for k_scale_buffers")
+    }
+
+    /// Get V scale buffer for a specific layer. Panics if INT4 mode not enabled.
+    pub fn get_v_scale_buffer(&self, layer: usize) -> &wgpu::Buffer {
+        self.v_scale_buffers
+            .as_ref()
+            .expect("KVCache: get_v_scale_buffer called but INT4 buffers not allocated")
+            .get(layer)
+            .expect("KVCache: layer index out of range for v_scale_buffers")
+    }
+
+    /// Returns true if this cache was allocated with INT4 packed+scale buffers.
+    pub fn is_int4(&self) -> bool {
+        self.k_packed_buffers.is_some()
     }
 
     /// Get maximum sequence length (context window size)
