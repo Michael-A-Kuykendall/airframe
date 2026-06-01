@@ -122,7 +122,7 @@ for ($i = 0; $i -lt $Requests; $i++) {
     $Body = @{
         model    = "airframe"
         messages = @(@{ role = "user"; content = $Prompt })
-        max_tokens = 64
+        max_tokens = 16
         temperature = 0.0
     } | ConvertTo-Json -Depth 5
 
