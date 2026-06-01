@@ -265,7 +265,7 @@ impl GpuRuntime {
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 &self.spec,
                 128,
-            )
+            )?
         };
 
         // Advance KV cache position

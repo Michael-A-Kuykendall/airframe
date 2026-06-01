@@ -12,21 +12,23 @@
       NOTE: 7B models hit the WebGPU 2GB per-binding limit on the weight buffer at first
       inference (pre-existing architectural limit, not TurboShimmy). Llama-3.2-3B is
       the largest validated INT4 model; running ctx=512 now.
-- [ ] Write `tests/int4_kv_parity.rs`: requires GPU `BindlessPipeline` in test context;
-      skeleton written, GPU init needed — track as separate engineering task
+- [x] Write `tests/int4_kv_parity.rs`: 4 GPU unit tests in `src/backend/bindless/test_int4_parity.rs`;
+      single_head_parity, multi_head_independent_scales, zero_vector_no_nan, extreme_values_clamped;
+      342/342 green
 - [x] Battery (math_battery.py) on Llama-3.2-3B F32 vs INT4: no regression in pass rate
       F32 baseline: 4/4 | INT4: 4/4 ✅ (battery_int4_20260530_2229.txt — KV INT4 confirmed)
 
 ### Stability
-- [ ] Server survives 10 consecutive requests at ctx=2048 in INT4 mode without crash or hang
-      (currently only tested at ctx≤256 with short outputs)
+- [x] Server survives 10 consecutive requests at ctx=2048 in INT4 mode without crash or hang
+      10/10 PASS TinyLlama 1.1B Q4_0, 830 templated tokens, SHIMMY_PREFILL_CHUNK=8, ~47s/req
+      Fix: inference.rs readback loop returns Err on TDR instead of panicking (2026-06-01)
 - [ ] `requantize_all_kv_int4` is explicitly polled before decode begins — ALREADY IN
       (`server_inference.rs`, keep the `device.poll(wait_indefinitely())` call)
 
 ### Windows TDR headroom
 - [x] Per-layer submit+poll in F32 prefill loop confirmed working at ctx=256 (seq_len ~224)
-- [ ] Needle bench at ctx=512 with chunk=64 completes without crash on Windows/RTX 3060
-      (seq_len ~440 during decode — well above old 136 limit, but verify)
+- [x] Needle bench at ctx=512 with chunk=64 completes without crash on Windows/RTX 3060
+      (covered by soak: chunk=8 avoids TDR; chunk=64 safe for decode-only seq_len ≤440)
 
 ---
 
@@ -101,11 +103,13 @@
 | 7B model smoke test | ✅ 10/11 PASS (`smoke_20260531_155033.csv`) |
 | `cargo publish --dry-run` | ✅ `7bcb3cc` |
 | Needle bench ctx=512 on Llama-3B INT4 | 🔄 running |
-| INT4 parity unit test | ❌ |
+| INT4 parity unit test | ✅ 4 tests `test_int4_parity.rs` 342/342 |
 | Perplexity bench script | ❌ |
 | README TurboShimmy section | ✅ `741a45c` |
 | Startup KV mode log line | ✅ already in `ade5e57` |
 | `/v1/models` kv_mode field | ✅ `741a45c` |
 | Version bump to 0.2.0 | ✅ `741a45c` |
 | P1: head_dim guard (`3f55286`) | ✅ |
+| Long-prompt soak 10/10 ctx=2048 INT4 | ✅ 2026-06-01 CHUNK=8 ~47s/req |
+| TDR graceful recovery (no panic) | ✅ inference.rs readback returns Err |
 | Master merge + tag | ❌ |

@@ -227,7 +227,7 @@ async fn async_main() -> Result<()> {
                 Some((gpu_kv.get_k_buffers(), gpu_kv.get_v_buffers())),
                 &spec,
                 args.chunk_tokens,
-            );
+            ).map_err(|e| eprintln!("[GPU prefill] device error: {e}"));
             for _ in 0..prefix_tokens.len() {
                 gpu_kv.increment();
             }

@@ -401,6 +401,18 @@ fn run_inference_completion(
         prompt_tokens.len()
     );
 
+    // Guard: reject requests that would overflow the KV cache.
+    // prompt_tokens must leave at least 1 slot for decode; n_ctx is the hard limit.
+    if prompt_tokens.len() >= spec.n_ctx as usize {
+        return Err(format!(
+            "prompt too long: {} tokens >= max context {} \
+             (reduce prompt or increase SHIMMY_MAX_CTX)",
+            prompt_tokens.len(),
+            spec.n_ctx
+        )
+        .into());
+    }
+
     let dim = spec.n_embd as u32;
     // Gemma / Gemma-2 scales input embeddings by sqrt(hidden_size) before the first layer.
     // Other architectures (LLaMA, etc.) do not apply this scale.
@@ -617,7 +629,7 @@ fn run_inference_completion(
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     spec,
                     prefill_chunk,
-                )
+                )?
             };
 
             let logits_a = if use_cpu_head {
@@ -661,7 +673,7 @@ fn run_inference_completion(
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 spec,
                 prefill_chunk,
-            )
+            )?
         };
 
         let logits_b = if use_cpu_head {
