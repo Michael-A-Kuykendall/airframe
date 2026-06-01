@@ -607,16 +607,6 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             
-            // TDR Mitigation: submit and WAIT for each layer before encoding the next.
-            // poll(Wait) blocks until the GPU finishes this layer's work, guaranteeing no
-            // single GPU timeline slot exceeds Windows' ~2s TDR watchdog window.
-            queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost or TDR timeout during layer wait");
-
-            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Execute Batch Cont"),
-            });
-
             if trace_prefill_layers {
                 eprintln!("[PREFILL-LAYER] complete layer={}", i);
             }
