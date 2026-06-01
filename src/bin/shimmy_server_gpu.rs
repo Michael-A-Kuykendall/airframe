@@ -552,6 +552,15 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let kv_quant_int4 = std::env::var("SHIMMY_KV_QUANT")
         .map(|v| v.to_lowercase() == "int4")
         .unwrap_or(false);
+    if kv_quant_int4 && spec.head_dim % 2 != 0 {
+        eprintln!(
+            "[GPU Server] ERROR: SHIMMY_KV_QUANT=int4 requires head_dim to be a multiple of 2 \
+             (nibble packing), but this model has head_dim={}. \
+             Use SHIMMY_KV_QUANT=f32 (default) instead.",
+            spec.head_dim
+        );
+        std::process::exit(1);
+    }
     let kv_cache = Arc::new(Mutex::new(if kv_quant_int4 {
         eprintln!("[GPU Server] KV cache mode: INT4 (TurboQuant)");
         KVCache::new_int4(

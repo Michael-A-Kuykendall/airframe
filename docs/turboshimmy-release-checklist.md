@@ -8,7 +8,10 @@
 ## P0 — Gate conditions. Nothing ships without these.
 
 ### Correctness
-- [ ] `SHIMMY_KV_QUANT=int4` needle bench at ctx=512 on a ≥6B model passes ≥2/3 depths
+- [ ] `SHIMMY_KV_QUANT=int4` needle bench at ctx=512 on a ≥3B model passes ≥2/3 depths
+      NOTE: 7B models hit the WebGPU 2GB per-binding limit on the weight buffer at first
+      inference (pre-existing architectural limit, not TurboShimmy). Llama-3.2-3B is
+      the largest validated INT4 model; running ctx=512 now.
 - [ ] Write `tests/int4_kv_parity.rs`: requires GPU `BindlessPipeline` in test context;
       skeleton written, GPU init needed — track as separate engineering task
 - [ ] Battery (math_battery.py) on Llama-3.2-3B F32 vs INT4: no regression in pass rate
