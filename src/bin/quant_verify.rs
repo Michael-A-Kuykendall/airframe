@@ -51,7 +51,7 @@ fn main() {
         limits.max_storage_buffer_binding_size =
             adapter_limits.max_storage_buffer_binding_size;
         limits.max_buffer_size = adapter_limits.max_buffer_size;
-        limits.max_storage_buffers_per_shader_stage = 8;
+        limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage;
         limits.max_compute_invocations_per_workgroup = 256;
 
         let (device, queue) = adapter

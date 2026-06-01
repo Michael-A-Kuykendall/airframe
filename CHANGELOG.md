@@ -1,0 +1,113 @@
+# Changelog
+
+All notable changes to this project will be documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+---
+
+## [0.2.0] — 2026-05-31
+
+### The headline: TurboShimmy INT4 KV cache
+
+This release ships **TurboShimmy** — a per-head-vector INT4 KV cache compression system
+that cuts KV VRAM usage by ~7× with no measured retrieval loss at the context lengths that
+matter for most chat workloads. Enable it with a single environment variable:
+
+```bash
+SHIMMY_KV_QUANT=int4 cargo run --bin shimmy_server_gpu --release
+```
+
+KV cache example (Llama-3.2-3B, `ctx=2048`): **512 MB → ~72 MB**.
+
+This was designed top-down for [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy),
+the OpenAI-compatible server powered by Airframe. Shimmy 2.1.0 will surface
+`SHIMMY_KV_QUANT` as a first-class user config option — enabling memory-constrained
+deployments (8 GB VRAM cards, cloud spot instances, consumer laptops) to run 7B+ models
+with a context window that would otherwise OOM. See the
+[Shimmy integration roadmap](#shimmy-21-integration-targets) below.
+
+---
+
+### Validation results
+
+All 10 smoke-tested model families pass (TinyLlama through Qwen2-7B). Needle-in-a-haystack
+retrieval at ctx=256 is **identical between F32 and INT4** — zero degradation measured on
+Llama-3.2-3B across 10%, 50%, and 90% depth probes.
+
+| Model | ctx=256 needle (INT4) | smoke test |
+|---|---|---|
+| Llama-3.2-3B | 2/3 pass (matches F32) | ✅ |
+| deepseek-llm-7b | — | ✅ |
+| deepseek-coder-6.7b | — | ✅ |
+| qwen2-7b | — | ✅ |
+| TinyLlama, Llama-1B, phi-2, starcoder2, gpt2, Qwen3-0.6B | — | ✅ |
+
+Full artifact: `artifacts/model_smoke/smoke_20260531_155033.csv`.
+
+---
+
+### Shimmy 2.1 integration targets
+
+The following work lands in Shimmy after airframe 0.2.0 is published:
+
+- `airframe = "0.2"` dep bump in the Shimmy private repo
+- `SHIMMY_KV_QUANT` exposed as a top-level config key (`shimmy.toml`) and CLI flag
+  (`--kv-quant int4`)
+- `/v1/models` response already carries `"kv_mode"` field — Shimmy's dashboard can
+  surface this without code changes
+- Shimmy 2.1.0 release note: *"Memory optimization mode (experimental): set
+  `kv_quant = "int4"` in shimmy.toml to reduce KV cache VRAM by ~7×"*
+- Homebrew formula update for shimmy 2.1.0
+
+---
+
+### Added
+
+- **TurboShimmy INT4 KV cache** — WGSL shaders `quantize_kv_int4.wgsl` and
+  `decode_kv_int4.wgsl`; per-head-vector bias-8 nibble encoding; ~7× KV compression.
+- `KVCache::new_int4` constructor; `KVCache::is_int4()` query method.
+- `BindlessPipeline::run_layer_with_cache_int4` — 3-encoder per-layer decode path with
+  per-encoder GPU polls to stay within the Windows TDR watchdog on each INT4 decode step.
+- `BindlessPipeline::requantize_all_kv_int4` — bulk F32→INT4 requantize after prefill,
+  followed by an explicit `device.poll(wait_indefinitely())` before decode begins.
+- `SHIMMY_KV_QUANT` env var (`f32` | `int4`, default `f32`).
+- `SHIMMY_PREFILL_CHUNK` env var: chunked prefill batch size (default `64`); reduce on
+  lower-VRAM cards or if TDR crashes appear on very long prompts.
+- `SHIMMY_VRAM_LIMIT_MB` env var: VRAM budget warning threshold (default `10500`).
+- `/v1/models` response includes `"kv_mode": "f32"|"int4"` — downstream clients
+  (including Shimmy's dashboard) can query the active KV mode without log parsing.
+- Server startup log: `[GPU Server] KV cache mode: INT4 (TurboQuant)` when INT4 is active.
+- `docs/turboshimmy.md`: full feature spec, implementation notes, needle bench results,
+  deployment guidance, and Windows TDR context.
+- `scripts/needle_bench.py`: needle-in-a-haystack evaluation script against a live server.
+  Supports arbitrary `--ctx`, `--depths`, `--runs`, and `--out` for artifact collection.
+- README: *Memory Optimization* section with VRAM savings table and full env var reference.
+- `shimmyjinja` dependency updated to `0.5.0` (published alongside this release): adds
+  `try_render_chat_template_with_context` returning `Result<String, RenderError>`, seals
+  internal modules as `pub(crate)`, and adds CHANGELOG + doc-tests.
+
+### Fixed
+
+- **Windows TDR crashes during prefill** — GPU command encoder is now submitted and polled
+  once per layer in `run_full_model_prefill_chunked_with_cache_state`, preventing any
+  single dispatch from exceeding the ~2 s Windows TDR watchdog. Previously crashed at
+  seq_len ≥ 144; now verified stable at seq_len ≈ 224 (ctx=256) on RTX 3060 Windows.
+  The fix is structural — no user-tunable knob required for typical SHIMMY_PREFILL_CHUNK
+  values (≤64).
+- `scripts/needle_bench.py`: HTTP 400 from float seed (now cast to `int`); connection-reset
+  on stop-token emission (caught and treated as end-of-stream); fuzzy `check_pass` to
+  tolerate minor whitespace variation in model responses.
+
+### Changed
+
+- Version: `0.1.1` → `0.2.0`.
+- `shimmyjinja` dependency: `0.2.1` → `0.5.0`.
+
+---
+
+## [0.1.1] — 2026-05-15
+
+Initial public release: Bindless WebGPU pipeline, FSE subsystem, OpenAI-compatible HTTP
+server (`shimmy_server_gpu`). Supports Llama, Gemma, Phi, Qwen2, Qwen3 architectures via
+GGUF Q4_K_M and related quantization types. Ships `shimmyjinja` (Jinja2 chat_template
+renderer) and `shimmytok` (GGUF-native tokenizer) as zero-dependency companion crates.

@@ -405,7 +405,7 @@ impl EvalEngine for GpuEvalEngine {
             seq_len,
             Some((&self.kv_cache_k_layers, &self.kv_cache_v_layers)),
             &self.spec,
-        );
+        ).expect("GPU forward pass failed");
 
         self.current_pos += batch_size;
 
@@ -1605,7 +1605,8 @@ async fn run_l0probe(args: &Args) -> Result<()> {
     let cpu_l22 = cpu_logits_tensor.data;
 
     let (gpu_l20, gpu_l21, gpu_l22) = pipeline
-        .run_full_model_with_cache_state(&device, &queue, &model, input, None, 0, 1, None, &spec);
+        .run_full_model_with_cache_state(&device, &queue, &model, input, None, 0, 1, None, &spec)
+        .expect("GPU forward pass failed");
 
     // F12 isolation: run with F32-dequantized output head override.
     let output_head_f32 = {
@@ -1652,7 +1653,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
                 1,
                 None,
                 &spec,
-            )
+            ).expect("GPU forward pass failed (f32 head)")
         } else {
             (Vec::new(), Vec::new(), Vec::new())
         };

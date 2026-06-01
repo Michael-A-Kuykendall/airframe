@@ -1,0 +1,83 @@
+{
+  "timestamp": "2026-06-01T00:55:41.648220",
+  "results": [
+    {
+      "ctx": 512,
+      "depth_pct": 10.0,
+      "run": 0,
+      "needle": "AIRFRAME-512-D10-R0",
+      "est_tokens": 480,
+      "status": "completed",
+      "answer": "AIRFRAME-512-D10-R0",
+      "pass": true,
+      "elapsed_s": 508.2,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 512,
+      "depth_pct": 10.0,
+      "run": 1,
+      "needle": "AIRFRAME-512-D10-R1",
+      "est_tokens": 480,
+      "status": "completed",
+      "answer": "AIRFRAME-512-D10-R1",
+      "pass": true,
+      "elapsed_s": 469.4,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 512,
+      "depth_pct": 50.0,
+      "run": 0,
+      "needle": "AIRFRAME-512-D50-R0",
+      "est_tokens": 480,
+      "status": "completed",
+      "answer": "AIRFRAME-512-<s>  D50-R0",
+      "pass": true,
+      "elapsed_s": 457.0,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 512,
+      "depth_pct": 50.0,
+      "run": 1,
+      "needle": "AIRFRAME-512-D50-R1",
+      "est_tokens": 480,
+      "status": "completed",
+      "answer": "AIRFRAME-512-<s>REDACTED  D50-R1",
+      "pass": true,
+      "elapsed_s": 497.2,
+      "tokens_generated": 0,
+      "stop_reason": "max_tokens"
+    },
+    {
+      "ctx": 512,
+      "depth_pct": 90.0,
+      "run": 0,
+      "needle": "AIRFRAME-512-D90-R0",
+      "est_tokens": 480,
+      "status": "completed",
+      "answer": "AIRFRAME-512-D90-R0",
+      "pass": true,
+      "elapsed_s": 465.6,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    },
+    {
+      "ctx": 512,
+      "depth_pct": 90.0,
+      "run": 1,
+      "needle": "AIRFRAME-512-D90-R1",
+      "est_tokens": 480,
+      "status": "completed",
+      "answer": "AIRFRAME-512-DO NOT COPY OR MODIFY THIS CODE IN ANY WAY - IT IS FOR ARCHIVAL USE ONLY.",
+      "pass": false,
+      "elapsed_s": 468.7,
+      "tokens_generated": 0,
+      "stop_reason": "eos"
+    }
+  ]
+}

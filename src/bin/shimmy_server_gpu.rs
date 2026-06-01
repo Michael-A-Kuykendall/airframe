@@ -3,23 +3,13 @@
 
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
-use airframe::backend::bindless::pipeline::{
-    BindlessPipeline, LayerParams, RMSNormParams,
-};
+use airframe::backend::bindless::pipeline::BindlessPipeline;
 use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0};
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
-use airframe::debug_trace::{
-    topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace,
-    TokenTrace,
-};
 use aho_corasick::AhoCorasick;
-use libfse::metrics::{
-    logit_l2_norm, logit_variance, max_probability_from_logits, shannon_entropy_from_logits,
-};
 use std::sync::OnceLock;
 use memmap2::Mmap;
-use schoolmarm::{Grammar, GrammarState};
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
 use shimmyjinja;
@@ -146,11 +136,7 @@ const TM_CHATML_START:  usize = 4; // <|im_start|>
 const TM_CHATML_END:    usize = 5; // <|im_end|>
 const TM_TINY_USER:     usize = 6; // <|user|>
 const TM_TINY_ASST:     usize = 7; // <|assistant|>
-// Model-name markers (TM_LLAMA3_NAME..TM_GEMMA_NAME)
-const TM_LLAMA3_SPACE:  usize = 8;  // "llama 3"
-const TM_LLAMA3_DASH:   usize = 9;  // "llama-3"
-const TM_TINYLLAMA:     usize = 10; // "tinyllama"
-const TM_GEMMA_NAME:    usize = 11; // "gemma"
+
 
 /// Single Aho-Corasick automaton covering all template + model-name markers.
 /// Built once, reused for every model load.
@@ -477,7 +463,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
     limits.max_buffer_size = adapter_limits.max_buffer_size;
-    limits.max_storage_buffers_per_shader_stage = 8;
+    limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
     limits.max_compute_invocations_per_workgroup = 256;
 
     let (device, queue) = adapter
@@ -548,13 +534,37 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let embd_table_cpu = Arc::new(load_token_embd_cpu(&model_path, &gpu_model, &spec)?);
 
     // === Initialize KV Cache (Phase 4D) ===
-    let kv_cache = Arc::new(Mutex::new(KVCache::new(
-        &device,
-        spec.n_layer,
-        spec.n_head_kv as u32,
-        spec.head_dim as u32,
-        max_ctx,
-    )));
+    // SHIMMY_KV_QUANT=int4 enables TurboQuant INT4 KV compression (feat/turboquant-wgsl).
+    let kv_quant_int4 = std::env::var("SHIMMY_KV_QUANT")
+        .map(|v| v.to_lowercase() == "int4")
+        .unwrap_or(false);
+    if kv_quant_int4 && spec.head_dim % 2 != 0 {
+        eprintln!(
+            "[GPU Server] ERROR: SHIMMY_KV_QUANT=int4 requires head_dim to be a multiple of 2 \
+             (nibble packing), but this model has head_dim={}. \
+             Use SHIMMY_KV_QUANT=f32 (default) instead.",
+            spec.head_dim
+        );
+        std::process::exit(1);
+    }
+    let kv_cache = Arc::new(Mutex::new(if kv_quant_int4 {
+        eprintln!("[GPU Server] KV cache mode: INT4 (TurboQuant)");
+        KVCache::new_int4(
+            &device,
+            spec.n_layer,
+            spec.n_head_kv as u32,
+            spec.head_dim as u32,
+            max_ctx,
+        )
+    } else {
+        KVCache::new(
+            &device,
+            spec.n_layer,
+            spec.n_head_kv as u32,
+            spec.head_dim as u32,
+            max_ctx,
+        )
+    }));
     let kv_mb =
         (max_ctx as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4 * spec.n_layer as u64)
             / (1024 * 1024);
@@ -624,6 +634,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
     let prompt_renderer = make_prompt_renderer(&gpu_model.metadata.gguf_metadata, &spec, &tokenizer);
     let models_for_http = Arc::clone(&discovered_models);
+    let kv_quant_int4_for_http = kv_quant_int4;
     tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
@@ -633,8 +644,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 let streams = Arc::clone(&streams_for_http);
                 let models = Arc::clone(&models_for_http);
                 let prompt_renderer = prompt_renderer.clone();
+                let kv_int4_flag = kv_quant_int4_for_http;
                 tokio::spawn(async move {
-                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, models, prompt_renderer).await {
+                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, models, prompt_renderer, kv_int4_flag).await {
                         eprintln!("[HTTP] Connection error: {}", e);
                     }
                 });
@@ -784,6 +796,7 @@ async fn handle_http_connection(
     stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
     discovered_models: std::sync::Arc<Vec<(String, String)>>,
     prompt_renderer: PromptRenderer,
+    kv_quant_int4: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::AsyncWriteExt;
     let request_bytes = read_http_request(&mut stream).await?;
@@ -801,6 +814,7 @@ async fn handle_http_connection(
 
     if method == "GET" && path == "/v1/models" {
         // OpenAI-compatible model list — one entry per discovered .gguf
+        let kv_mode = if kv_quant_int4 { "int4" } else { "f32" };
         let mut items = String::from("[");
         for (i, (name, _)) in discovered_models.iter().enumerate() {
             if i > 0 {
@@ -808,8 +822,8 @@ async fn handle_http_connection(
             }
             let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
             items.push_str(&format!(
-                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\"}}",
-                escaped
+                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\",\"kv_mode\":\"{}\"}}",
+                escaped, kv_mode
             ));
         }
         items.push(']');
@@ -1484,7 +1498,7 @@ mod tests {
             }
             let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
             items.push_str(&format!(
-                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\"}}",
+                "{{\"id\":\"{}\",\"object\":\"model\",\"created\":0,\"owned_by\":\"airframe\",\"kv_mode\":\"f32\"}}",
                 escaped
             ));
         }
