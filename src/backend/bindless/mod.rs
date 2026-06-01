@@ -6,6 +6,8 @@ pub mod preflight;
 
 pub mod pipeline_shift;
 #[cfg(test)]
+mod test_int4_parity;
+#[cfg(test)]
 mod test_layer_dump;
 #[cfg(test)]
 mod test_parity;
