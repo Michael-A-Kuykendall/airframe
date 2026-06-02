@@ -12,6 +12,7 @@ use airframe::core::dequant::{
 };
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::spec::{GgufValue, ModelSpec};
+use airframe::core::vision_gpu::GpuVisionModel;
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace, TokenTrace,
 };
@@ -287,6 +288,48 @@ fn cpu_head_logits(embd_table: &[f32], hidden: &[f32], vocab_size: usize, dim: u
         .collect()
 }
 
+/// MiniCPM-V-2.6 image placeholder token ID.
+const IMAGE_TOKEN_ID: u32 = 151_646;
+
+/// Build the flat embedding sequence for prefill, splicing visual token embeddings
+/// in place of any `IMAGE_TOKEN_ID` placeholder.
+///
+/// When `visual_tokens` is `Some`, the first occurrence of token 151646 in
+/// `prompt_tokens` is replaced with `N_tiles × 64` visual embedding vectors
+/// (each `dim`-dimensional).  All other tokens use the normal CPU embedding table
+/// lookup.  The KV-cache advance count (returned as the second element) may
+/// therefore differ from `prompt_tokens.len()`.
+fn build_prefill_embeddings(
+    prompt_tokens: &[u32],
+    embd_table_cpu: &[f32],
+    emb_scale: f32,
+    dim: usize,
+    visual_tokens: Option<&[f32]>, // flat [N_tiles × 64 × dim] f32
+    visual_seq_len: usize,          // N_tiles × 64 (number of visual positions)
+) -> (Vec<f32>, usize) {
+    let mut out: Vec<f32> = Vec::with_capacity(prompt_tokens.len() * dim);
+    let mut kv_advance = 0usize;
+    let mut image_injected = false;
+
+    for &token_id in prompt_tokens {
+        if token_id == IMAGE_TOKEN_ID && !image_injected {
+            if let Some(vt) = visual_tokens {
+                // Splice all visual token embeddings (already in LLM space, dim-dimensional)
+                for chunk in vt.chunks(dim) {
+                    out.extend(chunk.iter().map(|x| x * emb_scale));
+                }
+                kv_advance += visual_seq_len;
+                image_injected = true;
+                continue;
+            }
+        }
+        let emb_start = token_id as usize * dim;
+        out.extend(embd_table_cpu[emb_start..emb_start + dim].iter().map(|x| x * emb_scale));
+        kv_advance += 1;
+    }
+    (out, kv_advance)
+}
+
 // run_inference_completion takes many args by design — GPU pipeline requires all context inline.
 // TODO: consider grouping device/queue/model/pipeline into a GpuContext struct to reduce arg count.
 #[allow(clippy::too_many_arguments)]
@@ -306,6 +349,7 @@ fn run_inference_completion(
     output_head_f32: &wgpu::Buffer,
     embd_table_cpu: &[f32], // Pre-dequantized CPU embedding table
     use_cpu_head: bool,     // True when output head buffer exceeds binding limit
+    vision_model: Option<&GpuVisionModel>,
 ) -> Result<(InferenceResponse, String), Box<dyn std::error::Error>> {
     let max_new_tokens = req.max_tokens.unwrap_or(64);
     let temperature = req.temperature.unwrap_or(0.8);
@@ -336,6 +380,37 @@ fn run_inference_completion(
             .chain(prompt_tokens.into_iter())
             .collect();
     }
+
+    // ── Vision: encode image tiles if a payload + vision model are present ────
+    // Produces a flat [N_tiles × 64 × dim] f32 buffer.  `visual_seq_len` is the
+    // number of extra KV-cache positions the visual tokens occupy (replacing the
+    // single IMAGE_TOKEN_ID placeholder that was in the text prompt).
+    let (visual_embedding_flat, visual_seq_len): (Option<Vec<f32>>, usize) =
+        match (vision_model, req.image_payload.as_ref()) {
+            (Some(vm), Some(payload)) if !payload.pixels_b64.is_empty() => {
+                use base64::Engine as _;
+                let pixels = base64::engine::general_purpose::STANDARD
+                    .decode(&payload.pixels_b64)
+                    .map_err(|e| format!("image_payload base64 decode failed: {}", e))?;
+                eprintln!(
+                    "[Vision] Encoding image {}×{} ({} bytes)",
+                    payload.w, payload.h, pixels.len()
+                );
+                let tile_outputs = vm.encode_tiles(&pixels, payload.h, payload.w, device, queue);
+                let n_tiles = tile_outputs.len();
+                let flat: Vec<f32> = tile_outputs.into_iter().flatten().collect();
+                // Each tile produces 64 visual tokens; dim is the resampler d_model (3584).
+                // The embedding table dim for the LLM may differ — visual tokens are already
+                // projected to LLM space by the Resampler, so we use them as-is.
+                let visual_seq = n_tiles * 64;
+                eprintln!(
+                    "[Vision] {} tile(s) → {} visual token positions",
+                    n_tiles, visual_seq
+                );
+                (Some(flat), visual_seq)
+            }
+            _ => (None, 0),
+        };
 
     let eos = tokenizer.eos_token();
     let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
@@ -495,10 +570,27 @@ fn run_inference_completion(
     let prefill_logits_f32 = if let Some(cfg) = trace_config.as_ref() {
         if cfg.include_prefill {
             let mut last_logits = vec![0.0; spec.n_vocab];
+            // Track position within the visual embedding flat buffer for image token expansion.
+            let mut visual_offset: usize = 0;
+            let visual_token_dim = dim as usize;
             for (prefill_step, &token_id) in prompt_tokens.iter().enumerate() {
-                let emb_start = token_id as usize * dim as usize;
-                let mut layer_output: Vec<f32> =
-                    embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale).collect();
+                // For the image placeholder, iterate over each visual token embedding individually.
+                let visual_slice: Option<&[f32]> = if token_id == IMAGE_TOKEN_ID {
+                    visual_embedding_flat.as_deref()
+                } else {
+                    None
+                };
+                let n_positions: usize = if visual_slice.is_some() { visual_seq_len } else { 1 };
+
+                for vis_pos in 0..n_positions {
+                    let layer_output_init: Vec<f32> = if let Some(vt) = visual_slice {
+                        let start = (visual_offset + vis_pos) * visual_token_dim;
+                        vt[start..start + visual_token_dim].iter().map(|x| x * emb_scale).collect()
+                    } else {
+                        let emb_start = token_id as usize * dim as usize;
+                        embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale).collect()
+                    };
+                let mut layer_output = layer_output_init;
                 let (cache_len_before, window_base_before) = {
                     let cache = kv_cache.lock().unwrap();
                     (cache.get_seq_len(), cache.get_window_base())
@@ -581,14 +673,21 @@ fn run_inference_completion(
                         });
                     }
                 }
+                } // end vis_pos loop
+                if visual_slice.is_some() {
+                    visual_offset += visual_seq_len;
+                }
             }
             last_logits
         } else {
-            let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
-            for &token_id in &prompt_tokens {
-                let emb_start = token_id as usize * dim as usize;
-                batched_embd.extend(embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale));
-            }
+            let (batched_embd, kv_advance_a) = build_prefill_embeddings(
+                &prompt_tokens,
+                embd_table_cpu,
+                emb_scale,
+                dim as usize,
+                visual_embedding_flat.as_deref(),
+                visual_seq_len,
+            );
 
             let (_pre_norm_a, l21_a, gpu_logits_a) = {
                 let cache_guard = kv_cache.lock().unwrap();
@@ -612,18 +711,21 @@ fn run_inference_completion(
 
             {
                 let mut cache = kv_cache.lock().unwrap();
-                for _ in 0..prompt_tokens.len() {
+                for _ in 0..kv_advance_a {
                     cache.increment().map_err(|e| e)?;
                 }
             }
             logits_a
         }
     } else {
-        let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
-        for &token_id in &prompt_tokens {
-            let emb_start = token_id as usize * dim as usize;
-            batched_embd.extend(embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale));
-        }
+        let (batched_embd, kv_advance_b) = build_prefill_embeddings(
+            &prompt_tokens,
+            embd_table_cpu,
+            emb_scale,
+            dim as usize,
+            visual_embedding_flat.as_deref(),
+            visual_seq_len,
+        );
 
         let (_pre_norm_b, l21_b, gpu_logits_b) = {
             let cache_guard = kv_cache.lock().unwrap();
@@ -647,7 +749,7 @@ fn run_inference_completion(
 
         {
             let mut cache = kv_cache.lock().unwrap();
-            for _ in 0..prompt_tokens.len() {
+            for _ in 0..kv_advance_b {
                 cache.increment().map_err(|e| e)?;
             }
         }
@@ -1025,6 +1127,7 @@ pub(super) async fn process_inference_job(
     output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
     embd_table_cpu: &[f32],         // Pre-dequantized F32 token embeddings (CPU)
     use_cpu_head: bool,             // True when output head buffer exceeds binding limit
+    vision_model: Option<&GpuVisionModel>,
 ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
     let session_window_tokens = spec.n_ctx;
     let disable_session_window = env_flag("SHIMMY_DISABLE_SESSION_WINDOW");
@@ -1070,6 +1173,7 @@ pub(super) async fn process_inference_job(
         output_head_f32,
         embd_table_cpu,
         use_cpu_head,
+        vision_model,
     )?;
 
     if !disable_session_window {

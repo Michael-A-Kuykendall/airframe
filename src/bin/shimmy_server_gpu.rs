@@ -9,6 +9,7 @@ use airframe::backend::bindless::pipeline::{
 use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0};
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
+use airframe::core::vision_gpu::GpuVisionModel;
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace,
     TokenTrace,
@@ -240,6 +241,7 @@ impl ChatCompletionRequest {
             debug_trace_start_step: None,
             debug_trace_max_steps: None,
             debug_trace_include_prefill: None,
+            image_payload: None,
         }
     }
 }
@@ -272,6 +274,19 @@ pub struct InferenceRequest {
     debug_trace_start_step: Option<usize>,
     debug_trace_max_steps: Option<usize>,
     debug_trace_include_prefill: Option<bool>,
+    /// Optional image payload for multimodal inference.
+    /// `pixels_hwc`: packed H×W×3 u8 RGB bytes (base64-encoded in JSON).
+    /// `h`, `w`: image dimensions in pixels.
+    pub image_payload: Option<ImagePayload>,
+}
+
+/// Raw RGB image attached to a multimodal inference request.
+#[derive(Clone, Deserialize, Default)]
+pub struct ImagePayload {
+    /// Base64-encoded HWC u8 RGB bytes.
+    pub pixels_b64: String,
+    pub h: usize,
+    pub w: usize,
 }
 
 #[derive(Clone, Default)]
@@ -533,6 +548,22 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     eprintln!("[GPU Server] FSE enabled (CrewChief active)");
+
+    // === Optional Vision Model (MiniCPM-V-2.6 mmproj) ===
+    // Set SHIMMY_MMPROJ_PATH to the path of mmproj-model-f16.gguf to enable
+    // multimodal image-to-text inference.  When unset the server runs text-only.
+    let vision_model: Option<Arc<GpuVisionModel>> =
+        std::env::var("SHIMMY_MMPROJ_PATH").ok().map(|p| {
+            eprintln!("[GPU Server] Loading vision model: {}", p);
+            Arc::new(
+                GpuVisionModel::from_mmproj_gguf(&p, &device)
+                    .expect("[GPU Server] Failed to load mmproj GGUF"),
+            )
+        });
+    if vision_model.is_some() {
+        eprintln!("[GPU Server] Vision model ready (SigLIP-So400M + Perceiver Resampler)");
+    }
+
     let shimmy_port = std::env::var("SHIMMY_PORT").unwrap_or_else(|_| "8080".to_string());
     let shimmy_bind_addr = format!("0.0.0.0:{}", shimmy_port);
     eprintln!(
@@ -673,6 +704,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 &output_head_f32,
                 &embd_table_cpu,
                 use_cpu_head,
+                vision_model.as_deref(),
             )
             .await
         };
