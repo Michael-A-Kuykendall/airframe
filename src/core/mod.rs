@@ -2,6 +2,7 @@ pub mod dequant;
 pub mod error;
 pub(crate) mod f16;
 pub mod ggml_types;
+pub mod image_preproc;
 pub mod model;
 pub mod spec;
 pub mod tensor;

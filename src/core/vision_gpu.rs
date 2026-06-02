@@ -27,7 +27,9 @@ use crate::backend::bindless::pipeline::vit_layer::{
     VitBlockOffsets, VitParams, VitPipeline,
 };
 use crate::core::error::{LibshimmyError, Result};
-use crate::core::model::load_mmproj_gguf_raw;
+use crate::core::f16::f16_bits_to_f32;
+use crate::core::image_preproc::{patch_embed_with_pos, normalize_hwc_u8_to_chw_f32, tile_image_chw, MAX_SLICES};
+use crate::core::model::{GgufTensorInfo, load_mmproj_gguf_raw};
 
 // ─── Fixed model dimensions (SigLIP-So400M + MiniCPM-V-2.6 Resampler) ────────
 
@@ -79,6 +81,14 @@ pub struct GpuVisionModel {
     query_state_buf:   wgpu::Buffer,
     /// `[VIT_N_TOKENS × RSP_D_MODEL × 3]` f32 — Resampler KV scratch (3 slots).
     kv_state_buf:      wgpu::Buffer,
+
+    // ── CPU patch embedding weights (small; kept resident for preprocessing) ──
+    /// `v.patch_embd.weight` dequantised to f32 — `[HIDDEN × 3 × 14 × 14]`.
+    patch_w:   Vec<f32>,
+    /// `v.patch_embd.bias` — `[HIDDEN]` f32.
+    patch_b:   Vec<f32>,
+    /// `v.position_embd.weight` dequantised to f32 — `[4900 × HIDDEN]`.
+    pos_embed: Vec<f32>,
 }
 
 impl GpuVisionModel {
@@ -101,6 +111,12 @@ impl GpuVisionModel {
             .map(|ti| (ti.name.clone(), base_offset + ti.offset))
             .collect();
 
+        // Build name → tensor info map (for CPU weight loading)
+        let info_map: HashMap<&str, &GgufTensorInfo> = tensor_infos
+            .iter()
+            .map(|ti| (ti.name.as_str(), ti))
+            .collect();
+
         let get = |name: &str| -> Result<u32> {
             let abs = *offsets.get(name).ok_or_else(|| LibshimmyError::WeightMissing {
                 weight_id: name.to_string(),
@@ -109,6 +125,42 @@ impl GpuVisionModel {
                 msg: format!("Tensor '{}' byte offset {} exceeds u32 range", name, abs),
             })
         };
+
+        // ── Helpers for loading CPU tensors from mmap ─────────────────────
+        let load_f16_tensor = |name: &str| -> Result<Vec<f32>> {
+            let ti = *info_map.get(name).ok_or_else(|| LibshimmyError::WeightMissing {
+                weight_id: name.to_string(),
+            })?;
+            let n: usize = ti.dimensions.iter().product();
+            let byte_off = (base_offset + ti.offset) as usize;
+            let mut out = Vec::with_capacity(n);
+            for i in 0..n {
+                let b = byte_off + i * 2;
+                let bits = u16::from_le_bytes([mmap[b], mmap[b + 1]]);
+                out.push(f16_bits_to_f32(bits));
+            }
+            Ok(out)
+        };
+
+        let load_f32_tensor = |name: &str| -> Result<Vec<f32>> {
+            let ti = *info_map.get(name).ok_or_else(|| LibshimmyError::WeightMissing {
+                weight_id: name.to_string(),
+            })?;
+            let n: usize = ti.dimensions.iter().product();
+            let byte_off = (base_offset + ti.offset) as usize;
+            let mut out = Vec::with_capacity(n);
+            for i in 0..n {
+                let b = byte_off + i * 4;
+                let bits = u32::from_le_bytes([mmap[b], mmap[b + 1], mmap[b + 2], mmap[b + 3]]);
+                out.push(f32::from_bits(bits));
+            }
+            Ok(out)
+        };
+
+        // ── Load CPU patch embedding + positional embedding weights ───────
+        let patch_w   = load_f16_tensor("v.patch_embd.weight")?;
+        let patch_b   = load_f32_tensor("v.patch_embd.bias")?;
+        let pos_embed = load_f16_tensor("v.position_embd.weight")?;
 
         // ── Upload entire GGUF file to GPU ────────────────────────────────
         let vit_blob_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -257,6 +309,9 @@ impl GpuVisionModel {
             temp_ffn_buf,
             query_state_buf,
             kv_state_buf,
+            patch_w,
+            patch_b,
+            pos_embed,
         })
     }
 
@@ -342,6 +397,41 @@ impl GpuVisionModel {
         queue.submit(Some(enc.finish()));
 
         readback_f32(device, &staging)
+    }
+
+    /// End-to-end pipeline: raw RGB image → visual token embeddings.
+    ///
+    /// Tiles the image (up to `MAX_SLICES` slices + 1 thumbnail), runs the
+    /// full ViT + Resampler pipeline on each tile, and returns one
+    /// `[64 × 3584]` f32 block per tile.
+    ///
+    /// # Arguments
+    /// * `pixels_hwc` – packed `[H × W × 3]` u8 bytes in HWC / RGB order.
+    /// * `h`, `w`     – image height and width in pixels.
+    ///
+    /// # Returns
+    /// `Vec` of `N_tiles` vectors; each inner `Vec<f32>` has length
+    /// `64 × 3584 = 229 376`.
+    pub fn encode_tiles(
+        &self,
+        pixels_hwc: &[u8],
+        h: usize,
+        w: usize,
+        device: &wgpu::Device,
+        queue:  &wgpu::Queue,
+    ) -> Vec<Vec<f32>> {
+        let chw   = normalize_hwc_u8_to_chw_f32(pixels_hwc, h, w);
+        let tiles = tile_image_chw(&chw, h, w, MAX_SLICES);
+
+        tiles.iter().map(|tile| {
+            let patch_embeds = patch_embed_with_pos(
+                tile,
+                &self.patch_w,
+                &self.patch_b,
+                &self.pos_embed,
+            );
+            self.encode_image(&patch_embeds, device, queue)
+        }).collect()
     }
 }
 
