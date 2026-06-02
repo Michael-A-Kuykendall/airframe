@@ -1287,4 +1287,109 @@ mod tests {
         assert!(!allowed[0], "prose token should be disallowed at start");
         assert!(allowed[1] || allowed[2], "rust anchors should be allowed");
     }
+
+    // ── build_prefill_embeddings tests ────────────────────────────────────────
+
+    /// All normal tokens — no image placeholder.
+    /// Expected: embeddings are a simple table lookup, kv_advance == n_tokens.
+    #[test]
+    fn bpe_no_image_token() {
+        let dim = 4usize;
+        // Vocab: 3 tokens, each 4-dimensional
+        let table: Vec<f32> = (0..12).map(|x| x as f32).collect();
+        let tokens: Vec<u32> = vec![0, 1, 2];
+        let (emb, kv) = build_prefill_embeddings(&tokens, &table, 1.0, dim, None, 0);
+        assert_eq!(kv, 3, "kv_advance must equal token count when no image");
+        assert_eq!(emb.len(), 3 * dim);
+        // Token 1 → table[4..8]
+        assert_eq!(&emb[4..8], &[4.0f32, 5.0, 6.0, 7.0]);
+    }
+
+    /// Image placeholder present but no visual tokens provided.
+    /// The placeholder should fall back to a normal table lookup.
+    #[test]
+    fn bpe_image_token_no_visual_data() {
+        let dim = 4usize;
+        let table: Vec<f32> = vec![0.0f32; (IMAGE_TOKEN_ID as usize + 1) * dim];
+        // write a sentinel value at the image-token row
+        let mut t = table.clone();
+        for i in 0..dim {
+            t[IMAGE_TOKEN_ID as usize * dim + i] = 99.0;
+        }
+        let tokens = vec![0u32, IMAGE_TOKEN_ID, 0u32];
+        let (emb, kv) = build_prefill_embeddings(&tokens, &t, 1.0, dim, None, 0);
+        assert_eq!(kv, 3);
+        assert_eq!(emb.len(), 3 * dim);
+        // middle slot should be the sentinel embedding
+        assert_eq!(&emb[dim..2 * dim], &vec![99.0f32; dim][..]);
+    }
+
+    /// Image placeholder with visual tokens provided.
+    /// The placeholder should be expanded to `visual_seq_len` positions.
+    #[test]
+    fn bpe_image_token_with_visual_data() {
+        let dim = 4usize;
+        let visual_seq_len = 3usize; // pretend 3 visual tokens
+        // visual_flat: 3 × dim values, each row = row_index cast to f32
+        let visual_flat: Vec<f32> = (0..visual_seq_len)
+            .flat_map(|i| vec![i as f32; dim])
+            .collect();
+
+        // emb table: zeroed (shouldn't be consulted for the image slot)
+        let table: Vec<f32> = vec![0.0f32; (IMAGE_TOKEN_ID as usize + 1) * dim];
+        let tokens = vec![0u32, IMAGE_TOKEN_ID, 0u32];
+        let (emb, kv) = build_prefill_embeddings(
+            &tokens,
+            &table,
+            1.0,
+            dim,
+            Some(&visual_flat),
+            visual_seq_len,
+        );
+        // kv_advance = 1 (tok 0) + visual_seq_len (image) + 1 (tok 0)
+        assert_eq!(kv, 2 + visual_seq_len);
+        assert_eq!(emb.len(), (2 + visual_seq_len) * dim);
+        // First `dim` values = tok 0 from table (all zeros)
+        assert_eq!(&emb[..dim], &vec![0.0f32; dim][..]);
+        // Next visual_seq_len × dim values = visual embeddings
+        assert_eq!(&emb[dim..dim + visual_seq_len * dim], &visual_flat[..]);
+        // Last `dim` values = tok 0 from table (all zeros)
+        assert_eq!(&emb[dim + visual_seq_len * dim..], &vec![0.0f32; dim][..]);
+    }
+
+    /// Only the FIRST image placeholder is expanded; subsequent ones use the table.
+    #[test]
+    fn bpe_only_first_image_token_expanded() {
+        let dim = 2usize;
+        let visual_seq_len = 1usize;
+        let visual_flat: Vec<f32> = vec![7.0f32; dim];
+        let mut table = vec![0.0f32; (IMAGE_TOKEN_ID as usize + 1) * dim];
+        // give the image-token row a distinct sentinel
+        table[IMAGE_TOKEN_ID as usize * dim] = 55.0;
+        table[IMAGE_TOKEN_ID as usize * dim + 1] = 55.0;
+
+        let tokens = vec![IMAGE_TOKEN_ID, IMAGE_TOKEN_ID];
+        let (emb, kv) = build_prefill_embeddings(
+            &tokens,
+            &table,
+            1.0,
+            dim,
+            Some(&visual_flat),
+            visual_seq_len,
+        );
+        // First: expanded (visual) → kv += 1; second: table lookup → kv += 1
+        assert_eq!(kv, 1 + 1);
+        assert_eq!(emb.len(), 2 * dim);
+        assert_eq!(&emb[..dim], &[7.0f32, 7.0]);       // visual
+        assert_eq!(&emb[dim..], &[55.0f32, 55.0]);     // table fallback
+    }
+
+    /// emb_scale is applied to every output value.
+    #[test]
+    fn bpe_emb_scale_applied() {
+        let dim = 2usize;
+        let table: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0]; // tok 0 = [1,2], tok 1 = [3,4]
+        let (emb, _) = build_prefill_embeddings(&[0, 1], &table, 2.0, dim, None, 0);
+        assert_eq!(emb, vec![2.0f32, 4.0, 6.0, 8.0]);
+    }
 }
