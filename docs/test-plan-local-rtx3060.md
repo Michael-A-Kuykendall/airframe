@@ -191,6 +191,36 @@ $env:SHIMMY_PORT = "8086"
 - [ ] All 10 math cases PASS
 - [ ] Fast latency observed (bypassed path, not model inference)
 
+### Formula Lens (Golden vs Candidate)
+
+When a regression is hard to reason about from raw logs, compare trace artifacts as
+algebraic signatures instead of scanning token-by-token text.
+
+The script `scripts/trace_formula_diff.py` converts each layer into compact formulas
+and ranks where shape diverged most:
+
+- `residual_gain = output_std / post_attn_std`
+- `ffn_gain = ffn_std / post_attn_std`
+- `qk_balance = q_std / k_std`
+- `kv_mean_gap = abs(k_mean - v_mean)`
+- `output_to_ffn_absmax_ratio = output_absmax / ffn_absmax`
+
+Run this after collecting at least one known-good trace and one failing trace:
+
+```bash
+python scripts/trace_formula_diff.py \
+  --golden artifacts/debug/phi2_nan_hunt/trace_<golden>.json \
+  --candidate artifacts/debug/phi2_nan_hunt/trace_<candidate>.json \
+  --top 25 \
+  --json-out artifacts/debug/phi2_nan_hunt/formula_diff_<golden>_vs_<candidate>.json
+```
+
+Pass criteria for usefulness (debugging aid, not model pass/fail):
+
+- [ ] Top divergence rows point to a stable set of (phase, step, layer) hotspots
+- [ ] Candidate-vs-golden metric fold deltas are reproducible across reruns
+- [ ] Output JSON can be attached to issue reports / PR discussion for faster triage
+
 ---
 
 ## Phase 5 — 7B Models, INT4 KV
