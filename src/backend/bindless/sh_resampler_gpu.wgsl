@@ -25,10 +25,16 @@
 //   7.  main_rsp_proj_q   query_state × attn_q_w + bias → kv_state slot 0 (safe temp)
 //   7b. main_rsp_copy_q   kv_state slot 0 → query_state
 //   8.  main_rsp_attn     Cross-attn: Q(query_state) K(slot 1) V(slot 2) → query_state
-//   9.  main_rsp_out_proj attn_out_proj + residual(query_embeds) → query_state
+//   9.  main_rsp_out_proj attn_out_proj + residual(ln_q_stash) → query_state
 //  10.  main_rsp_post_ln  LayerNorm query_state in-place
-//  11.  main_rsp_final_proj query_state × proj_w → kv_state slot 0
+//  11.  main_rsp_final_proj query_state @ proj_w → kv_state slot 0  (x @ proj, column access)
 //       (output: kv_state[0..n_q*d_model] — Rust caller reads this as 64 visual tokens)
+//
+// kv_state slot 0 sub-layout (all within 0..n_vit*D):
+//   [0        .. n_q*D)   Q projection temp (kernels 7/7b)
+//   [n_q*D    .. 2*n_q*D) ln_q stash: ln_q(query_embeds) saved by proj_q for out_proj residual
+//   [2*n_q*D .. n_vit*D)  free
+//   [0        .. n_q*D)   final_proj output (kernel 11 overwrites Q temp — both are n_q*D, safe)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Compile-time constant for Perceiver Resampler head dimension (3584 / 16 = 224)
@@ -302,6 +308,9 @@ fn main_rsp_ln_q(@builtin(global_invocation_id) gid: vec3<u32>) {
 //   Fix: write to kv_state slot 0 (kv_ln no longer needed after proj_k/proj_v).
 //   n_queries*D = 229376 << n_vit*D = 3670016, so slot 0 has plenty of space.
 //   main_rsp_copy_q copies back to query_state after this kernel.
+//   Simultaneously stashes the ln_q INPUT (query_state before projection) at
+//   kv_state[n_q*D + q*D + out_d] so main_rsp_out_proj can use it as the
+//   correct residual (ln_q(query_embeds)) rather than raw query_embeds.
 //   Dispatch: ((n_queries * d_model + 255) / 256, 1, 1)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -313,16 +322,20 @@ fn main_rsp_proj_q(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let q     = g / D;
     let out_d = g % D;
+    let q_base = q * D;
+
+    // Stash ln_q(query_embeds)[q, out_d] — needed as residual in out_proj.
+    // Occupies kv_state[n_q*D .. 2*n_q*D), within slot 0 (0..n_vit*D), no overlap.
+    kv_state[params.n_queries * D + q_base + out_d] = query_state[q_base + out_d];
 
     var dot = 0.0f;
     let row_byte = offsets.attn_q_w + out_d * D * 2u;
-    let q_base   = q * D;
     for (var in_d = 0u; in_d < D; in_d++) {
         dot += rsp_read_f16(row_byte + in_d * 2u) * query_state[q_base + in_d];
     }
     dot += rsp_read_f32(offsets.attn_q_b + out_d * 4u);
 
-    kv_state[q * D + out_d] = dot;    // → kv_state slot 0 (safe temp)
+    kv_state[q_base + out_d] = dot;    // → kv_state slot 0 Q projection temp
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -411,7 +424,9 @@ fn main_rsp_attn(@builtin(global_invocation_id) gid: vec3<u32>) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Kernel 9: main_rsp_out_proj
 //   Output projection + residual.
-//   residual = query_embeds (re-read from vit_blob) + attn_proj(attn_out)
+//   Canonical: out = W_out @ attn_out + b_out + ln_q(query_embeds)
+//   The ln_q stash written by main_rsp_proj_q at kv_state[n_q*D + q*D + out_d]
+//   is the correct residual — NOT raw query_embeds (which lack the LayerNorm).
 //   Dispatch: ((n_queries * d_model + 255) / 256, 1, 1)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -423,17 +438,17 @@ fn main_rsp_out_proj(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let q     = g / D;
     let out_d = g % D;
+    let q_base = q * D;
 
     var dot = 0.0f;
     let row_byte = offsets.attn_out_w + out_d * D * 2u;
-    let q_base   = q * D;
     for (var in_d = 0u; in_d < D; in_d++) {
         dot += rsp_read_f16(row_byte + in_d * 2u) * query_state[q_base + in_d];
     }
     dot += rsp_read_f32(offsets.attn_out_b + out_d * 4u);
 
-    // Add residual from original query_embeds (F32 in vit_blob)
-    let residual = rsp_read_f32(offsets.query_embeds + (q * D + out_d) * 4u);
+    // Residual: ln_q(query_embeds) stashed by main_rsp_proj_q.
+    let residual = kv_state[params.n_queries * D + q_base + out_d];
     query_state[q_base + out_d] = residual + dot;
 }
 
@@ -473,12 +488,18 @@ fn main_rsp_post_ln(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kernel 11: main_rsp_final_proj
-//   Final linear projection: post_ln_query × proj_w (F16) → kv_state slot 0.
+//   Final linear projection: out = post_ln_query @ proj_w → kv_state slot 0.
+//
+//   Canonical (modeling_minicpmv.py): out = x @ self.proj
+//   → out[q, out_d] = ∑_in x[q, in] × proj[in, out_d]
+//
+//   proj_w in GGUF: stored as nn.Parameter [d_model × d_model] in PyTorch
+//   row-major order (NOT transposed like nn.Linear.weight).
+//   Element proj[in, out_d] at flat offset (in * D + out_d).
+//   Access pattern: column out_d — stride D between successive in_d reads.
+//
 //   Reads from query_state, writes to kv_state slot 0 — no data race.
-//   kv_state slot 0 is free: kv_ln was consumed by proj_k/proj_v, and Q projection
-//   temp already copied back to query_state by copy_q.
 //   OUTPUT: kv_state[0 .. n_queries * d_model] = 64 visual tokens [64 × 3584].
-//   Rust caller reads back this region from the kv_state GPU buffer.
 //   Dispatch: ((n_queries * d_model + 255) / 256, 1, 1)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -490,12 +511,13 @@ fn main_rsp_final_proj(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let q     = g / D;
     let out_d = g % D;
+    let q_base = q * D;
 
+    // Column out_d access: proj_w[in_d, out_d] at byte (in_d * D + out_d) * 2.
+    // This computes out = x @ proj_w  (not proj_w @ x).
     var dot = 0.0f;
-    let row_byte = offsets.proj_w + out_d * D * 2u;
-    let q_base   = q * D;
     for (var in_d = 0u; in_d < D; in_d++) {
-        dot += rsp_read_f16(row_byte + in_d * 2u) * query_state[q_base + in_d];
+        dot += rsp_read_f16(offsets.proj_w + (in_d * D + out_d) * 2u) * query_state[q_base + in_d];
     }
 
     kv_state[q * D + out_d] = dot;    // → kv_state slot 0 (final output)

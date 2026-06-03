@@ -313,7 +313,7 @@ impl BindlessPipeline {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: model.gpu_buffer.as_entire_binding(),
+                        resource: model.blob_binding_0(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -361,6 +361,14 @@ impl BindlessPipeline {
                         binding: 9,
                         resource: cache_params_buffer.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: model.blob_binding_1(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: model.blob_binding_2(),
+                    },
                 ],
             });
 
@@ -376,7 +384,7 @@ impl BindlessPipeline {
             .expect("output_norm missing");
         let norm_params = RMSNormParams {
             count: dim,
-            weights_offset: norm_weight as u32,
+            weights_offset: (norm_weight / 4) as u32, // word index (byte_offset / 4); safe: 4.4GB/4 = 1.1B < u32::MAX
             eps: spec.rms_eps,
             padding: 0,
         };
@@ -396,7 +404,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffer.as_entire_binding(),
+                    resource: model.blob_binding_0(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -420,29 +428,39 @@ impl BindlessPipeline {
                     binding: 3,
                     resource: norm_param_buf.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.blob_binding_1(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.blob_binding_2(),
+                },
             ],
         });
 
         // 4. Output Head (MatMul)
-        let head_weight = model
-            .metadata
-            .get_tensor_offset("output.weight")
-            .or_else(|| model.metadata.get_tensor_offset("token_embd.weight"))
-            .unwrap_or(0);
+        // When head_weights_override = None (CPU logit path), skip GPU head entirely.
+        // The caller (server) will compute logits on CPU from the normed activation.
+        let head_bg: Option<wgpu::BindGroup> = head_weights_override.map(|override_buf| {
+            let head_weight = model
+                .metadata
+                .get_tensor_offset("output.weight")
+                .or_else(|| model.metadata.get_tensor_offset("token_embd.weight"))
+                .unwrap_or(0);
 
-        let head_params = MatMulParams {
-            n: vocab_size,
-            k: dim,
-            weights_offset: head_weight as u32,
-            padding: 0,
-        };
-        let head_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Head Params"),
-            contents: bytemuck::bytes_of(&head_params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+            let head_params = MatMulParams {
+                n: vocab_size,
+                k: dim,
+                weights_offset: head_weight as u32,
+                padding: 0,
+            };
+            let head_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Head Params"),
+                contents: bytemuck::bytes_of(&head_params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
-        let head_bg = if let Some(override_buf) = head_weights_override {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Head BG F32"),
                 layout: &self.matmul_f32_layout,
@@ -469,34 +487,7 @@ impl BindlessPipeline {
                     },
                 ],
             })
-        } else {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Head BG"),
-                layout: &self.matmul_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: model.gpu_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &temp_buffer,
-                            offset: 0,
-                            size: Some(token_size),
-                        }),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: logits_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: head_param_buf.as_entire_binding(),
-                    },
-                ],
-            })
-        };
+        });
 
         // 5. Command Encoding
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -580,6 +571,17 @@ impl BindlessPipeline {
             }
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - FFNNorm", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
+                cpass.set_pipeline(&self.layer_pipeline_ffn_norm);
+                // One workgroup per token: cooperative reduction inside the workgroup.
+                // X=1 because all 256 threads share one token via local_invocation_id.
+                cpass.dispatch_workgroups(1, batch_size, 1);
+            }
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - FFNProj", i)),
                     timestamp_writes: None,
                 });
@@ -643,14 +645,14 @@ impl BindlessPipeline {
             cpass.set_pipeline(&self.rmsnorm_pipeline);
             cpass.dispatch_workgroups(wg_norm, 1, 1);
 
-            // Head
-            cpass.set_bind_group(0, &head_bg, &[]);
-            if head_weights_override.is_some() {
+            // Head — only dispatched when a GPU head bind group is available.
+            // When head_weights_override = None (CPU logit path), head_bg is None
+            // and logits_buffer stays zero; the caller uses cpu_head_logits instead.
+            if let Some(ref hbg) = head_bg {
+                cpass.set_bind_group(0, hbg, &[]);
                 cpass.set_pipeline(&self.matmul_f32_pipeline);
-            } else {
-                cpass.set_pipeline(&self.matmul_pipeline);
+                cpass.dispatch_workgroups(wg_head, 1, 1);
             }
-            cpass.dispatch_workgroups(wg_head, 1, 1);
         }
 
         // 6. Readback

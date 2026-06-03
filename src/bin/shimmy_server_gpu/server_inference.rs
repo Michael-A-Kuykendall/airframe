@@ -348,6 +348,7 @@ fn run_inference_completion(
     kv_cache: Arc<Mutex<KVCache>>,
     output_head_f32: &wgpu::Buffer,
     embd_table_cpu: &[f32], // Pre-dequantized CPU embedding table
+    output_head_cpu: &[f32], // CPU dequant of output.weight for CPU logit path
     use_cpu_head: bool,     // True when output head buffer exceeds binding limit
     vision_model: Option<&GpuVisionModel>,
 ) -> Result<(InferenceResponse, String), Box<dyn std::error::Error>> {
@@ -389,14 +390,36 @@ fn run_inference_completion(
         match (vision_model, req.image_payload.as_ref()) {
             (Some(vm), Some(payload)) if !payload.pixels_b64.is_empty() => {
                 use base64::Engine as _;
-                let pixels = base64::engine::general_purpose::STANDARD
+                let raw = base64::engine::general_purpose::STANDARD
                     .decode(&payload.pixels_b64)
                     .map_err(|e| format!("image_payload base64 decode failed: {}", e))?;
+                // Accept either raw HWC u8 pixels or a PNG file (detected by magic bytes).
+                let (pixels, img_h, img_w) = if raw.starts_with(b"\x89PNG") {
+                    let decoder = png::Decoder::new(raw.as_slice());
+                    let mut reader = decoder.read_info()
+                        .map_err(|e| format!("PNG decode failed: {}", e))?;
+                    let mut buf = vec![0u8; reader.output_buffer_size()];
+                    let info = reader.next_frame(&mut buf)
+                        .map_err(|e| format!("PNG frame read failed: {}", e))?;
+                    // Ensure RGB — strip alpha if present.
+                    let pixels_rgb: Vec<u8> = match info.color_type {
+                        png::ColorType::Rgb => buf[..info.buffer_size()].to_vec(),
+                        png::ColorType::Rgba => buf[..info.buffer_size()]
+                            .chunks_exact(4)
+                            .flat_map(|p| [p[0], p[1], p[2]])
+                            .collect(),
+                        other => return Err(format!("Unsupported PNG color type: {:?}", other).into()),
+                    };
+                    (pixels_rgb, info.height as usize, info.width as usize)
+                } else {
+                    // Raw HWC u8 RGB: use caller-supplied dimensions.
+                    (raw, payload.h, payload.w)
+                };
                 eprintln!(
                     "[Vision] Encoding image {}×{} ({} bytes)",
-                    payload.w, payload.h, pixels.len()
+                    img_w, img_h, pixels.len()
                 );
-                let tile_outputs = vm.encode_tiles(&pixels, payload.h, payload.w, device, queue);
+                let tile_outputs = vm.encode_tiles(&pixels, img_h, img_w, device, queue);
                 let n_tiles = tile_outputs.len();
                 let flat: Vec<f32> = tile_outputs.into_iter().flatten().collect();
                 // Each tile produces 64 visual tokens; dim is the resampler d_model (3584).
@@ -559,10 +582,10 @@ fn run_inference_completion(
     let norm_weight_offset = model
         .metadata
         .get_tensor_offset("output_norm.weight")
-        .expect("output_norm.weight not found") as u32;
+        .expect("output_norm.weight not found");
     let norm_params = RMSNormParams {
         count: dim,
-        weights_offset: norm_weight_offset,
+        weights_offset: (norm_weight_offset / 4) as u32, // word index (byte_offset / 4) — matches sh_rmsnorm.wgsl read_blob() convention
         eps: spec.rms_eps,
         padding: 0,
     };
@@ -639,7 +662,7 @@ fn run_inference_completion(
                 let normed_output =
                     pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
                 last_logits = if use_cpu_head {
-                    cpu_head_logits(embd_table_cpu, &normed_output, spec.n_vocab, dim as usize, spec.final_logit_softcap)
+                    cpu_head_logits(output_head_cpu, &normed_output, spec.n_vocab, dim as usize, spec.final_logit_softcap)
                 } else {
                     pipeline.run_matmul_f32(
                         device,
@@ -691,6 +714,10 @@ fn run_inference_completion(
 
             let (_pre_norm_a, l21_a, gpu_logits_a) = {
                 let cache_guard = kv_cache.lock().unwrap();
+                // FSE: process the full prompt in one shot. Per-layer sync removed from
+                // inference.rs — all 28 layers execute in one command buffer. chunk_tokens
+                // only exists as a safety valve for extremely long prompts (>512 tokens).
+                // Layer weights are traversed once per chunk, not once per layer per chunk.
                 pipeline.run_full_model_prefill_chunked_with_cache_state(
                     device,
                     queue,
@@ -700,11 +727,11 @@ fn run_inference_completion(
                     0,
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     spec,
-                    512,
+                    32, // TDR-safe: 1 layer at batch=32 is ~3× batch=10 (proven safe)
                 )
             };
             let logits_a = if use_cpu_head {
-                cpu_head_logits(embd_table_cpu, &l21_a, spec.n_vocab, dim as usize, spec.final_logit_softcap)
+                cpu_head_logits(output_head_cpu, &l21_a, spec.n_vocab, dim as usize, spec.final_logit_softcap)
             } else {
                 gpu_logits_a
             };
@@ -738,11 +765,11 @@ fn run_inference_completion(
                 0,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 spec,
-                512,
+                32, // TDR-safe: per-layer submit in inference.rs; no poll between layers
             )
         };
         let logits_b = if use_cpu_head {
-            cpu_head_logits(embd_table_cpu, &l21_b, spec.n_vocab, dim as usize, spec.final_logit_softcap)
+            cpu_head_logits(output_head_cpu, &l21_b, spec.n_vocab, dim as usize, spec.final_logit_softcap)
         } else {
             gpu_logits_b
         };
@@ -988,7 +1015,7 @@ fn run_inference_completion(
             pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
 
         logits_vec = if use_cpu_head {
-            cpu_head_logits(embd_table_cpu, &normed_output, spec.n_vocab, dim as usize, spec.final_logit_softcap)
+            cpu_head_logits(output_head_cpu, &normed_output, spec.n_vocab, dim as usize, spec.final_logit_softcap)
         } else {
             pipeline.run_matmul_f32(
                 device,
@@ -1126,6 +1153,7 @@ pub(super) async fn process_inference_job(
     kv_cache: Arc<Mutex<KVCache>>,
     output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
     embd_table_cpu: &[f32],         // Pre-dequantized F32 token embeddings (CPU)
+    output_head_cpu: &[f32],        // CPU dequant of output.weight for CPU logit path
     use_cpu_head: bool,             // True when output head buffer exceeds binding limit
     vision_model: Option<&GpuVisionModel>,
 ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
@@ -1172,6 +1200,7 @@ pub(super) async fn process_inference_job(
         Arc::clone(&kv_cache),
         output_head_f32,
         embd_table_cpu,
+        output_head_cpu,
         use_cpu_head,
         vision_model,
     )?;

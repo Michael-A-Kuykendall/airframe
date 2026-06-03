@@ -3,14 +3,21 @@ use super::preflight::PreflightResources;
 use crate::core::spec::ModelSpec;
 use std::fs::File;
 use std::io::{Read, Seek};
+use std::num::NonZeroU64;
 use std::path::Path;
 use wgpu::util::DeviceExt; // Assuming ModelSpec is here or accessible
 
+/// Split point for the 3-way GGUF buffer binding.
+/// 2,000,000,000 bytes = ~1.86 GiB — safely below the 2,147,483,647 binding limit,
+/// and 256-byte aligned (required for sub-range offsets).
+pub const BLOB_CHUNK_BYTES: u64 = 2_000_000_000;
+
 /// A GPU-resident GGUF model.
-/// The entire file content is loaded into a single read-only storage buffer (`ByteAddressBuffer` in HLSL terms).
+/// The entire file content is loaded into a single read-only storage buffer.
 ///
-/// This is the "Bindless" approach: instead of binding buffers for each tensor,
-/// we bind the whole file once, and the shader reads by byte offset.
+/// For models > 2 GB the buffer is exposed to shaders through three sub-range
+/// bindings (blob_0 / blob_1 / blob_2) so that each individual binding stays
+/// within `max_storage_buffer_binding_size`.
 pub struct BindlessModel {
     /// The massive buffer containing the raw GGUF file bytes.
     /// Usage: STORAGE | COPY_DST
@@ -19,11 +26,62 @@ pub struct BindlessModel {
     /// Size in bytes (for boundary checking)
     pub size: u64,
 
+    /// A minimal 4-byte dummy STORAGE buffer used to fill blob_1 / blob_2
+    /// bindings for models whose data fits within a single 2 GB chunk.
+    pub dummy_buf: wgpu::Buffer,
+
     /// Parsed Metadata (tensor offsets)
     pub metadata: BindlessMetadata,
 
     /// Pre-fused resources (RoPE tables, Norm Banks)
     pub preflight: Option<PreflightResources>,
+}
+
+impl BindlessModel {
+    // ------------------------------------------------------------------
+    // Sub-range binding helpers
+    // Each binding covers at most BLOB_CHUNK_BYTES bytes of gpu_buffer.
+    // ------------------------------------------------------------------
+
+    /// Binding resource for blob_0: bytes [0, min(CHUNK, size)).
+    pub fn blob_binding_0(&self) -> wgpu::BindingResource<'_> {
+        let sz = self.size.min(BLOB_CHUNK_BYTES);
+        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &self.gpu_buffer,
+            offset: 0,
+            size: Some(NonZeroU64::new(sz).unwrap()),
+        })
+    }
+
+    /// Binding resource for blob_1: bytes [CHUNK, min(2·CHUNK, size)).
+    /// Falls back to the 4-byte dummy if the model fits in blob_0.
+    pub fn blob_binding_1(&self) -> wgpu::BindingResource<'_> {
+        if self.size <= BLOB_CHUNK_BYTES {
+            return self.dummy_buf.as_entire_binding();
+        }
+        let offset = BLOB_CHUNK_BYTES;
+        let sz = (self.size - BLOB_CHUNK_BYTES).min(BLOB_CHUNK_BYTES);
+        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &self.gpu_buffer,
+            offset,
+            size: Some(NonZeroU64::new(sz).unwrap()),
+        })
+    }
+
+    /// Binding resource for blob_2: bytes [2·CHUNK, size).
+    /// Falls back to the 4-byte dummy for models < 4 GB.
+    pub fn blob_binding_2(&self) -> wgpu::BindingResource<'_> {
+        if self.size <= 2 * BLOB_CHUNK_BYTES {
+            return self.dummy_buf.as_entire_binding();
+        }
+        let offset = 2 * BLOB_CHUNK_BYTES;
+        let sz = self.size - 2 * BLOB_CHUNK_BYTES;
+        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &self.gpu_buffer,
+            offset,
+            size: Some(NonZeroU64::new(sz).unwrap()),
+        })
+    }
 }
 
 impl BindlessModel {
@@ -86,11 +144,18 @@ impl BindlessModel {
             None
         };
 
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("GGUF Dummy Blob"),
+            contents: &[0u8; 4],
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
         println!("[BindlessLoader] Upload Complete.");
 
         Self {
             gpu_buffer,
             size,
+            dummy_buf,
             metadata,
             preflight,
         }

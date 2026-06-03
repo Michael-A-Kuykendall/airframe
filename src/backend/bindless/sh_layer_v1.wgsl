@@ -46,7 +46,22 @@ struct CacheParams {
 };
 
 // Bindings
-@group(0) @binding(0) var<storage, read> gguf_blob: array<u32>;
+@group(0) @binding(0)  var<storage, read> blob_0: array<u32>;
+@group(0) @binding(10) var<storage, read> blob_1: array<u32>;
+@group(0) @binding(11) var<storage, read> blob_2: array<u32>;
+
+const BLOB_SPLIT_0: u32 = 500000000u;  // 2,000,000,000 bytes / 4 = 500M words
+const BLOB_SPLIT_1: u32 = 1000000000u; // 4,000,000,000 bytes / 4 = 1B words
+
+fn read_blob(word_idx: u32) -> u32 {
+    if word_idx < BLOB_SPLIT_0 {
+        return blob_0[word_idx];
+    } else if word_idx < BLOB_SPLIT_1 {
+        return blob_1[word_idx - BLOB_SPLIT_0];
+    } else {
+        return blob_2[word_idx - BLOB_SPLIT_1];
+    }
+}
 @group(0) @binding(1) var<storage, read_write> activation_in: array<f32>; // The "Residual" stream
 @group(0) @binding(2) var<storage, read_write> temp_state: array<f32>;    // Scratchpad
 @group(0) @binding(3) var<uniform> offsets: LayerOffsets;
@@ -72,7 +87,7 @@ fn unpack_q4_0(block_val: u32, idx_in_block: u32) -> f32 {
 //   [16..143] qs   (128 bytes, 4-bit nibbles)
 // -------------------------------------------------------------------------
 fn read_byte_gguf(byte_idx: u32) -> u32 {
-    return extractBits(gguf_blob[byte_idx / 4u], (byte_idx % 4u) * 8u, 8u);
+    return extractBits(read_blob(byte_idx / 4u), (byte_idx % 4u) * 8u, 8u);
 }
 
 // Returns vec2(sc, m) — 6-bit unsigned scale and min for sub-block j.
@@ -96,13 +111,13 @@ fn get_scale_min_k4(j: u32, scales_base_byte: u32) -> vec2<u32> {
 // elem_in_block:   0..255
 fn dequant_q4k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     // Read d (fp16 at offset 0)
-    let d_packed = extractBits(gguf_blob[block_base_byte / 4u],
+    let d_packed = extractBits(read_blob(block_base_byte / 4u),
                                (block_base_byte % 4u) * 8u, 16u);
     let d = unpack2x16float(d_packed).x;
 
     // Read dmin (fp16 at offset 2)
     let dmin_byte = block_base_byte + 2u;
-    let dmin_packed = extractBits(gguf_blob[dmin_byte / 4u],
+    let dmin_packed = extractBits(read_blob(dmin_byte / 4u),
                                   (dmin_byte % 4u) * 8u, 16u);
     let dmin_val = unpack2x16float(dmin_packed).x;
 
@@ -144,7 +159,7 @@ fn dequant_q4k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 fn dequant_q6k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     // Read d (fp16 at byte offset 208)
     let d_byte = block_base_byte + 208u;
-    let d_packed = extractBits(gguf_blob[d_byte / 4u], (d_byte % 4u) * 8u, 16u);
+    let d_packed = extractBits(read_blob(d_byte / 4u), (d_byte % 4u) * 8u, 16u);
     let d = unpack2x16float(d_packed).x;
 
     let half    = elem_in_block / 128u;   // 0 or 1
@@ -182,7 +197,7 @@ fn dequant_q6k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 //   [2..33] qs  (32 int8 values)
 // -------------------------------------------------------------------------
 fn dequant_q8_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
-    let scale_packed = extractBits(gguf_blob[block_base_byte / 4u],
+    let scale_packed = extractBits(read_blob(block_base_byte / 4u),
                                    (block_base_byte % 4u) * 8u, 16u);
     let scale = unpack2x16float(scale_packed).x;
     let qs_byte = block_base_byte + 2u + elem_in_block;
@@ -193,7 +208,7 @@ fn dequant_q8_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 
 // Read a single fp16 value from an arbitrary byte offset in gguf_blob.
 fn dequant_f16_at(byte_offset: u32) -> f32 {
-    let packed = extractBits(gguf_blob[byte_offset / 4u],
+    let packed = extractBits(read_blob(byte_offset / 4u),
                              (byte_offset % 4u) * 8u, 16u);
     return unpack2x16float(packed).x;
 }
@@ -211,11 +226,11 @@ fn dequant_f16_at(byte_offset: u32) -> f32 {
 // -------------------------------------------------------------------------
 fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     // d and dmin (fp16)
-    let d_packed = extractBits(gguf_blob[block_base_byte / 4u],
+    let d_packed = extractBits(read_blob(block_base_byte / 4u),
                                (block_base_byte % 4u) * 8u, 16u);
     let d = unpack2x16float(d_packed).x;
     let dmin_byte = block_base_byte + 2u;
-    let dmin_packed = extractBits(gguf_blob[dmin_byte / 4u],
+    let dmin_packed = extractBits(read_blob(dmin_byte / 4u),
                                   (dmin_byte % 4u) * 8u, 16u);
     let dmin_val = unpack2x16float(dmin_packed).x;
 
@@ -376,7 +391,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else if (qt == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_byte_offset / 4u + row_idx * params.dim + col;
-            dot += temp_state[temp_base + col] * bitcast<f32>(gguf_blob[w_idx]);
+            dot += temp_state[temp_base + col] * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Q4_0 (quant_type == 2)
         let blocks_per_row = params.dim / 32u;
@@ -384,7 +399,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var b = 0u; b < blocks_per_row; b++) {
             let block_base = row_start_byte + (b * 18u);
             let scale_idx = block_base / 4u;
-            let scale_packed = extractBits(gguf_blob[scale_idx], (block_base % 4u) * 8u, 16u);
+            let scale_packed = extractBits(read_blob(scale_idx), (block_base % 4u) * 8u, 16u);
             let scale = unpack2x16float(scale_packed).x;
             let qs_byte_start = block_base + 2u;
             for (var i = 0u; i < 32u; i++) {
@@ -392,7 +407,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let val_x = temp_state[temp_base + col];
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;
-                let qs_word = gguf_blob[qs_idx / 4u];
+                let qs_word = read_blob(qs_idx / 4u);
                 let qs_byte = extractBits(qs_word, (qs_idx % 4u) * 8u, 8u);
                 let nib = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
                 let val_w = (f32(nib) - 8.0) * scale;
@@ -497,7 +512,7 @@ fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rms = inverseSqrt(sum_sq / f32(params.head_dim) + params.rms_eps);
 
     // Read norm weight for this dimension from GGUF blob (F32)
-    let w = bitcast<f32>(gguf_blob[norm_off / 4u + dim_in_head]);
+    let w = bitcast<f32>(read_blob(norm_off / 4u + dim_in_head));
 
     // Apply norm and write back
     if (!is_k) {
@@ -680,7 +695,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else if ((params.quant_type & 0xFFu) == 0u) { // F32
         for (var col = 0u; col < attn_dim; col++) {
             let w_idx = weight_byte_offset / 4u + idx * attn_dim + col;
-            dot += temp_state[temp_base + col] * bitcast<f32>(gguf_blob[w_idx]);
+            dot += temp_state[temp_base + col] * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Q4_0
         let blocks_per_row = attn_dim / 32u;
@@ -688,7 +703,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var b = 0u; b < blocks_per_row; b++) {
             let block_base = row_start_byte + (b * 18u);
             let scale_idx = block_base / 4u;
-            let scale_packed = extractBits(gguf_blob[scale_idx], (block_base % 4u) * 8u, 16u);
+            let scale_packed = extractBits(read_blob(scale_idx), (block_base % 4u) * 8u, 16u);
             let w_scale = unpack2x16float(scale_packed).x;
             let qs_byte_start = block_base + 2u;
             for (var i = 0u; i < 32u; i++) {
@@ -696,7 +711,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let val_ctx = temp_state[temp_base + col];
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;
-                let qs_word = gguf_blob[qs_idx / 4u];
+                let qs_word = read_blob(qs_idx / 4u);
                 let qs_byte = extractBits(qs_word, (qs_idx % 4u) * 8u, 8u);
                 let nib = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
                 let val_w = (f32(nib) - 8.0) * w_scale;
@@ -786,51 +801,99 @@ fn main_post_ffw_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     activation_in[act_base + idx] += normed_dot - dot;
 }
 
+// Workgroup-shared partial sums for the FFN norm cooperative reduction.
+// 256 slots × 4 bytes = 1 KB — well within the 16 KB workgroup memory limit.
+var<workgroup> wg_rms_partial: array<f32, 256>;
+
 // -------------------------------------------------------------------------
-// Kernel 3: FFN Proj (Norm -> Gate/Up -> SiLu)
+// Kernel 3: FFN Norm Broadcast — cooperative parallel reduction
+// -------------------------------------------------------------------------
+// One workgroup per token (dispatch X=1, Y=batch_size).  All 256 threads
+// cooperate to compute the RMS scalar in a single O(dim) pass, then
+// broadcast the normalized+weighted activations into the scratch slot.
+//
+// FSE invariant: activation_in is traversed ONCE per token, not once per
+// output element (the old per-thread O(dim) loop was O(dim²) total).
+@compute @workgroup_size(256, 1, 1)
+fn main_ffn_norm(
+    @builtin(local_invocation_id)  lid:       vec3<u32>,
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+) {
+    let lx        = lid.x;
+    let token_idx = global_id.y;
+
+    // token_idx is uniform across all 256 threads in this workgroup (same Y),
+    // so this early-return is uniform and does not break workgroupBarrier.
+    if (token_idx >= cache_params.batch_size) { return; }
+
+    let act_base  = token_idx * params.dim;
+    let temp_base = token_idx * params.temp_stride;
+
+    // ── 1. Each thread accumulates its strided partial sum-of-squares ──────
+    var partial = 0.0;
+    for (var i = lx; i < params.dim; i += 256u) {
+        let v = activation_in[act_base + i];
+        partial += v * v;
+    }
+    wg_rms_partial[lx] = partial;
+    workgroupBarrier();
+
+    // ── 2. Parallel reduction: 256 → 1 in shared memory ────────────────────
+    for (var stride = 128u; stride > 0u; stride = stride >> 1u) {
+        if (lx < stride) {
+            wg_rms_partial[lx] += wg_rms_partial[lx + stride];
+        }
+        workgroupBarrier();
+    }
+
+    let rms = inverseSqrt(wg_rms_partial[0] / f32(params.dim) + params.rms_eps);
+
+    // ── 3. Write normalized + norm-weight-scaled activations ────────────────
+    let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
+    for (var j = lx; j < params.dim; j += 256u) {
+        let norm_w = norm_bank[norm_offset_base + j];
+        temp_state[temp_base + params.ffn_dim * 2u + j] =
+            activation_in[act_base + j] * rms * norm_w;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Kernel 4: FFN Proj (Gate/Up -> SiLu)
 // -------------------------------------------------------------------------
 @compute @workgroup_size(256, 1, 1)
 fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    // Output size: FFN Intermed Dim (5632 for TinyLlama).
-    // Gate and Up are computed in parallel.
-    // temp_state layout: [Gate (0..5631), Up (5632..11263)]
-    // We launch 11264 threads?
-    // Typically ffn_gate and ffn_up are separate matrices.
-    // We can handle them by idx range.
-    
-    let ffn_dim = params.ffn_dim; 
+    let ffn_dim = params.ffn_dim;
     let idx = global_id.x;
     let token_idx = global_id.y;
-    
+
     if (idx >= ffn_dim * 2u || token_idx >= cache_params.batch_size) { return; }
-    
-    let act_base = token_idx * params.dim;
+
+    let act_base  = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;
-    
-    // 0. RMS Norm (FFN Norm) - Same Naive implementation
-    // Ideally Read-Once.
+
+    // Inline RMSNorm — reads activation_in directly (no stash dependency).
     var sum_sq = 0.0;
     for (var i = 0u; i < params.dim; i++) {
         let val = activation_in[act_base + i];
         sum_sq += val * val;
     }
     let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
-    
+
+    let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
+
     // Select Matrix
     var weight_off: u32;
     var row_idx = idx;
-    
+
     if (idx < ffn_dim) {
         weight_off = offsets.ffn_gate; // Gate
     } else {
         weight_off = offsets.ffn_up; // Up
         row_idx = idx - ffn_dim;
     }
-    
+
     // MatMul
     var dot = 0.0;
-    // Norm Params Base (Layer * 4 + 1 for FFN)
-    let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
 
     if ((params.quant_type & 0xFFu) == 14u) { // Q6_K
         let bpr = params.dim / 256u;
@@ -839,8 +902,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let bb = row_start + b * 210u;
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 dot += val_x * dequant_q6k_elem(bb, e);
             }
         }
@@ -851,8 +913,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let bb = row_start + b * 176u;
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 dot += val_x * dequant_q5k_elem(bb, e);
             }
         }
@@ -863,8 +924,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let block_base_k = row_start_byte_k + (b * 144u);
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 dot += val_x * dequant_q4k_elem(block_base_k, e);
             }
         }
@@ -875,24 +935,21 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let bb = row_start + b * 34u;
             for (var e = 0u; e < 32u; e++) {
                 let col = b * 32u + e;
-                let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 dot += val_x * dequant_q8_0_elem(bb, e);
             }
         }
     } else if ((params.quant_type & 0xFFu) == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_off + (row_idx * params.dim + col) * 2u;
-            let norm_w = norm_bank[norm_offset_base + col];
-            let val_x = activation_in[act_base + col] * rms * norm_w;
+            let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
             dot += val_x * dequant_f16_at(w_byte);
         }
     } else if ((params.quant_type & 0xFFu) == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_off / 4u + row_idx * params.dim + col;
-            let norm_w = norm_bank[norm_offset_base + col];
-            let val_x = activation_in[act_base + col] * rms * norm_w;
-            dot += val_x * bitcast<f32>(gguf_blob[w_idx]);
+            let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+            dot += val_x * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Q4_0
         let blocks_per_row = params.dim / 32u;
@@ -900,16 +957,15 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var b = 0u; b < blocks_per_row; b++) {
             let block_base = row_start_byte + (b * 18u);
             let scale_idx = block_base / 4u;
-            let scale_packed = extractBits(gguf_blob[scale_idx], (block_base % 4u) * 8u, 16u);
+            let scale_packed = extractBits(read_blob(scale_idx), (block_base % 4u) * 8u, 16u);
             let scale = unpack2x16float(scale_packed).x;
             let qs_byte_start = block_base + 2u;
             for (var i = 0u; i < 32u; i++) {
                 let col = b * 32u + i;
-                let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;
-                let qs_word = gguf_blob[qs_idx / 4u];
+                let qs_word = read_blob(qs_idx / 4u);
                 let qs_byte = extractBits(qs_word, (qs_idx % 4u) * 8u, 8u);
                 let nib = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
                 let val_w = (f32(nib) - 8.0) * scale;
@@ -1014,7 +1070,7 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let w_idx = weight_off / 4u + idx * ffn_dim + col;
             let val_gate = temp_state[temp_base + col];
             let val_up   = temp_state[temp_base + ffn_dim + col];
-            dot += (val_gate * val_up) * bitcast<f32>(gguf_blob[w_idx]);
+            dot += (val_gate * val_up) * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Q4_0
         let blocks_per_row = ffn_dim / 32u;
@@ -1022,7 +1078,7 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var b = 0u; b < blocks_per_row; b++) {
             let block_base = row_start_byte + (b * 18u);
             let scale_idx = block_base / 4u;
-            let scale_packed = extractBits(gguf_blob[scale_idx], (block_base % 4u) * 8u, 16u);
+            let scale_packed = extractBits(read_blob(scale_idx), (block_base % 4u) * 8u, 16u);
             let scale = unpack2x16float(scale_packed).x;
             let qs_byte_start = block_base + 2u;
             for (var i = 0u; i < 32u; i++) {
@@ -1032,7 +1088,7 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let val_x    = val_gate * val_up;
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;
-                let qs_word = gguf_blob[qs_idx / 4u];
+                let qs_word = read_blob(qs_idx / 4u);
                 let qs_byte = extractBits(qs_word, (qs_idx % 4u) * 8u, 8u);
                 let nib = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
                 let val_w = (f32(nib) - 8.0) * scale;

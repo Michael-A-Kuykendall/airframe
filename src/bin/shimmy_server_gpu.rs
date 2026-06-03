@@ -427,7 +427,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
     limits.max_buffer_size = adapter_limits.max_buffer_size;
-    limits.max_storage_buffers_per_shader_stage = 8;
+    limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage;
     limits.max_compute_invocations_per_workgroup = 256;
 
     let (device, queue) = adapter
@@ -476,18 +476,17 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // === Q6_K Output Head Workaround (Phase 4E) ===
     // TinyLlama Q4_0 uses Q6_K for output.weight (not Q4_0!)
     // GPU doesn't have Q6_K shader yet, so dequant to F32 on CPU
-    let output_head_f32 = load_output_head_f32(&model_path, &gpu_model, &device, &queue, &spec)?;
-    eprintln!("[GPU Server] Output head dequantized to F32 (262 MB)");
-
-    // If the output head buffer exceeds the hardware binding limit, route logit computation
-    // through the CPU embedding table (already loaded to RAM) instead of the GPU shader.
-    let use_cpu_head = output_head_f32.size() > adapter_limits.max_storage_buffer_binding_size as u64;
+    let (output_head_f32, output_head_cpu_vec) = load_output_head_f32(
+        &model_path, &gpu_model, &device, &queue, &spec,
+        adapter_limits.max_storage_buffer_binding_size as u64,
+    )?;
+    // use_cpu_head: true when a 4-byte placeholder was returned (output head exceeded binding
+    // limit and was NOT uploaded to VRAM — saved ~2 GB VRAM for large vocab models).
+    let use_cpu_head = output_head_f32.size() <= 4;
     if use_cpu_head {
-        eprintln!(
-            "[GPU Server] Output head ({} MB) exceeds binding limit ({} MB) — CPU logit path active",
-            output_head_f32.size() / 1_048_576,
-            adapter_limits.max_storage_buffer_binding_size / 1_048_576,
-        );
+        eprintln!("[GPU Server] Output head in CPU RAM only (exceeds binding limit) — CPU logit path active");
+    } else {
+        eprintln!("[GPU Server] Output head dequantized to F32 in VRAM");
     }
 
     // === Token Embedding CPU Table ===
@@ -703,6 +702,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 cache_clone,
                 &output_head_f32,
                 &embd_table_cpu,
+                &output_head_cpu_vec,
                 use_cpu_head,
                 vision_model.as_deref(),
             )
@@ -1264,7 +1264,8 @@ fn load_output_head_f32(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     spec: &ModelSpec,
-) -> Result<wgpu::Buffer, Box<dyn std::error::Error>> {
+    max_binding_bytes: u64,
+) -> Result<(wgpu::Buffer, Vec<f32>), Box<dyn std::error::Error>> {
     // Resolve tensor name: prefer output.weight, fall back to tied token_embd.weight
     let tensor_name = if gpu_model.metadata.get_tensor_type("output.weight").is_some() {
         "output.weight"
@@ -1334,12 +1335,30 @@ fn load_output_head_f32(
         &tensor_f32.data[..10.min(tensor_f32.data.len())]
     );
 
+    // Check if output head would exceed wgpu binding limit — if so, skip GPU allocation.
+    // The CPU logit path (cpu_head_logits) will use the returned Vec<f32> directly.
+    let f32_bytes = (tensor_f32.data.len() * 4) as u64;
+    if f32_bytes > max_binding_bytes {
+        eprintln!(
+            "[GPU Server] Output head ({} MB) exceeds binding limit ({} MB) — skipping GPU allocation, CPU logit path active",
+            f32_bytes / 1_048_576,
+            max_binding_bytes / 1_048_576,
+        );
+        let placeholder = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("OutputHeadPlaceholder"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        return Ok((placeholder, tensor_f32.data));
+    }
+
     // Upload to GPU (STORAGE usage for matmul shader)
     // Use create_buffer + queue.write_buffer to avoid mapped_at_creation staging path
     // which can fail on Vulkan (Linux) after large prior VRAM uploads.
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Output Head F32"),
-        size: (tensor_f32.data.len() * 4) as u64,
+        size: f32_bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -1347,10 +1366,10 @@ fn load_output_head_f32(
 
     eprintln!(
         "[GPU Server] Output head F32 buffer: {} MB",
-        (tensor_f32.data.len() * 4) as f32 / 1024.0 / 1024.0
+        f32_bytes as f32 / 1024.0 / 1024.0
     );
 
-    Ok(buffer)
+    Ok((buffer, tensor_f32.data))
 }
 
 fn build_templated_prompt(

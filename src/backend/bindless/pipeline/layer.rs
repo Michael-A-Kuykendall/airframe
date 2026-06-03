@@ -67,7 +67,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffer.as_entire_binding(),
+                    resource: model.blob_binding_0(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -106,6 +106,22 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 7,
                     resource: kv_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.blob_binding_1(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.blob_binding_2(),
                 },
             ],
         });
@@ -282,7 +298,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffer.as_entire_binding(),
+                    resource: model.blob_binding_0(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -329,6 +345,14 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 9,
                     resource: cache_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.blob_binding_1(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.blob_binding_2(),
                 },
             ],
         });
@@ -418,7 +442,19 @@ impl BindlessPipeline {
             encoder.copy_buffer_to_buffer(&activation_buffer, 0, &staging_mid, 0, dim * 4);
         }
 
-        // Kernel 5: FFN Projection
+        // Kernel 5: FFN Norm Broadcast (cooperative reduction)
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("FFNNorm"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_ffn_norm);
+            // X=1: one workgroup (256 threads) cooperates on the single token.
+            cpass.dispatch_workgroups(1, 1, 1);
+        }
+
+        // Kernel 6: FFN Projection
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FFN"),
@@ -429,7 +465,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_ffn, 1, 1);
         }
 
-        // Kernel 6: FFN Down
+        // Kernel 7: FFN Down
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FFNDown"),
@@ -549,7 +585,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffer.as_entire_binding(),
+                    resource: model.blob_binding_0(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -596,6 +632,14 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 9,
                     resource: cache_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.blob_binding_1(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.blob_binding_2(),
                 },
             ],
         });
@@ -682,7 +726,19 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         } // ← GPU waits for PostAttnNorm to finish
 
-        // Kernel 5: FFN gate/up + SiLU
+        // Kernel 5: FFN normalization broadcast (cooperative reduction)
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - FFNNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_ffn_norm);
+            // X=1: 256 threads share the token via local_invocation_id.
+            cpass.dispatch_workgroups(1, 1, 1);
+        } // ← GPU waits for FFNNorm to finish
+
+        // Kernel 6: FFN gate/up + SiLU
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - FFN", layer_idx)),
@@ -693,7 +749,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_ffn, 1, 1);
         } // ← GPU waits for FFN to finish
 
-        // Kernel 6: FFN down + residual
+        // Kernel 7: FFN down + residual
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - FFNDown", layer_idx)),
@@ -800,7 +856,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffer.as_entire_binding(),
+                    resource: model.blob_binding_0(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -847,6 +903,14 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 9,
                     resource: cache_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.blob_binding_1(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.blob_binding_2(),
                 },
             ],
         });
@@ -987,6 +1051,17 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
         encoder.copy_buffer_to_buffer(&activation_buffer, 0, &post_attn_staging, 0, dim * 4);
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("Layer {} - FFNNorm", layer_idx)),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_pipeline(&self.layer_pipeline_ffn_norm);
+            // X=1: 256 threads share the token via local_invocation_id.
+            cpass.dispatch_workgroups(1, 1, 1);
+        }
 
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

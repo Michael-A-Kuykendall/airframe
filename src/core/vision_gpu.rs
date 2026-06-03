@@ -444,13 +444,8 @@ fn readback_f32(device: &wgpu::Device, staging: &wgpu::Buffer) -> Vec<f32> {
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
-    loop {
-        device.poll(wgpu::PollType::Poll).expect("GPU device lost during vision readback");
-        if let Ok(res) = rx.try_recv() {
-            res.expect("Vision output buffer map failed");
-            break;
-        }
-    }
+    device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during vision readback");
+    rx.recv().expect("Map callback not triggered").expect("Vision output buffer map failed");
 
     let data = slice.get_mapped_range();
     let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();

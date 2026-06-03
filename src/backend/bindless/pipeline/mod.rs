@@ -127,6 +127,7 @@ pub struct BindlessPipeline {
     pub layer_pipeline_qk_norm: wgpu::ComputePipeline,
     pub layer_pipeline_attn_out: wgpu::ComputePipeline,
     pub layer_pipeline_attn_proj: wgpu::ComputePipeline,
+    pub layer_pipeline_ffn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_ffn_proj: wgpu::ComputePipeline,
     pub layer_pipeline_ffn_down: wgpu::ComputePipeline,
     pub layer_pipeline_post_attn_norm: wgpu::ComputePipeline,
@@ -467,6 +468,28 @@ impl BindlessPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    // GGUF Blob chunk 1: bytes [2GB, 4GB)
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    // GGUF Blob chunk 2: bytes [4GB, end)
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -609,6 +632,28 @@ impl BindlessPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    // GGUF Blob chunk 1: bytes [2GB, 4GB)
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    // GGUF Blob chunk 2: bytes [4GB, end)
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -641,6 +686,7 @@ impl BindlessPipeline {
         let layer_pipeline_qk_norm = mk_pipeline("main_qk_norm");
         let layer_pipeline_attn_out = mk_pipeline("main_attn_out");
         let layer_pipeline_attn_proj = mk_pipeline("main_attn_proj");
+        let layer_pipeline_ffn_norm = mk_pipeline("main_ffn_norm");
         let layer_pipeline_ffn_proj = mk_pipeline("main_ffn_proj");
         let layer_pipeline_ffn_down = mk_pipeline("main_ffn_down");
         let layer_pipeline_post_attn_norm = mk_pipeline("main_post_attn_norm");
@@ -662,6 +708,7 @@ impl BindlessPipeline {
             layer_pipeline_qk_norm,
             layer_pipeline_attn_out,
             layer_pipeline_attn_proj,
+            layer_pipeline_ffn_norm,
             layer_pipeline_ffn_proj,
             layer_pipeline_ffn_down,
             layer_pipeline_post_attn_norm,
