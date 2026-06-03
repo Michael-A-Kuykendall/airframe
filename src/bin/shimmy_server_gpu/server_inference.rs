@@ -577,10 +577,8 @@ fn run_inference_completion(
                 let mut layer_traces = Vec::new();
 
                 for layer_idx in 0..spec.n_layer {
-                    let layer_offsets = model
-                        .metadata
-                        .get_layer_offsets(layer_idx, spec.arch_string())
-                        .expect(&format!("Missing offsets for layer {}", layer_idx));
+                    let compiled = &model.metadata.compiled_layers[layer_idx];
+                    let layer_params_l = LayerParams { quant_type: compiled.quant_type_packed, ..layer_params };
 
                     let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = {
                         let mut cache = kv_cache.lock().unwrap();
@@ -591,8 +589,8 @@ fn run_inference_completion(
                             &mut cache,
                             layer_idx,
                             &layer_output,
-                            layer_offsets,
-                            layer_params,
+                            compiled.offsets,
+                            layer_params_l,
                         )
                     };
 
