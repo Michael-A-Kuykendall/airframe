@@ -283,9 +283,8 @@ fn make_prompt_renderer(
             eos,
         }
     } else {
-        PromptRenderer::Family(chat_template_family_for_model(spec))
+        PromptRenderer::Family(chat_template_family_for_model(spec, ""))
     }
-}
 }
 
 impl ChatCompletionRequest {

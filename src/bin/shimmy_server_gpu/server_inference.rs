@@ -680,11 +680,7 @@ fn run_inference_completion(
                 )?
             };
 
-            let logits_a = if use_cpu_head {
-                cpu_head_logits(embd_table_cpu, &l21_a, spec.n_vocab, dim as usize, spec.final_logit_softcap)
-            } else {
-                gpu_logits_a
-            };
+            let logits_a = gpu_logits_a;
 
             {
                 let mut cache = kv_cache.lock().unwrap();
@@ -727,11 +723,7 @@ fn run_inference_completion(
             )?
         };
 
-        let logits_b = if use_cpu_head {
-            cpu_head_logits(embd_table_cpu, &l21_b, spec.n_vocab, dim as usize, spec.final_logit_softcap)
-        } else {
-            gpu_logits_b
-        };
+        let logits_b = gpu_logits_b;
 
         {
             let mut cache = kv_cache.lock().unwrap();
