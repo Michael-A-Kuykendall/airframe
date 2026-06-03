@@ -5,8 +5,6 @@ pub(super) mod dequant;
 pub(super) mod inference;
 pub(super) mod layer;
 pub(super) mod matmul;
-pub mod resampler_gpu;
-pub mod vit_layer;
 
 //       pipeline/kv_cache.rs, pipeline/dispatch.rs — see C3 architectural debt.
 use crate::core::spec::ModelSpec;

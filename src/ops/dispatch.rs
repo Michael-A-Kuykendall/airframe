@@ -4,7 +4,7 @@
 //! for matrix operations, normalization, attention, and activations.
 
 use crate::core::{error::Result, tensor::Tensor};
-use crate::ops::reference::{activations, attention, ffn, matmul, rmsnorm, rope, softmax, vision};
+use crate::ops::reference::{activations, attention, ffn, matmul, rmsnorm, rope, softmax};
 use crate::runtime::kvcache::KvCache;
 
 /// Dispatcher for all tensor operations.
@@ -197,46 +197,6 @@ impl OpDispatcher {
         activations::gelu_f32(input)
     }
 
-    /// Patch embedding: image → token sequence via strided 2-D conv.
-    ///
-    /// * `image`  – `[C, H, W]` float32, values already normalised.
-    /// * `weight` – `[out_ch, C, patch, patch]` conv kernel.
-    /// * `bias`   – `[out_ch]`.
-    /// * `patch`  – Patch size in pixels (14 for SigLIP-So400M).
-    ///
-    /// Returns `[n_patches, out_ch]`.
-    pub fn patch_embed(
-        &self,
-        image: &Tensor,
-        weight: &Tensor,
-        bias: &Tensor,
-        patch: usize,
-    ) -> Result<Tensor> {
-        vision::patch_embed_f32(image, weight, bias, patch)
-    }
-
-    /// Scaled dot-product multi-head attention for ViT encoders.
-    ///
-    /// Takes **pre-projected** Q, K, V (bias already added by caller).
-    /// No RoPE. Always bidirectional. Used by SigLIP-So400M blocks.
-    ///
-    /// * `q`, `k`, `v` – `[seq, n_head * head_dim]`
-    /// * `o_weight`    – `[n_head * head_dim, out_dim]`
-    /// * `o_bias`      – `[out_dim]`
-    ///
-    /// Returns `[seq, out_dim]`.
-    pub fn vit_attention(
-        &self,
-        q: &Tensor,
-        k: &Tensor,
-        v: &Tensor,
-        o_weight: &Tensor,
-        o_bias: &Tensor,
-        n_head: usize,
-        head_dim: usize,
-    ) -> Result<Tensor> {
-        vision::vit_mha_f32(q, k, v, o_weight, o_bias, n_head, head_dim)
-    }
 }
 
 impl Default for OpDispatcher {

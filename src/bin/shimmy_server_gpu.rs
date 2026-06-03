@@ -9,7 +9,6 @@ use airframe::backend::bindless::pipeline::{
 use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0};
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
-use airframe::core::vision_gpu::GpuVisionModel;
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace,
     TokenTrace,
@@ -558,21 +557,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     }
     eprintln!("[GPU Server] FSE enabled (CrewChief active)");
 
-    // === Optional Vision Model (MiniCPM-V-2.6 mmproj) ===
-    // Set SHIMMY_MMPROJ_PATH to the path of mmproj-model-f16.gguf to enable
-    // multimodal image-to-text inference.  When unset the server runs text-only.
-    let vision_model: Option<Arc<GpuVisionModel>> =
-        std::env::var("SHIMMY_MMPROJ_PATH").ok().map(|p| {
-            eprintln!("[GPU Server] Loading vision model: {}", p);
-            Arc::new(
-                GpuVisionModel::from_mmproj_gguf(&p, &device)
-                    .expect("[GPU Server] Failed to load mmproj GGUF"),
-            )
-        });
-    if vision_model.is_some() {
-        eprintln!("[GPU Server] Vision model ready (SigLIP-So400M + Perceiver Resampler)");
-    }
-
     let shimmy_port = std::env::var("SHIMMY_PORT").unwrap_or_else(|_| "8080".to_string());
     let shimmy_bind_addr = format!("0.0.0.0:{}", shimmy_port);
     eprintln!(
@@ -711,7 +695,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 &spec,
                 cache_clone,
                 &embd_table_cpu,
-                vision_model.as_deref(),
             )
             .await
         };

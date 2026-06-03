@@ -5,4 +5,3 @@ pub mod matmul;
 pub mod rmsnorm;
 pub mod rope;
 pub mod softmax;
-pub mod vision;

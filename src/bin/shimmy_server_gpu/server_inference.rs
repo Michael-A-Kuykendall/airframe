@@ -12,7 +12,6 @@ use airframe::core::dequant::{
 };
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::spec::{GgufValue, ModelSpec};
-use airframe::core::vision_gpu::GpuVisionModel;
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace, TokenTrace,
 };
@@ -331,7 +330,6 @@ fn run_inference_completion(
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
     embd_table_cpu: &[f32], // Pre-dequantized CPU embedding table
-    vision_model: Option<&GpuVisionModel>,
 ) -> Result<(InferenceResponse, String), Box<dyn std::error::Error>> {
     let max_new_tokens = req.max_tokens.unwrap_or(64);
     let temperature = req.temperature.unwrap_or(0.8);
@@ -363,58 +361,7 @@ fn run_inference_completion(
             .collect();
     }
 
-    // ── Vision: encode image tiles if a payload + vision model are present ────
-    // Produces a flat [N_tiles × 64 × dim] f32 buffer.  `visual_seq_len` is the
-    // number of extra KV-cache positions the visual tokens occupy (replacing the
-    // single IMAGE_TOKEN_ID placeholder that was in the text prompt).
-    let (visual_embedding_flat, visual_seq_len): (Option<Vec<f32>>, usize) =
-        match (vision_model, req.image_payload.as_ref()) {
-            (Some(vm), Some(payload)) if !payload.pixels_b64.is_empty() => {
-                use base64::Engine as _;
-                let raw = base64::engine::general_purpose::STANDARD
-                    .decode(&payload.pixels_b64)
-                    .map_err(|e| format!("image_payload base64 decode failed: {}", e))?;
-                // Accept either raw HWC u8 pixels or a PNG file (detected by magic bytes).
-                let (pixels, img_h, img_w) = if raw.starts_with(b"\x89PNG") {
-                    let decoder = png::Decoder::new(raw.as_slice());
-                    let mut reader = decoder.read_info()
-                        .map_err(|e| format!("PNG decode failed: {}", e))?;
-                    let mut buf = vec![0u8; reader.output_buffer_size()];
-                    let info = reader.next_frame(&mut buf)
-                        .map_err(|e| format!("PNG frame read failed: {}", e))?;
-                    // Ensure RGB — strip alpha if present.
-                    let pixels_rgb: Vec<u8> = match info.color_type {
-                        png::ColorType::Rgb => buf[..info.buffer_size()].to_vec(),
-                        png::ColorType::Rgba => buf[..info.buffer_size()]
-                            .chunks_exact(4)
-                            .flat_map(|p| [p[0], p[1], p[2]])
-                            .collect(),
-                        other => return Err(format!("Unsupported PNG color type: {:?}", other).into()),
-                    };
-                    (pixels_rgb, info.height as usize, info.width as usize)
-                } else {
-                    // Raw HWC u8 RGB: use caller-supplied dimensions.
-                    (raw, payload.h, payload.w)
-                };
-                eprintln!(
-                    "[Vision] Encoding image {}×{} ({} bytes)",
-                    img_w, img_h, pixels.len()
-                );
-                let tile_outputs = vm.encode_tiles(&pixels, img_h, img_w, device, queue);
-                let n_tiles = tile_outputs.len();
-                let flat: Vec<f32> = tile_outputs.into_iter().flatten().collect();
-                // Each tile produces 64 visual tokens; dim is the resampler d_model (3584).
-                // The embedding table dim for the LLM may differ — visual tokens are already
-                // projected to LLM space by the Resampler, so we use them as-is.
-                let visual_seq = n_tiles * 64;
-                eprintln!(
-                    "[Vision] {} tile(s) → {} visual token positions",
-                    n_tiles, visual_seq
-                );
-                (Some(flat), visual_seq)
-            }
-            _ => (None, 0),
-        };
+    let (visual_embedding_flat, visual_seq_len): (Option<Vec<f32>>, usize) = (None, 0);
 
     let eos = tokenizer.eos_token();
     let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
@@ -1117,7 +1064,6 @@ pub(super) async fn process_inference_job(
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
     embd_table_cpu: &[f32],         // Pre-dequantized F32 token embeddings (CPU)
-    vision_model: Option<&GpuVisionModel>,
 ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
     let session_window_tokens = spec.n_ctx;
     let disable_session_window = env_flag("SHIMMY_DISABLE_SESSION_WINDOW");
@@ -1161,7 +1107,6 @@ pub(super) async fn process_inference_job(
         spec,
         Arc::clone(&kv_cache),
         embd_table_cpu,
-        vision_model,
     )?;
 
     if !disable_session_window {
