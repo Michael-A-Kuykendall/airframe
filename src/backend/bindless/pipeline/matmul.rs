@@ -213,6 +213,104 @@ impl BindlessPipeline {
         result
     }
 
+    /// Run the blob-based LM head matmul on CPU-side normed activation.
+    /// Uploads `input` to a transient GPU buffer, dispatches `main_lm_head`,
+    /// reads back the logits.  No F32 dequant buffer required — weights are
+    /// read directly from the GGUF blob.
+    pub fn run_lm_head_blob(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        model: &super::super::loader::BindlessModel,
+        input: &[f32],          // normed activation [dim]
+        vocab_size: u32,
+        dim: u32,
+        weight_off: u32,        // byte offset of output.weight in GGUF blob
+        quant_type: u32,        // GGML type
+        softcap: f32,
+    ) -> Vec<f32> {
+        let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("LM Head Input"),
+            contents: bytemuck::cast_slice(input),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        let output_size = (vocab_size as u64) * 4;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("LM Head Logits"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let head_params = HeadBlobParams {
+            vocab_size,
+            dim,
+            weight_off,
+            quant_type,
+            softcap,
+            _pad: 0,
+        };
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("LM Head Blob Params"),
+            contents: bytemuck::bytes_of(&head_params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("LM Head Blob BG"),
+            layout: &self.lm_head_blob_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0,  resource: model.blob_binding_0() },
+                wgpu::BindGroupEntry { binding: 1,  resource: input_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2,  resource: output_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3,  resource: params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 10, resource: model.blob_binding_1() },
+                wgpu::BindGroupEntry { binding: 11, resource: model.blob_binding_2() },
+            ],
+        });
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("LM Head Blob Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.lm_head_blob_pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = (vocab_size + 63) / 64;
+            cpass.dispatch_workgroups(workgroups, 1, 1);
+        }
+
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("LM Head Staging"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging, 0, output_size);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+        loop {
+            device.poll(wgpu::PollType::Poll).expect("GPU device lost during head readback");
+            if let Ok(res) = rx.try_recv() {
+                res.expect("LM head buffer map failed");
+                break;
+            }
+        }
+
+        let data = slice.get_mapped_range();
+        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging.unmap();
+        result
+    }
+
     /// Run RMSNorm Test
     pub fn run_rmsnorm_test(
         &self,

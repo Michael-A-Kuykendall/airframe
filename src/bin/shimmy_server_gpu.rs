@@ -501,22 +501,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // Flush any pending staging work from GGUF upload before allocating output head buffer
     device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during initial flush");
 
-    // === Q6_K Output Head Workaround (Phase 4E) ===
-    // TinyLlama Q4_0 uses Q6_K for output.weight (not Q4_0!)
-    // GPU doesn't have Q6_K shader yet, so dequant to F32 on CPU
-    let (output_head_f32, output_head_cpu_vec) = load_output_head_f32(
-        &model_path, &gpu_model, &device, &queue, &spec,
-        adapter_limits.max_storage_buffer_binding_size as u64,
-    )?;
-    // use_cpu_head: true when a 4-byte placeholder was returned (output head exceeded binding
-    // limit and was NOT uploaded to VRAM — saved ~2 GB VRAM for large vocab models).
-    let use_cpu_head = output_head_f32.size() <= 4;
-    if use_cpu_head {
-        eprintln!("[GPU Server] Output head in CPU RAM only (exceeds binding limit) — CPU logit path active");
-    } else {
-        eprintln!("[GPU Server] Output head dequantized to F32 in VRAM");
-    }
-
     // === Token Embedding CPU Table ===
     // The dequant pipeline uses a hardcoded Q4_0 shader, which is wrong for
     // Q4_K_M models where token_embd.weight is Q6_K (type 14).  Pre-compute
@@ -541,28 +525,26 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         kv_total_mb, max_ctx
     );
     // === VRAM Budget Check ===
-    // Tracks known large allocations: KV cache (K+V) + output head.
+    // Tracks known large allocations: KV cache (K+V).
     // Does not block startup — emits a structured warning if totals look tight.
     // Set SHIMMY_VRAM_LIMIT_MB to override the default (10500 for RTX 3060 12 GB).
     {
-        let head_mb = output_head_f32.size() / 1_048_576;
-        let total_known_mb = kv_total_mb + head_mb;
         let vram_limit_mb: u64 = std::env::var("SHIMMY_VRAM_LIMIT_MB")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(10500);
         eprintln!(
-            "[VRAM_BUDGET] kv_cache={} MB  output_head={} MB  tracked_total={} MB  limit={} MB",
-            kv_total_mb, head_mb, total_known_mb, vram_limit_mb
+            "[VRAM_BUDGET] kv_cache={} MB  tracked_total={} MB  limit={} MB",
+            kv_total_mb, kv_total_mb, vram_limit_mb
         );
-        if total_known_mb > vram_limit_mb {
-            let safe_ctx = ((vram_limit_mb.saturating_sub(head_mb))
+        if kv_total_mb > vram_limit_mb {
+            let safe_ctx = (vram_limit_mb
                 * 1_048_576
                 / (spec.n_layer as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4 * 2))
                 as u32;
             eprintln!(
                 "[VRAM_BUDGET] WARN: tracked allocations ({} MB) exceed limit ({} MB).",
-                total_known_mb, vram_limit_mb
+                kv_total_mb, vram_limit_mb
             );
             eprintln!(
                 "[VRAM_BUDGET] KV cache is dominant: ctx={}  layers={}  kv_heads={}  head_dim={}",
@@ -728,10 +710,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 &tokenizer,
                 &spec,
                 cache_clone,
-                &output_head_f32,
                 &embd_table_cpu,
-                &output_head_cpu_vec,
-                use_cpu_head,
                 vision_model.as_deref(),
             )
             .await
@@ -1279,125 +1258,6 @@ fn load_token_embd_cpu(
         (tensor_f32.data.len() * 4) as f32 / 1024.0 / 1024.0
     );
     Ok(tensor_f32.data)
-}
-
-/// Load and dequantize the output projection (lm_head) to F32.
-///
-/// Tries `output.weight` first; falls back to `token_embd.weight` for models
-/// that use tied embeddings (e.g. Llama 3.2 1B, many compact models).
-/// Handles F32, Q4_0, Q5_0, Q8_0, Q4_K, and Q6_K tensor types.
-fn load_output_head_f32(
-    model_path: &str,
-    gpu_model: &BindlessModel,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    spec: &ModelSpec,
-    max_binding_bytes: u64,
-) -> Result<(wgpu::Buffer, Vec<f32>), Box<dyn std::error::Error>> {
-    // Resolve tensor name: prefer output.weight, fall back to tied token_embd.weight
-    let tensor_name = if gpu_model.metadata.get_tensor_type("output.weight").is_some() {
-        "output.weight"
-    } else if gpu_model.metadata.get_tensor_type("token_embd.weight").is_some() {
-        eprintln!("[GPU Server] No output.weight found — using tied token_embd.weight");
-        "token_embd.weight"
-    } else {
-        return Err("Neither output.weight nor token_embd.weight found in model".into());
-    };
-
-    let ggml_type = gpu_model.metadata.get_tensor_type(tensor_name).unwrap();
-    let abs_offset = gpu_model.metadata.get_tensor_offset(tensor_name).unwrap();
-    let data_start = gpu_model.metadata.data_start_offset;
-    let relative_offset = abs_offset - data_start;
-
-    // Use dims from metadata; fall back to spec-derived shape if not stored
-    let dimensions = gpu_model
-        .metadata
-        .tensor_dims
-        .get(tensor_name)
-        .map(|d| d.iter().map(|&x| x as usize).collect::<Vec<_>>())
-        .unwrap_or_else(|| vec![spec.n_vocab, spec.n_embd]);
-
-    eprintln!(
-        "[GPU Server] Loading output head: {} (type={}, dims={:?})",
-        tensor_name, ggml_type, dimensions
-    );
-
-    let tensor_info = GgufTensorInfo {
-        name: tensor_name.to_string(),
-        dimensions,
-        ggml_type,
-        offset: relative_offset,
-    };
-
-    // Re-mmap the file for CPU dequant
-    let file = std::fs::File::open(model_path)?;
-    let mmap = unsafe { Mmap::map(&file)? };
-
-    // Dequantize to F32 based on actual tensor type
-    let tensor_f32 = match ggml_type {
-        0 => {
-            // F32 — direct copy
-            let start = (data_start + relative_offset) as usize;
-            let n = tensor_info.dimensions.iter().product::<usize>();
-            let bytes = &mmap[start..start + n * 4];
-            let data: Vec<f32> = bytes
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                .collect();
-            airframe::core::tensor::Tensor::new(data, tensor_info.dimensions.clone())?
-        }
-        2 => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
-        6 => dequantize_q5_0(&tensor_info, &mmap, data_start)?,
-        8 => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
-        12 => dequantize_q4_k(&tensor_info, &mmap, data_start)?,
-        14 => dequantize_q6_k(&tensor_info, &mmap, data_start)?,
-        other => {
-            return Err(format!("Unsupported output head quant type: {}", other).into());
-        }
-    };
-
-    eprintln!("[DEBUG] Dequantized tensor shape: {:?}", tensor_f32.shape);
-    eprintln!("[DEBUG] Total elements: {}", tensor_f32.data.len());
-    eprintln!(
-        "[DEBUG] First 10 values: {:?}",
-        &tensor_f32.data[..10.min(tensor_f32.data.len())]
-    );
-
-    // Check if output head would exceed wgpu binding limit — if so, skip GPU allocation.
-    // The CPU logit path (cpu_head_logits) will use the returned Vec<f32> directly.
-    let f32_bytes = (tensor_f32.data.len() * 4) as u64;
-    if f32_bytes > max_binding_bytes {
-        eprintln!(
-            "[GPU Server] Output head ({} MB) exceeds binding limit ({} MB) — skipping GPU allocation, CPU logit path active",
-            f32_bytes / 1_048_576,
-            max_binding_bytes / 1_048_576,
-        );
-        let placeholder = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("OutputHeadPlaceholder"),
-            size: 4,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-        return Ok((placeholder, tensor_f32.data));
-    }
-
-    // Upload to GPU (STORAGE usage for matmul shader)
-    // Use create_buffer + queue.write_buffer to avoid mapped_at_creation staging path
-    // which can fail on Vulkan (Linux) after large prior VRAM uploads.
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Output Head F32"),
-        size: f32_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&tensor_f32.data));
-
-    eprintln!(
-        "[GPU Server] Output head F32 buffer: {} MB",
-        f32_bytes as f32 / 1024.0 / 1024.0
-    );
-
-    Ok((buffer, tensor_f32.data))
 }
 
 fn build_templated_prompt(

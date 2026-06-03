@@ -272,22 +272,6 @@ fn rust_compile_check(source: &str) -> Result<(), String> {
 /// OpenAI-compatible chat completions request body.
 // When the output head buffer exceeds max_storage_buffer_binding_size, fall back to a plain
 // CPU dot-product against the pre-dequantized embedding table that is already in RAM.
-// This unblocks Gemma-2 (256K vocab × hidden_dim F32 > 2 GiB binding limit) at the cost of
-// ~5–15 ms per token on a server CPU — well within acceptable latency.
-fn cpu_head_logits(embd_table: &[f32], hidden: &[f32], vocab_size: usize, dim: usize, final_logit_softcap: f32) -> Vec<f32> {
-    (0..vocab_size)
-        .map(|i| {
-            let row = &embd_table[i * dim..(i + 1) * dim];
-            let logit: f32 = hidden.iter().zip(row).map(|(h, w)| h * w).sum();
-            if final_logit_softcap > 0.0 {
-                (logit / final_logit_softcap).tanh() * final_logit_softcap
-            } else {
-                logit
-            }
-        })
-        .collect()
-}
-
 /// MiniCPM-V-2.6 image placeholder token ID.
 const IMAGE_TOKEN_ID: u32 = 151_646;
 
@@ -346,10 +330,7 @@ fn run_inference_completion(
     tokenizer: &Tokenizer,
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
-    output_head_f32: &wgpu::Buffer,
     embd_table_cpu: &[f32], // Pre-dequantized CPU embedding table
-    output_head_cpu: &[f32], // CPU dequant of output.weight for CPU logit path
-    use_cpu_head: bool,     // True when output head buffer exceeds binding limit
     vision_model: Option<&GpuVisionModel>,
 ) -> Result<(InferenceResponse, String), Box<dyn std::error::Error>> {
     let max_new_tokens = req.max_tokens.unwrap_or(64);
@@ -661,18 +642,12 @@ fn run_inference_completion(
 
                 let normed_output =
                     pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
-                last_logits = if use_cpu_head {
-                    cpu_head_logits(output_head_cpu, &normed_output, spec.n_vocab, dim as usize, spec.final_logit_softcap)
-                } else {
-                    pipeline.run_matmul_f32(
-                        device,
-                        queue,
-                        output_head_f32,
-                        &normed_output,
-                        spec.n_vocab as u32,
-                        dim,
-                    )
-                };
+                {
+                    let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() { "output.weight" } else { "token_embd.weight" };
+                    let head_off = model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) as u32;
+                    let head_qt  = model.metadata.get_tensor_type(head_tensor).unwrap_or(2);
+                    last_logits = pipeline.run_lm_head_blob(device, queue, model, &normed_output, spec.n_vocab as u32, dim, head_off, head_qt, spec.final_logit_softcap);
+                }
 
                 let (cache_len_after, window_base_after) = {
                     let mut cache = kv_cache.lock().unwrap();
@@ -723,18 +698,14 @@ fn run_inference_completion(
                     queue,
                     model,
                     &batched_embd,
-                    if use_cpu_head { None } else { Some(&output_head_f32) },
+                    None, // blob head — quantized weights read directly from GGUF blob
                     0,
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     spec,
                     32, // TDR-safe: 1 layer at batch=32 is ~3× batch=10 (proven safe)
                 )
             };
-            let logits_a = if use_cpu_head {
-                cpu_head_logits(output_head_cpu, &l21_a, spec.n_vocab, dim as usize, spec.final_logit_softcap)
-            } else {
-                gpu_logits_a
-            };
+            let logits_a = gpu_logits_a;
 
             {
                 let mut cache = kv_cache.lock().unwrap();
@@ -761,18 +732,14 @@ fn run_inference_completion(
                 queue,
                 model,
                 &batched_embd,
-                if use_cpu_head { None } else { Some(&output_head_f32) },
+                None, // blob head — quantized weights read directly from GGUF blob
                 0,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 spec,
                 32, // TDR-safe: per-layer submit in inference.rs; no poll between layers
             )
         };
-        let logits_b = if use_cpu_head {
-            cpu_head_logits(output_head_cpu, &l21_b, spec.n_vocab, dim as usize, spec.final_logit_softcap)
-        } else {
-            gpu_logits_b
-        };
+        let logits_b = gpu_logits_b;
 
         {
             let mut cache = kv_cache.lock().unwrap();
@@ -1014,18 +981,12 @@ fn run_inference_completion(
         let normed_output =
             pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
 
-        logits_vec = if use_cpu_head {
-            cpu_head_logits(output_head_cpu, &normed_output, spec.n_vocab, dim as usize, spec.final_logit_softcap)
-        } else {
-            pipeline.run_matmul_f32(
-                device,
-                queue,
-                output_head_f32,
-                &normed_output,
-                spec.n_vocab as u32,
-                dim,
-            )
-        };
+        {
+            let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() { "output.weight" } else { "token_embd.weight" };
+            let head_off = model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) as u32;
+            let head_qt  = model.metadata.get_tensor_type(head_tensor).unwrap_or(2);
+            logits_vec = pipeline.run_lm_head_blob(device, queue, model, &normed_output, spec.n_vocab as u32, dim, head_off, head_qt, spec.final_logit_softcap);
+        }
 
         // Debug: show top-5 logits for first decode step
         if generated_count == 0 {
@@ -1151,10 +1112,7 @@ pub(super) async fn process_inference_job(
     tokenizer: &Tokenizer,
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
-    output_head_f32: &wgpu::Buffer, // Pre-dequantized F32 output weights
     embd_table_cpu: &[f32],         // Pre-dequantized F32 token embeddings (CPU)
-    output_head_cpu: &[f32],        // CPU dequant of output.weight for CPU logit path
-    use_cpu_head: bool,             // True when output head buffer exceeds binding limit
     vision_model: Option<&GpuVisionModel>,
 ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
     let session_window_tokens = spec.n_ctx;
@@ -1198,10 +1156,7 @@ pub(super) async fn process_inference_job(
         tokenizer,
         spec,
         Arc::clone(&kv_cache),
-        output_head_f32,
         embd_table_cpu,
-        output_head_cpu,
-        use_cpu_head,
         vision_model,
     )?;
 

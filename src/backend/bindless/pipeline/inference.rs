@@ -439,29 +439,37 @@ impl BindlessPipeline {
             ],
         });
 
-        // 4. Output Head (MatMul)
-        // When head_weights_override = None (CPU logit path), skip GPU head entirely.
-        // The caller (server) will compute logits on CPU from the normed activation.
-        let head_bg: Option<wgpu::BindGroup> = head_weights_override.map(|override_buf| {
-            let head_weight = model
-                .metadata
-                .get_tensor_offset("output.weight")
-                .or_else(|| model.metadata.get_tensor_offset("token_embd.weight"))
-                .unwrap_or(0);
+        // 4. Output Head
+        // When head_weights_override = Some(buf): diagnostic F32 matmul override path.
+        // When head_weights_override = None (default): blob-based quantized head — reads
+        //   output.weight directly from the GGUF blob, no dequant buffer required.
+        let head_tensor_name = if model.metadata.get_tensor_type("output.weight").is_some() {
+            "output.weight"
+        } else {
+            "token_embd.weight"
+        };
+        let head_weight_off = model.metadata.get_tensor_offset(head_tensor_name).unwrap_or(0) as u32;
+        let head_quant_type = model.metadata.get_tensor_type(head_tensor_name).unwrap_or(2);
 
+        enum HeadBg {
+            F32(wgpu::BindGroup),
+            Blob(wgpu::BindGroup),
+        }
+
+        let head_bg = if let Some(override_buf) = head_weights_override {
+            // --- Diagnostic F32 override (kept for shimmy_eval comparison tests) ---
             let head_params = MatMulParams {
                 n: vocab_size,
                 k: dim,
-                weights_offset: head_weight as u32,
+                weights_offset: head_weight_off,
                 padding: 0,
             };
             let head_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Head Params"),
+                label: Some("Head Params F32"),
                 contents: bytemuck::bytes_of(&head_params),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
-
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
+            HeadBg::F32(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Head BG F32"),
                 layout: &self.matmul_f32_layout,
                 entries: &[
@@ -486,8 +494,57 @@ impl BindlessPipeline {
                         resource: head_param_buf.as_entire_binding(),
                     },
                 ],
-            })
-        });
+            }))
+        } else {
+            // --- Default blob-based path: output.weight stays quantized on GPU ---
+            let head_params = HeadBlobParams {
+                vocab_size,
+                dim,
+                weight_off: head_weight_off,
+                quant_type: head_quant_type,
+                softcap: spec.final_logit_softcap,
+                _pad: 0,
+            };
+            let head_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Head Params Blob"),
+                contents: bytemuck::bytes_of(&head_params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            HeadBg::Blob(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Head BG Blob"),
+                layout: &self.lm_head_blob_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: model.blob_binding_0(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &temp_buffer,
+                            offset: 0,
+                            size: Some(token_size),
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: logits_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: head_param_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: model.blob_binding_1(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: model.blob_binding_2(),
+                    },
+                ],
+            }))
+        };
 
         // 5. Command Encoding
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -645,13 +702,18 @@ impl BindlessPipeline {
             cpass.set_pipeline(&self.rmsnorm_pipeline);
             cpass.dispatch_workgroups(wg_norm, 1, 1);
 
-            // Head — only dispatched when a GPU head bind group is available.
-            // When head_weights_override = None (CPU logit path), head_bg is None
-            // and logits_buffer stays zero; the caller uses cpu_head_logits instead.
-            if let Some(ref hbg) = head_bg {
-                cpass.set_bind_group(0, hbg, &[]);
-                cpass.set_pipeline(&self.matmul_f32_pipeline);
-                cpass.dispatch_workgroups(wg_head, 1, 1);
+            // Head — blob path (default) or F32 diagnostic override.
+            match &head_bg {
+                HeadBg::Blob(bg) => {
+                    cpass.set_bind_group(0, bg, &[]);
+                    cpass.set_pipeline(&self.lm_head_blob_pipeline);
+                    cpass.dispatch_workgroups(wg_head, 1, 1);
+                }
+                HeadBg::F32(bg) => {
+                    cpass.set_bind_group(0, bg, &[]);
+                    cpass.set_pipeline(&self.matmul_f32_pipeline);
+                    cpass.dispatch_workgroups(wg_head, 1, 1);
+                }
             }
         }
 
