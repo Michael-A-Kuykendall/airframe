@@ -28,6 +28,7 @@ struct LayerParams {
     head_count: u32,    // 32
     head_count_kv: u32, // 4 (GQA)
     head_dim: u32,      // 64
+    rope_dim: u32,      // rotary sub-dimension (may be < head_dim for partial RoPE)
     rms_eps: f32,       // 1e-5
     ffn_dim: u32,       // Feed-forward intermediate dim (e.g. 5632)
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
@@ -293,7 +294,13 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let norm_offset_base = offsets.layer_idx * 4u * params.dim;
     let norm_w = norm_bank[norm_offset_base + idx];
-    temp_state[temp_base + idx] = activation_in[act_base + idx] * rms * norm_w;
+    let normed = activation_in[act_base + idx] * rms * norm_w;
+    temp_state[temp_base + idx] = normed;
+
+    // Non-gated FFN (phi-2, GPT-2): preserve pre-attention norm(x) for FFN.
+    if (offsets.ffn_gate == 0u) {
+        temp_state[temp_base + params.ffn_dim * 2u + idx] = normed;
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -566,6 +573,7 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let kv_head_idx = head_idx / gqa_ratio;
     let q_base     = temp_base + params.dim + head_idx * params.head_dim;
     let n_pairs    = params.head_dim / 2u;
+    let rope_pairs = params.rope_dim / 2u;
     let compact_query_pos = cache_params.current_pos + token_idx;
     let logical_query_pos = cache_params.logical_pos_base + compact_query_pos;
 
@@ -596,9 +604,13 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k_base = pos * params.head_count_kv * params.head_dim
                    + kv_head_idx * params.head_dim;
         for (var p = 0u; p < n_pairs; p++) {
-            let tbl   = rel * n_pairs * 2u + p * 2u;
-            let cos_a = rope_table[tbl];
-            let sin_a = rope_table[tbl + 1u];
+            var cos_a = 1.0;
+            var sin_a = 0.0;
+            if (p < rope_pairs) {
+                let tbl = rel * rope_pairs * 2u + p * 2u;
+                cos_a = rope_table[tbl];
+                sin_a = rope_table[tbl + 1u];
+            }
             let doff  = p * 2u;
             let q_re  = temp_state[q_base + doff];
             let q_im  = temp_state[q_base + doff + 1u];
@@ -659,7 +671,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var dot = 0.0;
     let weight_byte_offset = offsets.attn_out;
 
-    if ((params.quant_type & 0xFFu) == 14u) { // Q6_K
+    if (((params.quant_type >> 24u) & 0xFFu) == 14u) { // Q6_K
         let bpr = attn_dim / 256u;
         let row_start = weight_byte_offset + idx * bpr * 210u;
         for (var b = 0u; b < bpr; b++) {
@@ -669,7 +681,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 dot += temp_state[temp_base + col] * dequant_q6k_elem(bb, e);
             }
         }
-    } else if ((params.quant_type & 0xFFu) == 13u) { // Q5_K
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 13u) { // Q5_K
         let bpr = attn_dim / 256u;
         let row_start = weight_byte_offset + idx * bpr * 176u;
         for (var b = 0u; b < bpr; b++) {
@@ -679,7 +691,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 dot += temp_state[temp_base + col] * dequant_q5k_elem(bb, e);
             }
         }
-    } else if ((params.quant_type & 0xFFu) == 12u) { // Q4_K
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 12u) { // Q4_K
         let blocks_per_row_k = attn_dim / 256u;
         let row_start_byte_k = weight_byte_offset + (idx * blocks_per_row_k * 144u);
         for (var b = 0u; b < blocks_per_row_k; b++) {
@@ -690,7 +702,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 dot += val_ctx * dequant_q4k_elem(block_base_k, e);
             }
         }
-    } else if ((params.quant_type & 0xFFu) == 8u) { // Q8_0
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 8u) { // Q8_0
         let bpr = attn_dim / 32u;
         let row_start = weight_byte_offset + idx * bpr * 34u;
         for (var b = 0u; b < bpr; b++) {
@@ -700,12 +712,12 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 dot += temp_state[temp_base + col] * dequant_q8_0_elem(bb, e);
             }
         }
-    } else if ((params.quant_type & 0xFFu) == 1u) { // F16
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 1u) { // F16
         for (var col = 0u; col < attn_dim; col++) {
             let w_byte = weight_byte_offset + (idx * attn_dim + col) * 2u;
             dot += temp_state[temp_base + col] * dequant_f16_at(w_byte);
         }
-    } else if ((params.quant_type & 0xFFu) == 0u) { // F32
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 0u) { // F32
         for (var col = 0u; col < attn_dim; col++) {
             let w_idx = weight_byte_offset / 4u + idx * attn_dim + col;
             dot += temp_state[temp_base + col] * bitcast<f32>(read_blob(w_idx));
@@ -839,6 +851,10 @@ fn main_ffn_norm(
     // so this early-return is uniform and does not break workgroupBarrier.
     if (token_idx >= cache_params.batch_size) { return; }
 
+    // Non-gated FFN already staged pre-attention norm(x) in main_attn_norm.
+    // Keep that stash intact for parallel FFN models (phi-2, GPT-2).
+    if (offsets.ffn_gate == 0u) { return; }
+
     let act_base  = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;
 
@@ -881,25 +897,36 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (idx >= ffn_dim * 2u || token_idx >= cache_params.batch_size) { return; }
 
+    // Non-gated FFN (phi-2, GPT-2): up slot is unused; write 1.0 so gate*up = GELU(gate).
+    if (offsets.ffn_gate == 0u && idx >= ffn_dim) {
+        temp_state[token_idx * params.temp_stride + idx] = 1.0;
+        return;
+    }
+
     let act_base  = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;
 
-    // Inline RMSNorm — reads activation_in directly (no stash dependency).
-    var sum_sq = 0.0;
-    for (var i = 0u; i < params.dim; i++) {
-        let val = activation_in[act_base + i];
-        sum_sq += val * val;
+    let non_gated = offsets.ffn_gate == 0u;
+    var rms = 1.0;
+    var norm_offset_base: u32 = 0u;
+    if (!non_gated) {
+        // Gated models: FFN RMSNorm over post-attention residual stream.
+        var sum_sq = 0.0;
+        for (var i = 0u; i < params.dim; i++) {
+            let val = activation_in[act_base + i];
+            sum_sq += val * val;
+        }
+        rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+        norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
     }
-    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
-
-    let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
 
     // Select Matrix
     var weight_off: u32;
     var row_idx = idx;
 
     if (idx < ffn_dim) {
-        weight_off = offsets.ffn_gate; // Gate
+        // Non-gated (phi-2, GPT-2): use ffn_up for the single proj that feeds the gate slot.
+        weight_off = select(offsets.ffn_gate, offsets.ffn_up, offsets.ffn_gate == 0u);
     } else {
         weight_off = offsets.ffn_up; // Up
         row_idx = idx - ffn_dim;
@@ -908,60 +935,84 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // MatMul
     var dot = 0.0;
 
-    if ((params.quant_type & 0xFFu) == 14u) { // Q6_K
+    if (((params.quant_type >> 24u) & 0xFFu) == 14u) { // Q6_K
         let bpr = params.dim / 256u;
         let row_start = weight_off + (row_idx * bpr * 210u);
         for (var b = 0u; b < bpr; b++) {
             let bb = row_start + b * 210u;
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+                let val_x = select(
+                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
+                    temp_state[temp_base + params.ffn_dim * 2u + col],
+                    non_gated
+                );
                 dot += val_x * dequant_q6k_elem(bb, e);
             }
         }
-    } else if ((params.quant_type & 0xFFu) == 13u) { // Q5_K
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 13u) { // Q5_K
         let bpr = params.dim / 256u;
         let row_start = weight_off + (row_idx * bpr * 176u);
         for (var b = 0u; b < bpr; b++) {
             let bb = row_start + b * 176u;
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+                let val_x = select(
+                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
+                    temp_state[temp_base + params.ffn_dim * 2u + col],
+                    non_gated
+                );
                 dot += val_x * dequant_q5k_elem(bb, e);
             }
         }
-    } else if ((params.quant_type & 0xFFu) == 12u) { // Q4_K
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 12u) { // Q4_K
         let blocks_per_row_k = params.dim / 256u;
         let row_start_byte_k = weight_off + (row_idx * blocks_per_row_k * 144u);
         for (var b = 0u; b < blocks_per_row_k; b++) {
             let block_base_k = row_start_byte_k + (b * 144u);
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+                let val_x = select(
+                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
+                    temp_state[temp_base + params.ffn_dim * 2u + col],
+                    non_gated
+                );
                 dot += val_x * dequant_q4k_elem(block_base_k, e);
             }
         }
-    } else if ((params.quant_type & 0xFFu) == 8u) { // Q8_0
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 8u) { // Q8_0
         let bpr = params.dim / 32u;
         let row_start = weight_off + (row_idx * bpr * 34u);
         for (var b = 0u; b < bpr; b++) {
             let bb = row_start + b * 34u;
             for (var e = 0u; e < 32u; e++) {
                 let col = b * 32u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+                let val_x = select(
+                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
+                    temp_state[temp_base + params.ffn_dim * 2u + col],
+                    non_gated
+                );
                 dot += val_x * dequant_q8_0_elem(bb, e);
             }
         }
-    } else if ((params.quant_type & 0xFFu) == 1u) { // F16
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_off + (row_idx * params.dim + col) * 2u;
-            let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+            let val_x = select(
+                activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
+                temp_state[temp_base + params.ffn_dim * 2u + col],
+                non_gated
+            );
             dot += val_x * dequant_f16_at(w_byte);
         }
-    } else if ((params.quant_type & 0xFFu) == 0u) { // F32
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_off / 4u + row_idx * params.dim + col;
-            let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+            let val_x = select(
+                activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
+                temp_state[temp_base + params.ffn_dim * 2u + col],
+                non_gated
+            );
             dot += val_x * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Q4_0
@@ -975,7 +1026,11 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let qs_byte_start = block_base + 2u;
             for (var i = 0u; i < 32u; i++) {
                 let col = b * 32u + i;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+                let val_x = select(
+                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
+                    temp_state[temp_base + params.ffn_dim * 2u + col],
+                    non_gated
+                );
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;
                 let qs_word = read_blob(qs_idx / 4u);
@@ -991,7 +1046,8 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Gemma-2 uses GeGLU; detected by attn_logit_softcap > 0 (only Gemma-2 uses it).
     if (idx < ffn_dim) {
         var activated: f32;
-        if (params.attn_logit_softcap > 0.0) {
+        // Non-gated uses GELU; Gemma-2 (GeGLU) also uses GELU; gated uses SiLU.
+        if (offsets.ffn_gate == 0u || params.attn_logit_softcap > 0.0) {
             // GELU approximate (PyTorch tanh variant): 0.5*x*(1+tanh(sqrt(2/π)*(x+0.044715*x³)))
             activated = 0.5 * dot * (1.0 + tanh(0.7978845608f * (dot + 0.044715f * dot * dot * dot)));
         } else {

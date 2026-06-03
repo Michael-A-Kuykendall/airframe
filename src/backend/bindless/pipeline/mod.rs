@@ -74,6 +74,7 @@ pub struct LayerParams {
     pub head_count: u32,
     pub head_count_kv: u32,
     pub head_dim: u32,
+    pub rope_dim: u32,
     pub rms_eps: f32,
     pub ffn_dim: u32, // Feed-forward intermediate dimension (e.g. 5632 for TinyLlama)
     pub temp_stride: u32, // Per-token temp buffer stride in floats (e.g. 16384)

@@ -196,6 +196,7 @@ impl BindlessPipeline {
             head_count: spec.n_head as u32,
             head_count_kv: spec.n_head_kv as u32,
             head_dim: spec.head_dim as u32,
+            rope_dim: spec.rope_dim as u32,
             rms_eps: spec.rms_eps,
             ffn_dim,
             temp_stride,
@@ -669,7 +670,55 @@ impl BindlessPipeline {
                 cpass.set_pipeline(&self.layer_pipeline_post_ffw_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            
+
+            // TDR Mitigation: submit and wait after each layer so the GPU activation buffer
+            // is fully flushed before the next layer reads it.  Without this on D3D12/Windows
+            // the driver may pipeline commands in a way that produces NaN in the residual
+            // stream (observed on RTX 3060 with phi-2 and other non-LLaMA architectures).
+            queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::PollType::wait_indefinitely())
+                .map_err(|_| "GPU device lost or TDR timeout during per-layer wait".to_string())?;
+
+            if trace_prefill_layers {
+                let mut trace_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some(&format!("Layer {} Trace Readback", i)),
+                });
+                trace_encoder.copy_buffer_to_buffer(
+                    &activation_buffer,
+                    last_token_offset,
+                    &pre_norm_buffer,
+                    0,
+                    (dim as u64) * 4,
+                );
+                queue.submit(Some(trace_encoder.finish()));
+                device.poll(wgpu::PollType::wait_indefinitely())
+                    .map_err(|_| "GPU device lost or TDR timeout during layer trace readback".to_string())?;
+
+                let trace_slice = pre_norm_buffer.slice(..);
+                let (tx_trace, rx_trace) = std::sync::mpsc::channel();
+                trace_slice.map_async(wgpu::MapMode::Read, move |res| tx_trace.send(res).unwrap());
+                loop {
+                    device.poll(wgpu::PollType::Poll)
+                        .map_err(|_| "GPU device lost during layer trace poll".to_string())?;
+                    if let Ok(res) = rx_trace.try_recv() {
+                        res.map_err(|_| "Layer trace buffer map failed".to_string())?;
+                        break;
+                    }
+                }
+                let mapped = trace_slice.get_mapped_range();
+                let trace_vals: &[f32] = bytemuck::cast_slice(&mapped);
+                let nan_count = trace_vals.iter().filter(|&&x| x.is_nan()).count();
+                let first5: Vec<f32> = trace_vals.iter().take(5).copied().collect();
+                eprintln!("[PREFILL-LAYER-TRACE] layer={} nan={}/{} first5={:?}",
+                    i, nan_count, trace_vals.len(), first5);
+                drop(mapped);
+                pre_norm_buffer.unmap();
+            }
+
+            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("Layer {} Cont", i)),
+            });
+
             if trace_prefill_layers {
                 eprintln!("[PREFILL-LAYER] complete layer={}", i);
             }

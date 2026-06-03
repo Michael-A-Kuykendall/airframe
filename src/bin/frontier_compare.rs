@@ -268,6 +268,7 @@ async fn async_main() -> Result<()> {
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
         head_dim: spec.head_dim as u32,
+        rope_dim: spec.rope_dim as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,

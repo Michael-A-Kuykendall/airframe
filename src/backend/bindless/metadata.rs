@@ -146,11 +146,91 @@ impl BindlessMetadata {
                     let key = format!("blk.{}.{}", li, suffix);
                     *offsets.get(&key).unwrap_or(&0) as u32
                 };
+                // Fused QKV support: phi-2, StarCoder2, GPT-2 and similar models store Q+K+V
+                // in a single weight matrix `attn_qkv.weight`. When separate attn_q/k/v tensors
+                // are absent, split the fused offset into per-component byte ranges.
+                let fused_qkv_key = format!("blk.{}.attn_qkv.weight", layer_idx);
+                let has_separate_q = absolute_offsets.contains_key(&format!("blk.{}.attn_q.weight", layer_idx));
+                let has_fused_qkv  = absolute_offsets.contains_key(&fused_qkv_key);
+
+                let (attn_q_off, attn_k_off, attn_v_off, lqt_main, lqt_v) = if has_separate_q {
+                    let lm = t(&tensor_types, layer_idx, "attn_q.weight");
+                    let lv = t(&tensor_types, layer_idx, "attn_v.weight");
+                    (
+                        p(&absolute_offsets, layer_idx, "attn_q.weight"),
+                        p(&absolute_offsets, layer_idx, "attn_k.weight"),
+                        p(&absolute_offsets, layer_idx, "attn_v.weight"),
+                        lm, lv,
+                    )
+                } else if has_fused_qkv {
+                    let fused_off  = *absolute_offsets.get(&fused_qkv_key).unwrap() as u64;
+                    let fused_type = *tensor_types.get(&fused_qkv_key).unwrap_or(&2u32);
+                    // dim_in = input columns (= n_embd); total_out = Q+K+V output rows
+                    let dim_in    = tensor_dims.get(&fused_qkv_key).and_then(|d| d.first()).copied().unwrap_or(0) as u64;
+                    let total_out = tensor_dims.get(&fused_qkv_key).and_then(|d| d.get(1)).copied().unwrap_or(0) as u64;
+                    // dim_q = n_head * head_dim; read from attn_output.weight's input dim
+                    let attn_out_key = format!("blk.{}.attn_output.weight", layer_idx);
+                    let dim_q = tensor_dims.get(&attn_out_key).and_then(|d| d.first()).copied().unwrap_or(dim_in) as u64;
+                    // dim_k = dim_v = (total_out - dim_q) / 2  (handles GQA)
+                    let dim_k = total_out.saturating_sub(dim_q) / 2;
+                    // Bytes per output row based on quant type
+                    let bpr: u64 = match fused_type {
+                        0  => dim_in * 4,
+                        1  => dim_in * 2,
+                        2  => (dim_in / 32) * 18,
+                        8  => (dim_in / 32) * 34,
+                        12 => (dim_in / 256) * 144,
+                        13 => (dim_in / 256) * 176,
+                        14 => (dim_in / 256) * 210,
+                        _  => (dim_in / 32) * 18,
+                    };
+                    let q_off = fused_off as u32;
+                    let k_off = (fused_off + dim_q * bpr) as u32;
+                    let v_off = (fused_off + (dim_q + dim_k) * bpr) as u32;
+                    println!(
+                        "[Metadata] Layer {}: fused QKV type={} dim_in={} dim_q={} dim_k={} bpr={} K@{} V@{}",
+                        layer_idx, fused_type, dim_in, dim_q, dim_k, bpr, k_off, v_off
+                    );
+                    (q_off, k_off, v_off, fused_type, fused_type)
+                } else {
+                    (0u32, 0u32, 0u32, 2u32, 2u32)
+                };
+
+                let sep_q_bias = opt(&absolute_offsets, layer_idx, "attn_q.bias");
+                let sep_k_bias = opt(&absolute_offsets, layer_idx, "attn_k.bias");
+                let sep_v_bias = opt(&absolute_offsets, layer_idx, "attn_v.bias");
+                let fused_qkv_bias_key = format!("blk.{}.attn_qkv.bias", layer_idx);
+                let (attn_q_bias_off, attn_k_bias_off, attn_v_bias_off) = if sep_q_bias != 0 || sep_k_bias != 0 || sep_v_bias != 0 {
+                    (sep_q_bias, sep_k_bias, sep_v_bias)
+                } else if has_fused_qkv {
+                    if let Some(&fused_bias_off) = absolute_offsets.get(&fused_qkv_bias_key) {
+                        // Bias layout mirrors fused QKV rows: [Q rows][K rows][V rows], each f32.
+                        let fused_qkv_key = format!("blk.{}.attn_qkv.weight", layer_idx);
+                        let dim_in = tensor_dims.get(&fused_qkv_key).and_then(|d| d.first()).copied().unwrap_or(0) as u64;
+                        let total_out = tensor_dims.get(&fused_qkv_key).and_then(|d| d.get(1)).copied().unwrap_or(0) as u64;
+                        let attn_out_key = format!("blk.{}.attn_output.weight", layer_idx);
+                        let dim_q = tensor_dims.get(&attn_out_key).and_then(|d| d.first()).copied().unwrap_or(dim_in) as u64;
+                        let dim_k = total_out.saturating_sub(dim_q) / 2;
+                        let q_bias = fused_bias_off as u32;
+                        let k_bias = (fused_bias_off + dim_q * 4) as u32;
+                        let v_bias = (fused_bias_off + (dim_q + dim_k) * 4) as u32;
+                        println!(
+                            "[Metadata] Layer {}: fused QKV bias split Q@{} K@{} V@{}",
+                            layer_idx, q_bias, k_bias, v_bias
+                        );
+                        (q_bias, k_bias, v_bias)
+                    } else {
+                        (0u32, 0u32, 0u32)
+                    }
+                } else {
+                    (0u32, 0u32, 0u32)
+                };
+
                 let offsets = super::pipeline::LayerOffsets {
                     attn_norm: p(&absolute_offsets, layer_idx, "attn_norm.weight"),
-                    attn_q:    p(&absolute_offsets, layer_idx, "attn_q.weight"),
-                    attn_k:    p(&absolute_offsets, layer_idx, "attn_k.weight"),
-                    attn_v:    p(&absolute_offsets, layer_idx, "attn_v.weight"),
+                    attn_q:    attn_q_off,
+                    attn_k:    attn_k_off,
+                    attn_v:    attn_v_off,
                     attn_out:  p(&absolute_offsets, layer_idx, "attn_output.weight"),
                     ffn_norm:  p(&absolute_offsets, layer_idx, "ffn_norm.weight"),
                     ffn_gate:  p(&absolute_offsets, layer_idx, "ffn_gate.weight"),
@@ -159,16 +239,18 @@ impl BindlessMetadata {
                     layer_idx: layer_idx as u32,
                     attn_q_norm: opt(&absolute_offsets, layer_idx, "attn_q_norm.weight"),
                     attn_k_norm: opt(&absolute_offsets, layer_idx, "attn_k_norm.weight"),
-                    attn_q_bias: opt(&absolute_offsets, layer_idx, "attn_q.bias"),
-                    attn_k_bias: opt(&absolute_offsets, layer_idx, "attn_k.bias"),
-                    attn_v_bias: opt(&absolute_offsets, layer_idx, "attn_v.bias"),
+                    attn_q_bias: attn_q_bias_off,
+                    attn_k_bias: attn_k_bias_off,
+                    attn_v_bias: attn_v_bias_off,
                 };
-                let lqt_main = t(&tensor_types, layer_idx, "attn_q.weight");
-                let lqt_v    = t(&tensor_types, layer_idx, "attn_v.weight");
                 let lqt_down = t(&tensor_types, layer_idx, "ffn_down.weight");
+                // bits 24-31: attn_output.weight type — used by main_attn_proj and main_ffn_proj.
+                // For models with fused QKV (phi-2, starcoder2), lqt_main = fused QKV type, but
+                // attn_output.weight and ffn_up/gate have a different (usually lower) quant type.
+                let lqt_attn_out = t(&tensor_types, layer_idx, "attn_output.weight");
                 compiled_layers.push(CompiledLayerEntry {
                     offsets,
-                    quant_type_packed: lqt_main | (lqt_v << 8) | (lqt_down << 16),
+                    quant_type_packed: lqt_main | (lqt_v << 8) | (lqt_down << 16) | (lqt_attn_out << 24),
                 });
                 layer_idx += 1;
             }

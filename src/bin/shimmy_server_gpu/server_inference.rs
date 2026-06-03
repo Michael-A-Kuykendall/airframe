@@ -470,6 +470,7 @@ fn run_inference_completion(
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
         head_dim: spec.head_dim as u32,
+        rope_dim: spec.rope_dim as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
@@ -708,7 +709,7 @@ fn run_inference_completion(
             visual_seq_len,
         );
 
-        let (_pre_norm_b, l21_b, gpu_logits_b) = {
+        let (pre_norm_b, l21_b, gpu_logits_b) = {
             let cache_guard = kv_cache.lock().unwrap();
             pipeline.run_full_model_prefill_chunked_with_cache_state(
                 device,
