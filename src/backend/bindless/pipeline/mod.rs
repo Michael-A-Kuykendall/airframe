@@ -64,6 +64,9 @@ pub struct LayerOffsets {
     pub layer_idx: u32,        // was padding[0] — layer index for norm_bank lookup
     pub attn_q_norm: u32,      // byte offset of Q-norm weights in GGUF blob (0 = disabled)
     pub attn_k_norm: u32,      // byte offset of K-norm weights in GGUF blob (0 = disabled)
+    pub attn_q_bias: u32,      // byte offset of Q bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    pub attn_k_bias: u32,      // byte offset of K bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    pub attn_v_bias: u32,      // byte offset of V bias (F32) in GGUF blob (0 = disabled; Qwen2)
 }
 
 #[repr(C)]

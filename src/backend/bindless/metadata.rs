@@ -159,6 +159,9 @@ impl BindlessMetadata {
                     layer_idx: layer_idx as u32,
                     attn_q_norm: opt(&absolute_offsets, layer_idx, "attn_q_norm.weight"),
                     attn_k_norm: opt(&absolute_offsets, layer_idx, "attn_k_norm.weight"),
+                    attn_q_bias: opt(&absolute_offsets, layer_idx, "attn_q.bias"),
+                    attn_k_bias: opt(&absolute_offsets, layer_idx, "attn_k.bias"),
+                    attn_v_bias: opt(&absolute_offsets, layer_idx, "attn_v.bias"),
                 };
                 let lqt_main = t(&tensor_types, layer_idx, "attn_q.weight");
                 let lqt_v    = t(&tensor_types, layer_idx, "attn_v.weight");
@@ -239,6 +242,9 @@ impl BindlessMetadata {
             layer_idx: layer_idx as u32,
             attn_q_norm: self.tensor_offsets.get(&format!("blk.{}.attn_q_norm.weight", layer_idx)).copied().unwrap_or(0) as u32,
             attn_k_norm: self.tensor_offsets.get(&format!("blk.{}.attn_k_norm.weight", layer_idx)).copied().unwrap_or(0) as u32,
+            attn_q_bias: self.tensor_offsets.get(&format!("blk.{}.attn_q.bias", layer_idx)).copied().unwrap_or(0) as u32,
+            attn_k_bias: self.tensor_offsets.get(&format!("blk.{}.attn_k.bias", layer_idx)).copied().unwrap_or(0) as u32,
+            attn_v_bias: self.tensor_offsets.get(&format!("blk.{}.attn_v.bias", layer_idx)).copied().unwrap_or(0) as u32,
         })
     }
 }

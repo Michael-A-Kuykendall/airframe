@@ -65,6 +65,7 @@ enum ChatTemplateFamily {
     ChatML,
     Llama3,
     Gemma2,
+    MiniCpmV,
 }
 
 impl ChatTemplateFamily {
@@ -128,6 +129,20 @@ impl ChatTemplateFamily {
                 }
                 if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
                     prompt.push_str("<start_of_turn>model\n");
+                }
+                prompt
+            }
+            ChatTemplateFamily::MiniCpmV => {
+                // MiniCPM-V 2.6 uses Qwen2 backbone → ChatML format (<|im_start|>/<|im_end|>)
+                let mut prompt = String::new();
+                for msg in messages {
+                    prompt.push_str(&format!(
+                        "<|im_start|>{}\n{}<|im_end|>\n",
+                        msg.role, msg.content
+                    ));
+                }
+                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                    prompt.push_str("<|im_start|>assistant\n");
                 }
                 prompt
             }
@@ -198,8 +213,14 @@ fn classify_template(haystack: &str) -> Option<ChatTemplateFamily> {
     None
 }
 
-fn chat_template_family_for_model(spec: &ModelSpec) -> ChatTemplateFamily {
+fn chat_template_family_for_model(spec: &ModelSpec, model_path: &str) -> ChatTemplateFamily {
     let lower = spec.model_name.to_ascii_lowercase();
+    let path_lower = model_path.to_ascii_lowercase();
+    // MiniCPM-V shares <|user|>/<|assistant|> markers with TinyLlama but uses
+    // <|endoftext|> as separator — detect by model name or file path.
+    if lower.contains("minicpm") || path_lower.contains("minicpm") {
+        return ChatTemplateFamily::MiniCpmV;
+    }
     // Single pass over model name; all family markers checked simultaneously.
     classify_template(&lower).unwrap_or(ChatTemplateFamily::ChatML)
 }
@@ -207,13 +228,20 @@ fn chat_template_family_for_model(spec: &ModelSpec) -> ChatTemplateFamily {
 fn chat_template_family_from_metadata(
     metadata: &std::collections::HashMap<String, GgufValue>,
     spec: &ModelSpec,
+    model_path: &str,
 ) -> ChatTemplateFamily {
+    let path_lower = model_path.to_ascii_lowercase();
+    // MiniCPM-V overrides template detection: its chat_template contains <|user|>/<|assistant|>
+    // (same as TinyLlama) but uses <|endoftext|> as turn separator.  Detect by file path.
+    if path_lower.contains("minicpm") {
+        return ChatTemplateFamily::MiniCpmV;
+    }
     if let Some(GgufValue::String(chat_template)) = metadata.get("tokenizer.chat_template") {
         if let Some(family) = classify_template(chat_template) {
             return family;
         }
     }
-    chat_template_family_for_model(spec)
+    chat_template_family_for_model(spec, model_path)
 }
 
 impl ChatCompletionRequest {
@@ -587,7 +615,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let http_bind_addr = shimmy_bind_addr.clone();
     let listener = tokio::net::TcpListener::bind(&http_bind_addr).await?;
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
-    let chat_template_family = chat_template_family_from_metadata(&gpu_model.metadata.gguf_metadata, &spec);
+    let chat_template_family = chat_template_family_from_metadata(&gpu_model.metadata.gguf_metadata, &spec, &model_path);
     let models_for_http = Arc::clone(&discovered_models);
     tokio::spawn(async move {
         loop {

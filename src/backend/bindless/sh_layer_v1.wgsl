@@ -18,6 +18,9 @@ struct LayerOffsets {
     layer_idx: u32,     // was padding[0] — layer index for norm_bank lookup
     attn_q_norm: u32,   // byte offset of Q-norm weights in GGUF blob (0 = disabled)
     attn_k_norm: u32,   // byte offset of K-norm weights in GGUF blob (0 = disabled)
+    attn_q_bias: u32,   // byte offset of Q bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    attn_k_bias: u32,   // byte offset of K bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    attn_v_bias: u32,   // byte offset of V bias (F32) in GGUF blob (0 = disabled; Qwen2)
 };
 
 struct LayerParams {
@@ -416,7 +419,17 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    // 4. RoPE - REMOVED (Relative RoPE Architecture)
+    // 4. QKV Bias addition (Qwen2 uses F32 biases on Q, K, V projections)
+    // When the bias offset is non-zero, add the stored F32 value to the dot product.
+    var qkv_bias_off: u32;
+    if (target_stage == 0u) { qkv_bias_off = offsets.attn_q_bias; }
+    else if (target_stage == 1u) { qkv_bias_off = offsets.attn_k_bias; }
+    else { qkv_bias_off = offsets.attn_v_bias; }
+    if (qkv_bias_off != 0u) {
+        dot += bitcast<f32>(read_blob(qkv_bias_off / 4u + row_idx));
+    }
+
+    // 5. RoPE - REMOVED (Relative RoPE Architecture)
     // Q and K are stored RAW without absolute position encoding.
     // Position-dependent rotation is applied as relative RoPE(i-j)
     // during the Q·K dot product in main_attn_out.
@@ -425,7 +438,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // - Max relative distance bounded by window size (always in training range)
     // - No position counter overflow, no extrapolation artifacts
 
-    // 4. Store Output
+    // 6. Store Output
     // Q -> Temp State (offset dim)
     // K, V -> KV Cache at current position
     // 

@@ -59,7 +59,7 @@ def post(host: str, port: int, payload: dict, label: str) -> dict:
     )
     t0 = time.monotonic()
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=600) as resp:
             body = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8")
@@ -67,10 +67,18 @@ def post(host: str, port: int, payload: dict, label: str) -> dict:
         return {}
     elapsed = time.monotonic() - t0
     result = json.loads(body)
-    tok = result.get("tokens_generated", "?")
-    stop = result.get("stop_reason", "?")
+    # Support both legacy flat format and OpenAI choices format
+    choices = result.get("choices", [])
+    if choices:
+        msg = choices[0].get("message", {})
+        text = msg.get("content", choices[0].get("text", ""))
+        stop = choices[0].get("finish_reason", "?")
+    else:
+        text = result.get("text", "")
+        stop = result.get("stop_reason", "?")
+    result["text"] = text  # normalise for callers
+    tok = result.get("usage", {}).get("completion_tokens", result.get("tokens_generated", "?"))
     print(f"  [{label}] {elapsed:.1f}s  stop={stop}  tokens={tok}")
-    text = result.get("text", "")
     preview = text[:160].replace("\n", "\\n")
     print(f"  [response] {preview!r}")
     return result
@@ -97,7 +105,8 @@ def run_synthetic(host: str, port: int) -> bool:
     pixels = bytes(448 * 448 * 3)
     b64 = base64.b64encode(pixels).decode("ascii")
     result = post(host, port, {
-        "prompt": "<image>Describe this image in one sentence.",
+        "prompt": "<|im_start|>user\n<image>\nDescribe this image in one sentence.<|im_end|>\n<|im_start|>assistant\n",
+        "prompt_mode": "raw",
         "max_tokens": 40,
         "temperature": 0.0,
         "seed": 42,
@@ -177,7 +186,7 @@ def main():
                         help="Run synthetic all-zero image test only (no fixture files)")
     args = parser.parse_args()
 
-    print(f"Vision smoke test → {args.host}:{args.port}")
+    print(f"Vision smoke test -> {args.host}:{args.port}")
 
     if args.synthetic:
         ok = run_synthetic(args.host, args.port)
