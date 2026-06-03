@@ -448,7 +448,7 @@ impl BindlessPipeline {
         } else {
             "token_embd.weight"
         };
-        let head_weight_off = model.metadata.get_tensor_offset(head_tensor_name).unwrap_or(0) as u32;
+        let head_weight_off = (model.metadata.get_tensor_offset(head_tensor_name).unwrap_or(0) / 4) as u32;
         let head_quant_type = model.metadata.get_tensor_type(head_tensor_name).unwrap_or(2);
 
         enum HeadBg {
@@ -555,7 +555,9 @@ impl BindlessPipeline {
         let ffn_total = ffn_dim * 2; // Gate + Up need this many threads
         let wg_ffn = (ffn_total + 255) / 256; // Ceil div by workgroup size (256)
         let wg_norm = (dim + 255) / 256;
-        let wg_head = (vocab_size + 255) / 256;
+        // sh_head_blob.wgsl uses @workgroup_size(64, 1, 1); matmul_f32 uses @workgroup_size(256).
+        let wg_head_blob = (vocab_size + 63) / 64;
+        let wg_head_f32 = (vocab_size + 255) / 256;
 
         // QKV Dispatch Calculation
         let q_len = params_base.head_count * params_base.head_dim;
@@ -691,28 +693,33 @@ impl BindlessPipeline {
             (dim as u64) * 4,
         );
 
+        // Final Norm — separate pass so wgpu inserts a memory barrier before the
+        // LM Head pass reads from temp_buffer (same region that norm writes).
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Norm+Head"),
+                label: Some("Final Norm"),
                 timestamp_writes: None,
             });
-
-            // Final Norm
             cpass.set_bind_group(0, &norm_bg, &[]);
             cpass.set_pipeline(&self.rmsnorm_pipeline);
             cpass.dispatch_workgroups(wg_norm, 1, 1);
-
-            // Head — blob path (default) or F32 diagnostic override.
+        }
+        // LM Head — begins a new compute pass, guaranteeing visibility of the norm output.
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("LM Head"),
+                timestamp_writes: None,
+            });
             match &head_bg {
                 HeadBg::Blob(bg) => {
                     cpass.set_bind_group(0, bg, &[]);
                     cpass.set_pipeline(&self.lm_head_blob_pipeline);
-                    cpass.dispatch_workgroups(wg_head, 1, 1);
+                    cpass.dispatch_workgroups(wg_head_blob, 1, 1);
                 }
                 HeadBg::F32(bg) => {
                     cpass.set_bind_group(0, bg, &[]);
                     cpass.set_pipeline(&self.matmul_f32_pipeline);
-                    cpass.dispatch_workgroups(wg_head, 1, 1);
+                    cpass.dispatch_workgroups(wg_head_f32, 1, 1);
                 }
             }
         }

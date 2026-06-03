@@ -644,7 +644,7 @@ fn run_inference_completion(
                     pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
                 {
                     let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() { "output.weight" } else { "token_embd.weight" };
-                    let head_off = model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) as u32;
+                    let head_off = (model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) / 4) as u32;
                     let head_qt  = model.metadata.get_tensor_type(head_tensor).unwrap_or(2);
                     last_logits = pipeline.run_lm_head_blob(device, queue, model, &normed_output, spec.n_vocab as u32, dim, head_off, head_qt, spec.final_logit_softcap);
                 }
@@ -706,7 +706,6 @@ fn run_inference_completion(
                 )
             };
             let logits_a = gpu_logits_a;
-
             {
                 let mut cache = kv_cache.lock().unwrap();
                 for _ in 0..kv_advance_a {
@@ -740,7 +739,6 @@ fn run_inference_completion(
             )
         };
         let logits_b = gpu_logits_b;
-
         {
             let mut cache = kv_cache.lock().unwrap();
             for _ in 0..kv_advance_b {
@@ -780,6 +778,7 @@ fn run_inference_completion(
         );
     }
 
+    let mut prev_step_ms: f64 = 0.0;
     for _step in 0..max_new_tokens {
         // Apply final logit softcap (Gemma-2 uses 30.0; 0.0 = disabled)
         if spec.final_logit_softcap > 0.0 {
@@ -859,8 +858,8 @@ fn run_inference_completion(
 
         let piece = tokenizer.decode_single(next_token, true)?;
         eprintln!(
-            "[TOKEN] Step {}: id={}, text={:?}",
-            generated_count, next_token, piece
+            "[TOKEN] Step {}: id={}, text={:?}  ({:.1} ms/tok)",
+            generated_count, next_token, piece, prev_step_ms
         );
         generated_text.push_str(&piece);
         generated_count += 1;
@@ -912,6 +911,8 @@ fn run_inference_completion(
                 break;
             }
         }
+
+        let step_t0 = std::time::Instant::now();
 
         let emb_start = next_token as usize * dim as usize;
         let mut layer_output: Vec<f32> =
@@ -983,10 +984,13 @@ fn run_inference_completion(
 
         {
             let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() { "output.weight" } else { "token_embd.weight" };
-            let head_off = model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) as u32;
+            let head_off = (model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) / 4) as u32;
             let head_qt  = model.metadata.get_tensor_type(head_tensor).unwrap_or(2);
             logits_vec = pipeline.run_lm_head_blob(device, queue, model, &normed_output, spec.n_vocab as u32, dim, head_off, head_qt, spec.final_logit_softcap);
         }
+
+        let step_ms = step_t0.elapsed().as_secs_f64() * 1000.0;
+        prev_step_ms = step_ms;
 
         // Debug: show top-5 logits for first decode step
         if generated_count == 0 {

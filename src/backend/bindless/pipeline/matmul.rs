@@ -225,7 +225,7 @@ impl BindlessPipeline {
         input: &[f32],          // normed activation [dim]
         vocab_size: u32,
         dim: u32,
-        weight_off: u32,        // byte offset of output.weight in GGUF blob
+        weight_off: u32,        // word offset (byte_offset / 4) of output.weight in GGUF blob
         quant_type: u32,        // GGML type
         softcap: f32,
     ) -> Vec<f32> {
