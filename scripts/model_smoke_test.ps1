@@ -5,7 +5,9 @@ param(
     [int]$StartupTimeout = 180,
     [int]$RequestTimeout = 180,
     [string]$OutputDir   = "$PSScriptRoot\..\artifacts\model_smoke",
-    [switch]$IncludeLarge  # Pass -IncludeLarge to also test 7B models
+    [switch]$IncludeLarge,  # Pass -IncludeLarge to also test 7B models
+    [switch]$TestInt4,       # Pass -TestInt4 to re-run each verified model with SHIMMY_KV_QUANT=int4
+    [switch]$TestMath        # Pass -TestMath to run math interception checks (requires MathBypassControl)
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,20 +29,32 @@ $VerifiedModels = @(
     @("Qwen3-0.6B-Q4_K_M.gguf",                 "Paris",  "The capital of France is")
 )
 
+# Models that exercise the >2 GB blob split — previously blocked by the WebGPU
+# per-buffer 2 GB cap.  These are the key regression tests for feat/gpu-large-model.
+$BlobModels = @(
+    @("gemma-2-2b-it-Q4_K_M.gguf",              "Paris",  "The capital of France is")
+)
+
 # Models with known hardware/architecture limitations — not run, recorded as LIMIT.
 # Remove from this list only after the blocking issue is resolved.
 $KnownLimitationModels = @(
-    ,@("gemma-2-2b-it-Q4_K_M.gguf", "Output head = 2.19 GB exceeds WebGPU 2 GB buffer limit. Needs output head chunking.")
+    ,@("Phi-3.5-mini-instruct.Q4_K_M.gguf", "Fused QKV projection not yet supported (single attn tensor covers Q+K+V).")
+    ,@("phi3-mini-4k-instruct-q4.gguf",     "Fused QKV projection not yet supported (single attn tensor covers Q+K+V).")
+    ,@("LFM2.5-VL-1.6B/LFM2.5-VL-1.6B-Q4_0.gguf", "Vision/multimodal model — deferred to feat/vision-multimodal branch.")
 )
 
-# 7B models — larger VRAM needed, run only with -IncludeLarge
+# 7B models — larger VRAM footprint, run only with -IncludeLarge.
+# MiniCPM-V 2.6 is listed here as a text-only test (no mmproj) — exercises the
+# blob LM head fix that was the primary driver for feat/gpu-large-model.
 $LargeModels = @(
     @("deepseek-llm-7b-chat.Q4_K_M.gguf",               "Paris",  "The capital of France is"),
     @("deepseek-coder-6.7b-instruct.Q4_K_M.gguf",       "def ",   "def hello_world():"),
-    @("qwen2-7b-instruct-q4_k_m.gguf",                  "Paris",  "The capital of France is")
+    @("qwen2-7b-instruct-q4_k_m.gguf",                  "Paris",  "The capital of France is"),
+    @("minicpm-v-2.6/ggml-model-Q4_K_M.gguf",           "Paris",  "The capital of France is")
 )
 
-$Models = if ($IncludeLarge) { $VerifiedModels + $LargeModels } else { $VerifiedModels }
+$Models = $VerifiedModels + $BlobModels
+if ($IncludeLarge) { $Models = $Models + $LargeModels }
 
 $null = New-Item -ItemType Directory -Force -Path $OutputDir
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -124,6 +138,60 @@ function Stop-ServerProcess {
         $Proc.Kill()
         $Proc.WaitForExit(5000) | Out-Null
     }
+}
+
+# Math interception tests.
+# Requires MathBypassControl (airframe master / merged branch).
+# On a branch without MathBypassControl the prompts will go through the model —
+# responses will still be checked for the correct answer but latency will be high.
+# Each entry: @(prompt, exact_expected_answer)
+$MathTests = @(
+    @("What is 2 + 2?",           "4"),
+    @("What is 7 * 8?",           "56"),
+    @("What is 100 / 4?",         "25"),
+    @("What is 15 - 7?",          "8"),
+    @("What is 3 to the power 3?","27"),
+    @("What is 17 * 13?",         "221"),
+    @("What is 144 / 12?",        "12"),
+    @("What is 99 - 37?",         "62"),
+    @("Calculate 8 + 8",          "16"),
+    @("What is 2 * 2 * 2?",       "8")
+)
+
+function Test-MathInterception {
+    param([string]$Url)
+    Write-Log ""
+    Write-Log "=== Math interception tests ==="
+    $mathPass = 0; $mathFail = 0
+    foreach ($mt in $MathTests) {
+        $prompt  = $mt[0]
+        $expect  = $mt[1]
+        $body = @{
+            model       = "local"
+            messages    = @(@{ role = "user"; content = $prompt })
+            max_tokens  = 16
+            temperature = 0.0
+            stream      = $false
+        } | ConvertTo-Json -Depth 6
+        $tStart = Get-Date
+        try {
+            $resp = Invoke-RestMethod -Method Post -Uri "$Url/v1/chat/completions" `
+                -ContentType "application/json" -Body $body -TimeoutSec 30
+            $tMs  = ([int]((Get-Date) - $tStart).TotalMilliseconds)
+            $text = ""
+            try { $text = $resp.choices[0].message.content } catch {}
+            $hit  = $text -match [regex]::Escape($expect)
+            $tag  = if ($hit) { "PASS" } else { "FAIL" }
+            if ($hit) { $mathPass++ } else { $mathFail++ }
+            $latencyNote = if ($tMs -lt 3000) { "fast=${tMs}ms (bypassed)" } else { "slow=${tMs}ms (model path?)" }
+            Write-Log "$tag  math '$prompt' → '$($text.Substring(0,[Math]::Min(40,$text.Length)))' [$latencyNote]"
+        } catch {
+            $mathFail++
+            Write-Log "FAIL  math '$prompt' — request error: $_"
+        }
+    }
+    Write-Log "Math: PASS=$mathPass  FAIL=$mathFail  Total=$($MathTests.Count)"
+    return $mathFail -eq 0
 }
 
 Write-Log "=== Airframe model smoke test ==="
@@ -215,6 +283,11 @@ foreach ($entry in $Models) {
         } else {
             Write-Log "      SSE stream: WARNING -- no 'data: ' events received"
         }
+
+        # === Math interception probe (inline, while server is running) ===
+        if ($TestMath) {
+            $null = Test-MathInterception -Url $BaseUrl
+        }
     } else {
         Write-Log "FAIL  $modelFile -- empty response"
         $results += [pscustomobject]@{ Model=$modelFile; Result="FAIL"; Detail="empty response" }
@@ -222,6 +295,77 @@ foreach ($entry in $Models) {
 
     Stop-ServerProcess $proc
     Start-Sleep -Seconds 2
+}
+
+# === INT4 KV pass ===
+# Re-runs every verified model with SHIMMY_KV_QUANT=int4.
+# Skipped when -TestInt4 is not set.
+if ($TestInt4) {
+    Write-Log ""
+    Write-Log "=== INT4 KV pass (SHIMMY_KV_QUANT=int4) ==="
+    foreach ($entry in ($VerifiedModels + $BlobModels)) {
+        $modelFile  = $entry[0]
+        $expectWord = $entry[1]
+        $promptText = $entry[2]
+        $modelPath  = Join-Path $ModelDir $modelFile
+
+        if (-not (Test-Path $modelPath)) {
+            Write-Log "SKIP  [INT4] $modelFile (not found)"
+            $results += [pscustomobject]@{ Model="[INT4] $modelFile"; Result="SKIP"; Detail="file not found" }
+            continue
+        }
+
+        Write-Log "START [INT4] $modelFile"
+        $env:LIBSHIMMY_MODEL_PATH = $modelPath
+        $env:SHIMMY_PORT          = "8080"
+        $env:SHIMMY_KV_QUANT      = "int4"
+        $proc = Start-Process @{
+            FilePath    = $ServerBin
+            PassThru    = $true
+            NoNewWindow = $true
+        }
+
+        $ready = Wait-ServerReady -Url $BaseUrl -Timeout $StartupTimeout -Proc $proc
+        if (-not $ready) {
+            $detail = if ($proc.HasExited) { "server exited (code $($proc.ExitCode))" } else { "startup timeout" }
+            Write-Log "FAIL  [INT4] $modelFile -- $detail"
+            $results += [pscustomobject]@{ Model="[INT4] $modelFile"; Result="FAIL"; Detail=$detail }
+            Stop-ServerProcess $proc
+            $env:SHIMMY_KV_QUANT = ""
+            continue
+        }
+
+        $body = @{
+            model       = "local"
+            messages    = @(@{ role = "user"; content = $promptText })
+            max_tokens  = 32
+            temperature = 0.0
+            stream      = $false
+        } | ConvertTo-Json -Depth 6
+
+        try {
+            $response = Invoke-RestMethod -Method Post -Uri "$BaseUrl/v1/chat/completions" `
+                -ContentType "application/json" -Body $body -TimeoutSec $RequestTimeout
+            $text = ""
+            try { $text = $response.choices[0].message.content } catch {}
+            if ($text.Length -gt 0) {
+                $pass = ($expectWord -eq "") -or ($text -match [regex]::Escape($expectWord))
+                $tag  = if ($pass) { "PASS" } else { "WEAK" }
+                Write-Log "$tag  [INT4] $modelFile -- $($text.Substring(0,[Math]::Min(80,$text.Length)))"
+                $results += [pscustomobject]@{ Model="[INT4] $modelFile"; Result=$tag; Detail=$text }
+            } else {
+                Write-Log "FAIL  [INT4] $modelFile -- empty response"
+                $results += [pscustomobject]@{ Model="[INT4] $modelFile"; Result="FAIL"; Detail="empty response" }
+            }
+        } catch {
+            Write-Log "FAIL  [INT4] $modelFile -- request error: $_"
+            $results += [pscustomobject]@{ Model="[INT4] $modelFile"; Result="FAIL"; Detail="request error: $_" }
+        }
+
+        Stop-ServerProcess $proc
+        $env:SHIMMY_KV_QUANT = ""
+        Start-Sleep -Seconds 2
+    }
 }
 
 Write-Log ""
@@ -232,6 +376,8 @@ $fail  = ($results | Where-Object Result -eq "FAIL").Count
 $skip  = ($results | Where-Object Result -eq "SKIP").Count
 $limit = ($results | Where-Object Result -eq "LIMIT").Count
 Write-Log "PASS: $pass  WEAK: $weak  FAIL: $fail  SKIP: $skip  LIMIT: $limit  Total: $($results.Count)"
+if ($TestInt4) { Write-Log "  (INT4 pass included in counts above)" }
+if ($TestMath) { Write-Log "  (math interception results logged inline above)" }
 
 $csvPath = Join-Path $OutputDir "smoke_$timestamp.csv"
 $results | Export-Csv -Path $csvPath -NoTypeInformation
