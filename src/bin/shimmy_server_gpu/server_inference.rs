@@ -7,13 +7,17 @@ use super::*;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
+use airframe::control::{ControlDecision, InferenceControl, InferenceEvent};
 use airframe::core::spec::ModelSpec;
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace, TokenTrace,
 };
+use airframe::fse_control::FseControl;
+use airframe::runtime::kvcache::KvSnapshot;
 use libfse::metrics::{
     logit_l2_norm, logit_variance, max_probability_from_logits, shannon_entropy_from_logits,
 };
+use libfse::{FseMap, FseOpcode, Rule};
 use schoolmarm::{Grammar, GrammarState};
 use shimmytok::{EncodeOptions, Tokenizer};
 use std::sync::{Arc, Mutex};
@@ -184,6 +188,60 @@ fn write_trace_package(path: &str, trace: &InferenceTracePackage) -> Result<(), 
     let json = serde_json::to_string_pretty(trace)?;
     fs::write(path, json)?;
     Ok(())
+}
+
+/// Build FSE control from `SHIMMY_FSE_REJECT_PATTERNS`.
+///
+/// Format:
+/// - Preferred separator: `;;` (to preserve commas inside patterns)
+/// - Back-compat separator: `,`
+///
+/// Example:
+/// `SHIMMY_FSE_REJECT_PATTERNS="forbidden phrase;;internal-only token"`
+fn build_fse_control_from_env() -> Option<FseControl> {
+    let raw = std::env::var("SHIMMY_FSE_REJECT_PATTERNS").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let parts: Vec<&str> = if trimmed.contains(";;") {
+        trimmed.split(";;").collect()
+    } else {
+        trimmed.split(',').collect()
+    };
+
+    let mut rules = Vec::new();
+    for (i, p) in parts.iter().enumerate() {
+        let pat = p.trim();
+        if pat.is_empty() {
+            continue;
+        }
+        rules.push(Rule::new(pat.as_bytes(), FseOpcode::Reject(i as u32)));
+    }
+
+    if rules.is_empty() {
+        return None;
+    }
+
+    let map = match FseMap::compile(rules) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("[FSE] failed to compile SHIMMY_FSE_REJECT_PATTERNS: {}", e);
+            return None;
+        }
+    };
+
+    match FseControl::new(map) {
+        Ok(ctrl) => {
+            eprintln!("[FSE] control enabled via SHIMMY_FSE_REJECT_PATTERNS");
+            Some(ctrl)
+        }
+        Err(e) => {
+            eprintln!("[FSE] failed to initialize control cursor: {}", e);
+            None
+        }
+    }
 }
 
 fn developer_mode_grammar() -> &'static str {
@@ -772,6 +830,8 @@ fn run_inference_completion(
     }
 
     let mut prev_step_ms: f64 = 0.0;
+    let fse_control = build_fse_control_from_env();
+    let mut control_tokens: Vec<usize> = prompt_tokens.iter().map(|&t| t as usize).collect();
     for _step in 0..max_new_tokens {
         // Apply final logit softcap (Gemma-2 uses 30.0; 0.0 = disabled)
         if spec.final_logit_softcap > 0.0 {
@@ -803,7 +863,7 @@ fn run_inference_completion(
 
         let is_unsafe = perplexity > 500.0 || norm > 1e5;
 
-        let next_token = if let Some(forced) = math_bypass_queue.pop_front() {
+        let sampled_token = if let Some(forced) = math_bypass_queue.pop_front() {
             eprintln!("[MathBypass] Step {}: forcing token {}", generated_count, forced);
             forced
         } else if is_unsafe {
@@ -825,6 +885,44 @@ fn run_inference_completion(
                 &mut rng,
             )
         };
+
+        let mut next_token = sampled_token;
+        if let Some(ctrl) = fse_control.as_ref() {
+            let kv_meta = {
+                let cache = kv_cache.lock().unwrap();
+                KvSnapshot {
+                    len: cache.get_seq_len() as usize,
+                    version: cache.get_seq_len() as usize,
+                }
+            };
+            let event = InferenceEvent {
+                tokens: &control_tokens,
+                candidate_token: sampled_token as usize,
+                step: generated_count,
+                kv: kv_meta,
+                text: &generated_text,
+            };
+
+            match ctrl.intervene(&event) {
+                ControlDecision::Allow => {}
+                ControlDecision::ForceToken(forced) => {
+                    next_token = forced as u32;
+                    eprintln!(
+                        "[FSE] step {} force-token {} (sampled {})",
+                        generated_count, next_token, sampled_token
+                    );
+                }
+                ControlDecision::EarlyExit => {
+                    stop_reason = "control_early_exit";
+                    break;
+                }
+                ControlDecision::BlockAndTerminate(reason) => {
+                    metrics_violation = Some(format!("control_block:{}", reason));
+                    stop_reason = "control_block";
+                    break;
+                }
+            }
+        }
 
         recent_tokens.push(next_token);
         if recent_tokens.len() > 64 {
@@ -859,6 +957,7 @@ fn run_inference_completion(
         );
         generated_text.push_str(&piece);
         generated_count += 1;
+        control_tokens.push(next_token as usize);
 
         // Stream the piece before any early-exit break, so the HTTP collector
         // (which reads from the stream channel, not resp.text) always receives
