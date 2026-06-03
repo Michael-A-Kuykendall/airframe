@@ -40,7 +40,7 @@ $BlobModels = @(
 $KnownLimitationModels = @(
     ,@("Phi-3.5-mini-instruct.Q4_K_M.gguf", "Fused QKV projection not yet supported (single attn tensor covers Q+K+V).")
     ,@("phi3-mini-4k-instruct-q4.gguf",     "Fused QKV projection not yet supported (single attn tensor covers Q+K+V).")
-    ,@("LFM2.5-VL-1.6B/LFM2.5-VL-1.6B-Q4_0.gguf", "Vision/multimodal model — deferred to feat/vision-multimodal branch.")
+    ,@("LFM2.5-VL-1.6B/LFM2.5-VL-1.6B-Q4_0.gguf", "Vision/multimodal model - deferred to feat/vision-multimodal branch.")
 )
 
 # 7B models — larger VRAM footprint, run only with -IncludeLarge.
@@ -187,7 +187,7 @@ function Test-MathInterception {
             Write-Log "$tag  math '$prompt' → '$($text.Substring(0,[Math]::Min(40,$text.Length)))' [$latencyNote]"
         } catch {
             $mathFail++
-            Write-Log "FAIL  math '$prompt' — request error: $_"
+            Write-Log "FAIL  math '$prompt' - request error: $_"
         }
     }
     Write-Log "Math: PASS=$mathPass  FAIL=$mathFail  Total=$($MathTests.Count)"
