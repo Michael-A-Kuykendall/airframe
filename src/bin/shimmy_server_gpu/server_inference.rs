@@ -442,17 +442,27 @@ fn run_inference_completion(
 
     let (visual_embedding_flat, visual_seq_len): (Option<Vec<f32>>, usize) = (None, 0);
 
-    // Math bypass: pre-compute arithmetic answers and force their tokens.
-    // Set SHIMMY_MATH_BYPASS_DISABLE=1 to observe raw model behavior for diagnostics.
-    let bypass_disabled = std::env::var("SHIMMY_MATH_BYPASS_DISABLE").as_deref() == Ok("1");
-    let math_bypass_tokens = if bypass_disabled {
-        vec![]
-    } else {
+    // Math bypass is opt-in for production safety.
+    // Enable with SHIMMY_MATH_BYPASS_ENABLE=1.
+    // Legacy SHIMMY_MATH_BYPASS_DISABLE=1 still hard-disables if both are set.
+    let bypass_enabled = env_flag("SHIMMY_MATH_BYPASS_ENABLE");
+    let bypass_disabled = env_flag("SHIMMY_MATH_BYPASS_DISABLE");
+    let math_bypass_tokens = if bypass_enabled && !bypass_disabled {
         airframe::math_bypass_control::compute_bypass_tokens(user_prompt, tokenizer)
+    } else {
+        vec![]
     };
     let math_bypass_was_active = !math_bypass_tokens.is_empty();
     let mut math_bypass_queue: std::collections::VecDeque<u32> =
         math_bypass_tokens.into_iter().collect();
+    if bypass_enabled && bypass_disabled {
+        eprintln!(
+            "[MathBypass] SHIMMY_MATH_BYPASS_ENABLE=1 ignored because SHIMMY_MATH_BYPASS_DISABLE=1"
+        );
+    }
+    if bypass_enabled && !math_bypass_was_active {
+        eprintln!("[MathBypass] Enabled but no arithmetic pattern detected in prompt");
+    }
     if math_bypass_was_active {
         eprintln!(
             "[MathBypass] Detected arithmetic in prompt — forcing {} token(s) instead of sampling",
