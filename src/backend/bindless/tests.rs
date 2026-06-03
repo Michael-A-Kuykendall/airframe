@@ -150,9 +150,15 @@ mod tests {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Blob"),
+            contents: &[0u8; 4],
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let model = BindlessModel {
             gpu_buffer,
             size: block_bytes.len() as u64,
+            dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
         };
@@ -254,9 +260,15 @@ mod tests {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Blob"),
+            contents: &[0u8; 4],
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let model = BindlessModel {
             gpu_buffer,
             size: 72,
+            dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
         };
@@ -322,9 +334,15 @@ mod tests {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Blob"),
+            contents: &[0u8; 4],
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let model = BindlessModel {
             gpu_buffer,
             size: block_bytes.len() as u64,
+            dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
         };
@@ -392,9 +410,15 @@ mod tests {
             contents: &block_bytes,
             usage: wgpu::BufferUsages::STORAGE,
         });
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Blob"),
+            contents: &[0u8; 4],
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let model = BindlessModel {
             gpu_buffer,
             size: block_bytes.len() as u64,
+            dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
         };
@@ -473,6 +497,14 @@ mod tests {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: rms_params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.dummy_buf.as_entire_binding(),
                 },
             ],
         });
