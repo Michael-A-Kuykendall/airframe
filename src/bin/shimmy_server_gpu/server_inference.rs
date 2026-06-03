@@ -122,28 +122,46 @@ struct TraceConfig {
     top_k: usize,
 }
 
+fn default_trace_path_for_profile(profile: &str) -> Option<String> {
+    let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let dir = format!("artifacts/debug/{}", profile);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    Some(format!("{}/trace_{}.json", dir, ts))
+}
+
 impl TraceConfig {
     fn from_request(req: &InferenceRequest) -> Option<Self> {
+        // Agile debug profile mode: when SHIMMY_DEBUG_PROFILE is set, auto-enable
+        // trace output to a predictable artifact path if no explicit path is provided.
+        let profile = std::env::var("SHIMMY_DEBUG_PROFILE").ok();
         let path = req
             .debug_trace_path
             .clone()
-            .or_else(|| std::env::var("SHIMMY_INFERENCE_TRACE_PATH").ok())?;
+            .or_else(|| std::env::var("SHIMMY_INFERENCE_TRACE_PATH").ok())
+            .or_else(|| profile.as_deref().and_then(default_trace_path_for_profile))?;
+
+        let profile_active = profile.as_deref().map(|v| !v.trim().is_empty()).unwrap_or(false);
         Some(Self {
             path,
             include_values: req
                 .debug_trace_full
-                .unwrap_or_else(|| env_flag("SHIMMY_INFERENCE_TRACE_FULL")),
+                .unwrap_or_else(|| env_flag("SHIMMY_INFERENCE_TRACE_FULL") || profile_active),
             include_prefill: req
                 .debug_trace_include_prefill
-                .unwrap_or_else(|| !matches!(std::env::var("SHIMMY_INFERENCE_TRACE_INCLUDE_PREFILL"), Ok(v) if v == "0" || v.eq_ignore_ascii_case("false"))),
+                .unwrap_or_else(|| {
+                    profile_active || !matches!(std::env::var("SHIMMY_INFERENCE_TRACE_INCLUDE_PREFILL"), Ok(v) if v == "0" || v.eq_ignore_ascii_case("false"))
+                }),
             start_step: req
                 .debug_trace_start_step
                 .or_else(|| env_usize("SHIMMY_INFERENCE_TRACE_START_STEP"))
                 .unwrap_or(0),
             max_steps: req
                 .debug_trace_max_steps
-                .or_else(|| env_usize("SHIMMY_INFERENCE_TRACE_MAX_STEPS")),
-            top_k: env_usize("SHIMMY_INFERENCE_TRACE_TOPK").unwrap_or(8),
+                .or_else(|| env_usize("SHIMMY_INFERENCE_TRACE_MAX_STEPS"))
+                .or(if profile_active { Some(16) } else { None }),
+            top_k: env_usize("SHIMMY_INFERENCE_TRACE_TOPK").unwrap_or(if profile_active { 16 } else { 8 }),
         })
     }
 
@@ -199,7 +217,13 @@ fn write_trace_package(path: &str, trace: &InferenceTracePackage) -> Result<(), 
 /// Example:
 /// `SHIMMY_FSE_REJECT_PATTERNS="forbidden phrase;;internal-only token"`
 fn build_fse_control_from_env() -> Option<FseControl> {
-    let raw = std::env::var("SHIMMY_FSE_REJECT_PATTERNS").ok()?;
+    let raw = std::env::var("SHIMMY_FSE_REJECT_PATTERNS")
+        .ok()
+        .or_else(|| {
+            std::env::var("SHIMMY_FSE_REJECT_PATTERNS_PATH")
+                .ok()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+        })?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
