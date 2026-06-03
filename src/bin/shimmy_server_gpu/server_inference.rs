@@ -7,24 +7,15 @@ use super::*;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
-use airframe::core::dequant::{
-    dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0,
-};
-use airframe::core::model::GgufTensorInfo;
-use airframe::core::spec::{GgufValue, ModelSpec};
+use airframe::core::spec::ModelSpec;
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace, TokenTrace,
 };
 use libfse::metrics::{
     logit_l2_norm, logit_variance, max_probability_from_logits, shannon_entropy_from_logits,
 };
-use memmap2::Mmap;
 use schoolmarm::{Grammar, GrammarState};
-use serde::{Deserialize, Serialize};
 use shimmytok::{EncodeOptions, Tokenizer};
-use std::io::Write;
-use std::net::TcpStream;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 struct Rng(u64);
@@ -337,6 +328,12 @@ fn run_inference_completion(
     let rep_penalty = req.repetition_penalty.unwrap_or(1.1);
     let use_stream = req.stream.unwrap_or(false) && stream_tx.is_some();
     let mut rng = Rng::new(req.seed.unwrap_or(42));
+    // SHIMMY_PREFILL_CHUNK: token batch size for chunked prefill. Default 64 is conservative;
+    // with the AttnOut encoder isolation (A2 TDR fix) larger values should also be safe on Windows.
+    let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(64);
 
     eprintln!(
         "[GPU Server] Sampling: temp={:.2}, top_p={:.2}, rep_penalty={:.2}, stream={}",
@@ -362,6 +359,24 @@ fn run_inference_completion(
     }
 
     let (visual_embedding_flat, visual_seq_len): (Option<Vec<f32>>, usize) = (None, 0);
+
+    // Math bypass: pre-compute arithmetic answers and force their tokens.
+    // Set SHIMMY_MATH_BYPASS_DISABLE=1 to observe raw model behavior for diagnostics.
+    let bypass_disabled = std::env::var("SHIMMY_MATH_BYPASS_DISABLE").as_deref() == Ok("1");
+    let math_bypass_tokens = if bypass_disabled {
+        vec![]
+    } else {
+        airframe::math_bypass_control::compute_bypass_tokens(user_prompt, tokenizer)
+    };
+    let math_bypass_was_active = !math_bypass_tokens.is_empty();
+    let mut math_bypass_queue: std::collections::VecDeque<u32> =
+        math_bypass_tokens.into_iter().collect();
+    if math_bypass_was_active {
+        eprintln!(
+            "[MathBypass] Detected arithmetic in prompt — forcing {} token(s) instead of sampling",
+            math_bypass_queue.len()
+        );
+    }
 
     let eos = tokenizer.eos_token();
     let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
@@ -411,6 +426,18 @@ fn run_inference_completion(
         user_prompt,
         prompt_tokens.len()
     );
+
+    // Guard: reject requests that would overflow the KV cache.
+    // prompt_tokens must leave at least 1 slot for decode; n_ctx is the hard limit.
+    if prompt_tokens.len() >= spec.n_ctx as usize {
+        return Err(format!(
+            "prompt too long: {} tokens >= max context {} \
+             (reduce prompt or increase SHIMMY_MAX_CTX)",
+            prompt_tokens.len(),
+            spec.n_ctx
+        )
+        .into());
+    }
 
     let dim = spec.n_embd as u32;
     // Gemma / Gemma-2 scales input embeddings by sqrt(hidden_size) before the first layer.
@@ -649,14 +676,28 @@ fn run_inference_completion(
                     0,
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     spec,
-                    32, // TDR-safe: 1 layer at batch=32 is ~3× batch=10 (proven safe)
-                )
+                    prefill_chunk,
+                )?
             };
-            let logits_a = gpu_logits_a;
+
+            let logits_a = if use_cpu_head {
+                cpu_head_logits(embd_table_cpu, &l21_a, spec.n_vocab, dim as usize, spec.final_logit_softcap)
+            } else {
+                gpu_logits_a
+            };
+
             {
                 let mut cache = kv_cache.lock().unwrap();
                 for _ in 0..kv_advance_a {
                     cache.increment().map_err(|e| e)?;
+                }
+                if cache.is_int4() {
+                    pipeline.requantize_all_kv_int4(
+                        device, queue, &cache,
+                        spec.n_head_kv as u32, spec.head_dim as u32,
+                        prompt_tokens.len() as u32, spec.n_layer,
+                    );
+                    device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during requantize poll (A)");
                 }
             }
             logits_a
@@ -682,20 +723,34 @@ fn run_inference_completion(
                 0,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 spec,
-                32, // TDR-safe: per-layer submit in inference.rs; no poll between layers
-            )
+                prefill_chunk,
+            )?
         };
-        let logits_b = gpu_logits_b;
+
+        let logits_b = if use_cpu_head {
+            cpu_head_logits(embd_table_cpu, &l21_b, spec.n_vocab, dim as usize, spec.final_logit_softcap)
+        } else {
+            gpu_logits_b
+        };
+
         {
             let mut cache = kv_cache.lock().unwrap();
             for _ in 0..kv_advance_b {
                 cache.increment().map_err(|e| e)?;
             }
+            if cache.is_int4() {
+                pipeline.requantize_all_kv_int4(
+                    device, queue, &cache,
+                    spec.n_head_kv as u32, spec.head_dim as u32,
+                    prompt_tokens.len() as u32, spec.n_layer,
+                );
+                device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during requantize poll (B)");
+            }
         }
         logits_b
     };
 
-    eprintln!("[GPU Server] Prefill complete. Cache info updated.");
+
 
     let mut logits_vec = prefill_logits_f32;
 
@@ -746,7 +801,7 @@ fn run_inference_completion(
             .collect();
         let entropy = shannon_entropy_from_logits(&raw_logits);
         let _variance = logit_variance(&raw_logits);
-        let _max_prob = max_probability_from_logits(&raw_logits);
+        let max_prob = max_probability_from_logits(&raw_logits);
         let norm = logit_l2_norm(&raw_logits);
 
         if ppl_window.len() >= 10 {
@@ -757,7 +812,10 @@ fn run_inference_completion(
 
         let is_unsafe = perplexity > 500.0 || norm > 1e5;
 
-        let next_token = if is_unsafe {
+        let next_token = if let Some(forced) = math_bypass_queue.pop_front() {
+            eprintln!("[MathBypass] Step {}: forcing token {}", generated_count, forced);
+            forced
+        } else if is_unsafe {
             eprintln!(
                 "[REDO] Metric Violation (PPL={:.2}, Norm={:.2}). Falling back to greedy.",
                 perplexity, norm
@@ -805,14 +863,23 @@ fn run_inference_completion(
 
         let piece = tokenizer.decode_single(next_token, true)?;
         eprintln!(
-            "[TOKEN] Step {}: id={}, text={:?}  ({:.1} ms/tok)",
-            generated_count, next_token, piece, prev_step_ms
+            "[TOKEN] Step {}: id={}, text={:?}, entropy={:.3}, max_prob={:.3}",
+            generated_count, next_token, piece, entropy, max_prob
         );
         generated_text.push_str(&piece);
         generated_count += 1;
 
+        // Stream the piece before any early-exit break, so the HTTP collector
+        // (which reads from the stream channel, not resp.text) always receives
+        // every token that was appended to generated_text.
         if let Some(tx) = stream_tx {
             let _ = tx.send(piece.clone());
+        }
+
+        // Math bypass: stop cleanly once the forced-answer queue is drained.
+        if math_bypass_was_active && math_bypass_queue.is_empty() {
+            stop_reason = "math_bypass";
+            break;
         }
 
         if let (Some(states_map), Some(job_id_ref)) = (states, job_id) {
@@ -913,10 +980,17 @@ fn run_inference_completion(
 
                 {
                     let mut cache = kv_cache.lock().unwrap();
-                    layer_output = pipeline.run_layer_with_cache(
-                        device, queue, model, &mut cache, layer_idx, &layer_output,
-                        compiled.offsets, layer_params_l,
-                    );
+                    if cache.is_int4() {
+                        layer_output = pipeline.run_layer_with_cache_int4(
+                            device, queue, model, &mut cache, layer_idx, &layer_output,
+                            compiled.offsets, layer_params_l,
+                        );
+                    } else {
+                        layer_output = pipeline.run_layer_with_cache(
+                            device, queue, model, &mut cache, layer_idx, &layer_output,
+                            compiled.offsets, layer_params_l,
+                        );
+                    }
                 }
             }
         }
@@ -938,18 +1012,6 @@ fn run_inference_completion(
 
         let step_ms = step_t0.elapsed().as_secs_f64() * 1000.0;
         prev_step_ms = step_ms;
-
-        // Debug: show top-5 logits for first decode step
-        if generated_count == 0 {
-            let mut indexed: Vec<(usize, f32)> = logits_vec.iter().copied().enumerate().collect();
-            indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            eprintln!("[DEBUG-DECODE0] normed_output L2={:.4}", normed_output.iter().map(|x| x*x).sum::<f32>().sqrt());
-            eprintln!("[DEBUG-DECODE0] Top-5 pre-cap decode logits:");
-            for (tok_id, logit) in indexed.iter().take(5) {
-                let piece = tokenizer.decode_single(*tok_id as u32, false).unwrap_or_default();
-                eprintln!("  id={} logit={:.4} text={:?}", tok_id, logit, piece);
-            }
-        }
 
         let (cache_len_after_step, window_base_after_step) = {
             let cache = kv_cache.lock().unwrap();

@@ -6,16 +6,16 @@ members = ["crates/libfse"]
 
 [package]
 name = "airframe"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
-description = "FP32-first inference core for Llama-family models. Pure Rust WebGPU engine."
+description = "Pure-Rust WebGPU inference engine for GGUF models. No C++ toolchain, no llama.cpp. Runs on NVIDIA, AMD, Intel, and Apple Silicon via wgpu."
 license = "MIT"
 repository = "https://github.com/Michael-A-Kuykendall/airframe"
 homepage = "https://github.com/Michael-A-Kuykendall/airframe"
 readme = "README.md"
-authors = ["Michael A. Kuykendall"]
-keywords = ["llm", "inference", "llama", "gguf", "wgpu"]
-categories = ["science", "simulation"]
+authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
+keywords = ["llm", "inference", "gguf", "wgpu", "webgpu"]
+categories = ["science", "simulation", "graphics"]
 publish = true
 
 [dependencies]
@@ -33,10 +33,11 @@ pollster = "0.4.0"
 bytemuck = { version = "1.24.0", features = ["derive"] }
 clap = { version = "4.5.56", features = ["derive"] }
 tokio = { version = "1.49.0", features = ["full"] }
-libfse = { path = "crates/libfse", version = "0.1.1" }
+libfse = { path = "crates/libfse", version = "0.1.3" }
 schoolmarm = "0.1.1"
 sha2 = "0.10"
 aho-corasick = { version = "1.1", features = ["std"] }
+shimmyjinja = { version = "0.5.0" }
 
 [dev-dependencies]
 sha2 = "0.10"

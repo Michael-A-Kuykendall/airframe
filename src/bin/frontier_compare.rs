@@ -172,7 +172,7 @@ async fn async_main() -> Result<()> {
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
     limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
-    limits.max_storage_buffers_per_shader_stage = 8;
+    limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage;
     limits.max_compute_invocations_per_workgroup = 256;
 
     let (device, queue) = adapter
@@ -227,7 +227,7 @@ async fn async_main() -> Result<()> {
                 Some((gpu_kv.get_k_buffers(), gpu_kv.get_v_buffers())),
                 &spec,
                 args.chunk_tokens,
-            );
+            ).map_err(|e| eprintln!("[GPU prefill] device error: {e}"));
             for _ in 0..prefix_tokens.len() {
                 gpu_kv.increment();
             }

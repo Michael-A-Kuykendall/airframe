@@ -102,6 +102,26 @@ impl MultiTokenEngine {
                         text_buffer.push_str(&dec.decode_single(next_token));
                     }
                 }
+                ControlDecision::ForceToken(forced) => {
+                    if let Some(dec) = decoder {
+                        text_buffer.push_str(&dec.decode_single(forced));
+                    }
+                    let max_logit_value = current_logits
+                        .data
+                        .iter()
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .copied();
+                    per_step_logits.push(LogitInfo {
+                        step,
+                        max_logit_index: forced as u32,
+                        max_logit_value,
+                        finite,
+                    });
+                    generated_tokens.push(forced as u32);
+                    sequence_so_far.push(forced);
+                    current_logits = self.engine.decode(forced, weights)?;
+                    continue;
+                }
                 ControlDecision::EarlyExit => break,
                 ControlDecision::BlockAndTerminate(reason) => {
                     return Err(crate::core::error::LibshimmyError::Unsupported(format!(

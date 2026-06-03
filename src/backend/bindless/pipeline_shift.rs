@@ -3,6 +3,9 @@ use wgpu::util::DeviceExt;
 pub struct RopeShiftPipeline {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
+    // INT4 packed+scale shift extension (TurboQuant — feat/turboquant-wgsl)
+    int4_pipeline: wgpu::ComputePipeline,
+    int4_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 #[derive(Debug, bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
@@ -102,9 +105,57 @@ impl RopeShiftPipeline {
             compilation_options: Default::default(),
         });
 
+        // --- INT4 packed+scale shift pipeline ---
+        let int4_shader_src = include_str!("sh_rope_shift_int4.wgsl");
+        let int4_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Helical Context Shift INT4"),
+            source: wgpu::ShaderSource::Wgsl(int4_shader_src.into()),
+        });
+
+        let int4_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("RopeShift INT4 Bind Group Layout"),
+            entries: &[
+                // 0: params
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // 1: packed_k_src (read)
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // 2: scale_k_src (read)
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // 3: packed_v_src (read)
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // 4: scale_v_src (read)
+                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // 5: packed_k_dst (read_write)
+                wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // 6: scale_k_dst (read_write)
+                wgpu::BindGroupLayoutEntry { binding: 6, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // 7: packed_v_dst (read_write)
+                wgpu::BindGroupLayoutEntry { binding: 7, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // 8: scale_v_dst (read_write)
+                wgpu::BindGroupLayoutEntry { binding: 8, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            ],
+        });
+
+        let int4_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("RopeShift INT4 Pipeline Layout"),
+            bind_group_layouts: &[&int4_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let int4_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Helical Context Shift INT4 Pipeline"),
+            layout: Some(&int4_pipeline_layout),
+            module: &int4_module,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: Default::default(),
+        });
+
         Self {
             pipeline,
             bind_group_layout,
+            int4_pipeline,
+            int4_bind_group_layout,
         }
     }
 
@@ -216,6 +267,171 @@ impl RopeShiftPipeline {
 
                 cpass.dispatch_workgroups(dim_x, dim_y, dim_z);
             }
+        }
+
+        queue.submit(Some(encoder.finish()));
+    }
+
+    /// INT4 variant — shifts F32 staging buffers AND packed+scale buffers in one submission.
+    ///
+    /// Call this instead of `execute()` when the KV cache was created with `KVCache::new_int4()`.
+    /// Internally freezes all 6 buffers into scratch copies before dispatching both kernels so
+    /// there is no overlap hazard between source and destination ranges.
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_int4(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        // F32 staging buffers
+        k_buffer: &wgpu::Buffer,
+        v_buffer: &wgpu::Buffer,
+        // INT4 packed nibble buffers
+        packed_k_buffer: &wgpu::Buffer,
+        packed_v_buffer: &wgpu::Buffer,
+        // INT4 scale buffers
+        scale_k_buffer: &wgpu::Buffer,
+        scale_v_buffer: &wgpu::Buffer,
+        // Compaction parameters
+        keep_sink: u32,
+        shift_amt: u32,
+        old_seq_len: u32,
+        n_head_kv: u32,
+        head_dim: u32,
+        max_seq_len: u32,
+    ) {
+        let elements_to_shift = if old_seq_len > keep_sink + shift_amt {
+            old_seq_len - (keep_sink + shift_amt)
+        } else {
+            0
+        };
+        if elements_to_shift == 0 { return; }
+
+        let params = CompactionParams {
+            keep_sink,
+            shift_amt,
+            old_seq_len,
+            n_head_kv,
+            head_dim,
+            rope_dim: head_dim,
+            rope_base: 10000.0,
+            max_seq_len,
+        };
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("RopeShiftINT4 Params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Scratch buffers for F32 K/V (same as execute())
+        let f32_buf_size = k_buffer.size();
+        let scratch_k = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RopeShiftINT4 Scratch K F32"),
+            size: f32_buf_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let scratch_v = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RopeShiftINT4 Scratch V F32"),
+            size: f32_buf_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Scratch buffers for INT4 packed K/V
+        let packed_size = packed_k_buffer.size();
+        let scratch_pk = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RopeShiftINT4 Scratch PK"),
+            size: packed_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let scratch_pv = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RopeShiftINT4 Scratch PV"),
+            size: packed_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Scratch buffers for INT4 scale K/V
+        let scale_size = scale_k_buffer.size();
+        let scratch_sk = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RopeShiftINT4 Scratch SK"),
+            size: scale_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let scratch_sv = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RopeShiftINT4 Scratch SV"),
+            size: scale_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let f32_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RopeShiftINT4 F32 BindGroup"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: scratch_k.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: scratch_v.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: k_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: v_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: params_buffer.as_entire_binding() },
+            ],
+        });
+
+        let int4_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RopeShiftINT4 Packed BindGroup"),
+            layout: &self.int4_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: scratch_pk.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: scratch_sk.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: scratch_pv.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: scratch_sv.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: packed_k_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: scale_k_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 7, resource: packed_v_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 8, resource: scale_v_buffer.as_entire_binding() },
+            ],
+        });
+
+        let dim_x_f32   = head_dim.div_ceil(64);
+        let dim_x_int4  = (head_dim / 8).div_ceil(64);
+        let dim_y       = n_head_kv.div_ceil(4);
+        let dim_z       = elements_to_shift;
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("RopeShiftINT4 Encoder"),
+        });
+
+        // Freeze all live buffers into scratch (eliminates overlap hazard)
+        encoder.copy_buffer_to_buffer(k_buffer,        0, &scratch_k,  0, f32_buf_size);
+        encoder.copy_buffer_to_buffer(v_buffer,        0, &scratch_v,  0, f32_buf_size);
+        encoder.copy_buffer_to_buffer(packed_k_buffer, 0, &scratch_pk, 0, packed_size);
+        encoder.copy_buffer_to_buffer(packed_v_buffer, 0, &scratch_pv, 0, packed_size);
+        encoder.copy_buffer_to_buffer(scale_k_buffer,  0, &scratch_sk, 0, scale_size);
+        encoder.copy_buffer_to_buffer(scale_v_buffer,  0, &scratch_sv, 0, scale_size);
+
+        // Dispatch F32 shift
+        {
+            let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("RopeShiftINT4 F32 Pass"),
+                timestamp_writes: None,
+            });
+            cp.set_pipeline(&self.pipeline);
+            cp.set_bind_group(0, &f32_bg, &[]);
+            cp.dispatch_workgroups(dim_x_f32, dim_y, dim_z);
+        }
+
+        // Dispatch INT4 packed+scale shift
+        {
+            let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("RopeShiftINT4 Packed Pass"),
+                timestamp_writes: None,
+            });
+            cp.set_pipeline(&self.int4_pipeline);
+            cp.set_bind_group(0, &int4_bg, &[]);
+            cp.dispatch_workgroups(dim_x_int4, dim_y, dim_z);
         }
 
         queue.submit(Some(encoder.finish()));

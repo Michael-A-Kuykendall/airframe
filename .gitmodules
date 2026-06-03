@@ -1,4 +1,0 @@
-[submodule "shimmy_integration"]
-	path = shimmy_integration
-	url = https://github.com/Michael-A-Kuykendall/shimmy.git
-	branch = main
