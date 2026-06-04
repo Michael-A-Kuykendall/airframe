@@ -77,6 +77,54 @@ def load_trace(path: Path) -> Dict:
         return json.load(f)
 
 
+def load_json(path: Path) -> Dict:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def resolve_golden_from_bank(bank_path: Path, candidate_path: Path) -> Tuple[Path, str]:
+    bank = load_json(bank_path)
+    entries = bank.get("entries", [])
+    if not entries:
+        raise SystemExit(f"Golden bank has no entries: {bank_path}")
+
+    candidate_pkg = load_trace(candidate_path)
+    c_arch = candidate_pkg.get("model_arch", "")
+    c_mode = candidate_pkg.get("prompt_mode", "")
+    c_prompt_tokens = int(candidate_pkg.get("prompt_token_count", 0))
+    c_stop = candidate_pkg.get("final_stop_reason", "")
+
+    scored: List[Tuple[float, str, Path]] = []
+    for i, entry in enumerate(entries):
+        rel_path = entry.get("path")
+        if not rel_path:
+            continue
+        entry_path = (bank_path.parent / rel_path).resolve()
+        if not entry_path.exists():
+            continue
+
+        e_arch = entry.get("model_arch", "")
+        e_mode = entry.get("prompt_mode", "")
+        e_prompt_tokens = int(entry.get("prompt_token_count", 0))
+        e_stop = entry.get("final_stop_reason", "")
+
+        arch_penalty = 0.0 if e_arch == c_arch else 10_000.0
+        mode_penalty = 0.0 if e_mode == c_mode else 1_000.0
+        stop_penalty = 0.0 if e_stop == c_stop else 100.0
+        token_distance = abs(e_prompt_tokens - c_prompt_tokens)
+
+        score = arch_penalty + mode_penalty + stop_penalty + token_distance
+        label = entry.get("label", f"entry-{i}")
+        scored.append((score, label, entry_path))
+
+    if not scored:
+        raise SystemExit(f"No usable trace files found in golden bank: {bank_path}")
+
+    scored.sort(key=lambda x: x[0])
+    _, label, chosen = scored[0]
+    return chosen, label
+
+
 def build_layer_formula(layer: Dict) -> LayerFormula:
     q = layer["q"]["stats"]
     k = layer["k"]["stats"]
@@ -224,10 +272,12 @@ def print_top_diffs(diffs: Sequence[LayerDiff], top_n: int) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Compare Airframe traces using formula-style layer signatures.")
-    p.add_argument("--golden", required=True, help="Path to golden trace JSON")
+    p.add_argument("--golden", required=False, help="Path to golden trace JSON")
+    p.add_argument("--golden-bank", default=None, help="Path to golden bank JSON used to auto-select a golden trace")
     p.add_argument("--candidate", required=True, help="Path to candidate trace JSON")
     p.add_argument("--phase", choices=["prefill", "decode"], default=None, help="Optional phase filter")
     p.add_argument("--top", type=int, default=20, help="How many top divergent layer points to print")
+    p.add_argument("--fail-threshold", type=float, default=None, help="Fail with exit code 2 when mean layer score exceeds this value")
     p.add_argument("--json-out", default=None, help="Optional output file for machine-readable report")
     return p
 
@@ -235,12 +285,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
 
-    golden_path = Path(args.golden)
     candidate_path = Path(args.candidate)
-    if not golden_path.exists():
-        raise SystemExit(f"Golden trace not found: {golden_path}")
     if not candidate_path.exists():
         raise SystemExit(f"Candidate trace not found: {candidate_path}")
+
+    selected_label: Optional[str] = None
+    if args.golden:
+        golden_path = Path(args.golden)
+    elif args.golden_bank:
+        golden_path, selected_label = resolve_golden_from_bank(Path(args.golden_bank), candidate_path)
+    else:
+        raise SystemExit("Provide either --golden or --golden-bank")
+
+    if not golden_path.exists():
+        raise SystemExit(f"Golden trace not found: {golden_path}")
 
     golden_pkg = load_trace(golden_path)
     candidate_pkg = load_trace(candidate_path)
@@ -256,6 +314,8 @@ def main() -> int:
     print(f"golden   : {golden_path}")
     print(f"candidate: {candidate_path}")
     print(f"phase    : {args.phase or 'all'}")
+    if selected_label is not None:
+        print(f"golden-label: {selected_label}")
     print()
     print("Layer Summary:")
     for k, v in layer_summary.items():
@@ -274,6 +334,7 @@ def main() -> int:
             "golden": str(golden_path),
             "candidate": str(candidate_path),
             "phase": args.phase or "all",
+            "golden_label": selected_label,
             "layer_summary": layer_summary,
             "token_summary": token_summary,
             "top_diffs": [
@@ -292,6 +353,15 @@ def main() -> int:
         out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
         print()
         print(f"Wrote JSON report: {out_path}")
+
+    if args.fail_threshold is not None:
+        mean_score = float(layer_summary.get("mean_score", 0.0))
+        if mean_score > args.fail_threshold:
+            print()
+            print(
+                f"FAIL: mean_score {mean_score:.6f} exceeds fail-threshold {args.fail_threshold:.6f}"
+            )
+            return 2
 
     return 0
 
