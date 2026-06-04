@@ -635,6 +635,15 @@ fn run_inference_completion(
         schema_version: 1,
         model_arch: spec.arch_string().to_string(),
         prompt_mode: prompt_mode.clone(),
+        prompt_renderer_mode: req
+            .prompt_renderer_mode
+            .clone()
+            .unwrap_or_else(|| "none".to_string()),
+        prompt_renderer_family: req.prompt_renderer_family.clone(),
+        prompt_template_source: req
+            .prompt_template_source
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
         seed: req.seed.unwrap_or(42),
         max_tokens: max_new_tokens,
         temperature,
@@ -815,7 +824,7 @@ fn run_inference_completion(
                 visual_seq_len,
             );
 
-            let (_pre_norm_a, l21_a, gpu_logits_a) = {
+            let (_pre_norm_a, _l21_a, gpu_logits_a) = {
                 let cache_guard = kv_cache.lock().unwrap();
                 // FSE: process the full prompt in one shot. Per-layer sync removed from
                 // inference.rs — all 28 layers execute in one command buffer. chunk_tokens
@@ -862,7 +871,7 @@ fn run_inference_completion(
             visual_seq_len,
         );
 
-        let (pre_norm_b, l21_b, gpu_logits_b) = {
+        let (_pre_norm_b, _l21_b, gpu_logits_b) = {
             let cache_guard = kv_cache.lock().unwrap();
             pipeline.run_full_model_prefill_chunked_with_cache_state(
                 device,
@@ -926,7 +935,6 @@ fn run_inference_completion(
         );
     }
 
-    let mut prev_step_ms: f64 = 0.0;
     let fse_control = build_fse_control_from_env();
     let mut control_tokens: Vec<usize> = prompt_tokens.iter().map(|&t| t as usize).collect();
     for _step in 0..max_new_tokens {
@@ -1202,8 +1210,7 @@ fn run_inference_completion(
             logits_vec = pipeline.run_lm_head_blob(device, queue, model, &normed_output, spec.n_vocab as u32, dim, head_off, head_qt, spec.final_logit_softcap);
         }
 
-        let step_ms = step_t0.elapsed().as_secs_f64() * 1000.0;
-        prev_step_ms = step_ms;
+        let _step_ms = step_t0.elapsed().as_secs_f64() * 1000.0;
 
         let (cache_len_after_step, window_base_after_step) = {
             let cache = kv_cache.lock().unwrap();

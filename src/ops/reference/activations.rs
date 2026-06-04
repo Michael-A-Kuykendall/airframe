@@ -66,7 +66,6 @@ pub fn add_broadcast_f32(a: &Tensor, b: &Tensor) -> Result<Tensor> {
 /// `input`: `[rows, d]`, `bias`: `[d]` → returns `[rows, d]`.
 /// Also handles the degenerate 1-D case `[d] + [d]`.
 pub fn add_bias_f32(input: &Tensor, bias: &Tensor) -> Result<Tensor> {
-    let ndim = input.ndim();
     let d = *input.shape.last().unwrap();
     if bias.shape != vec![d] {
         return Err(LibshimmyError::ShapeMismatch {

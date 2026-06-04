@@ -212,36 +212,40 @@ fn classify_template(haystack: &str) -> Option<ChatTemplateFamily> {
     None
 }
 
-fn chat_template_family_for_model(spec: &ModelSpec, model_path: &str) -> ChatTemplateFamily {
+fn chat_template_family_for_model(spec: &ModelSpec, model_path: &str) -> (ChatTemplateFamily, &'static str) {
     let lower = spec.model_name.to_ascii_lowercase();
     let path_lower = model_path.to_ascii_lowercase();
     // MiniCPM-V shares <|user|>/<|assistant|> markers with TinyLlama but uses
     // <|endoftext|> as separator — detect by model name or file path.
     if lower.contains("minicpm") || path_lower.contains("minicpm") {
-        return ChatTemplateFamily::MiniCpmV;
+        return (ChatTemplateFamily::MiniCpmV, "fallback_name_minicpm");
     }
     // Architecture-based detection — uses the GGUF `general.architecture` field
     // which is always present and unambiguous. This fires only when the GGUF has
     // no embedded Jinja template (make_prompt_renderer takes the Jinja path first).
     match &spec.arch {
         // phi2/phi3 base models: no chat tokens, raw completion.
-        ModelArch::Phi => return ChatTemplateFamily::Completion,
+        ModelArch::Phi => return (ChatTemplateFamily::Completion, "fallback_arch"),
         // Gemma architecture → Gemma2 turn format.
-        ModelArch::Gemma => return ChatTemplateFamily::Gemma2,
+        ModelArch::Gemma => return (ChatTemplateFamily::Gemma2, "fallback_arch"),
         // Qwen2/3 without embedded template → ChatML (they use <|im_start|>/<|im_end|>).
-        ModelArch::Qwen2 | ModelArch::Qwen3 => return ChatTemplateFamily::ChatML,
+        ModelArch::Qwen2 | ModelArch::Qwen3 => return (ChatTemplateFamily::ChatML, "fallback_arch"),
         // Llama/Mistral: fall through to token-marker scan below.
         ModelArch::Llama | ModelArch::Mistral => {}
         // Catch-all for architectures not yet in the enum.
         ModelArch::Other(arch) => {
             let a = arch.to_ascii_lowercase();
             if a.contains("gpt2") || a.contains("starcoder") || a.contains("falcon") {
-                return ChatTemplateFamily::Completion;
+                return (ChatTemplateFamily::Completion, "fallback_arch_other");
             }
         }
     }
     // Fall back to scanning the model name for known chat-token markers.
-    classify_template(&lower).unwrap_or(ChatTemplateFamily::ChatML)
+    if let Some(family) = classify_template(&lower) {
+        (family, "fallback_name_marker")
+    } else {
+        (ChatTemplateFamily::ChatML, "fallback_default_chatml")
+    }
 }
 
 /// Decides how to render chat prompts for a loaded model.
@@ -256,15 +260,55 @@ enum PromptRenderer {
         template: Arc<str>,
         bos: String,
         eos: String,
+        enable_thinking: Option<bool>,
+        thinking_policy_source: &'static str,
     },
     /// No embedded template — use the hard-coded family renderer.
-    Family(ChatTemplateFamily),
+    Family {
+        family: ChatTemplateFamily,
+        source: &'static str,
+    },
 }
 
 impl PromptRenderer {
-    fn render(&self, messages: &[ChatMessage]) -> String {
+    fn mode_name(&self) -> &'static str {
         match self {
-            PromptRenderer::Jinja { template, bos, eos } => {
+            PromptRenderer::Jinja { .. } => "jinja",
+            PromptRenderer::Family { .. } => "family",
+        }
+    }
+
+    fn family_name(&self) -> Option<&'static str> {
+        let family = match self {
+            PromptRenderer::Jinja { .. } => return None,
+            PromptRenderer::Family { family, .. } => family,
+        };
+        Some(match family {
+            ChatTemplateFamily::TinyLlama => "TinyLlama",
+            ChatTemplateFamily::ChatML => "ChatML",
+            ChatTemplateFamily::Llama3 => "Llama3",
+            ChatTemplateFamily::Gemma2 => "Gemma2",
+            ChatTemplateFamily::MiniCpmV => "MiniCpmV",
+            ChatTemplateFamily::Completion => "Completion",
+        })
+    }
+
+    fn template_source(&self) -> &'static str {
+        match self {
+            PromptRenderer::Jinja { .. } => "embedded",
+            PromptRenderer::Family { source, .. } => source,
+        }
+    }
+
+    fn render(&self, messages: &[ChatMessage]) -> String {
+        let rendered = match self {
+            PromptRenderer::Jinja {
+                template,
+                bos,
+                eos,
+                enable_thinking,
+                ..
+            } => {
                 let shimmy_msgs: Vec<shimmyjinja::ChatMessage> = messages
                     .iter()
                     .map(|m| shimmyjinja::ChatMessage {
@@ -276,9 +320,9 @@ impl PromptRenderer {
                 ctx.set_var("bos_token", bos.as_str());
                 ctx.set_var("eos_token", eos.as_str());
                 ctx.set_flag("add_generation_prompt", true);
-                // Qwen3 templates enable "thinking" mode by default (outputs a <think> block
-                // before the answer).  Disable it so the model responds directly.
-                ctx.set_flag("enable_thinking", false);
+                if let Some(thinking_enabled) = enable_thinking {
+                    ctx.set_flag("enable_thinking", *thinking_enabled);
+                }
                 // catch_unwind guards against unsupported template constructs
                 // that slip through; falls back to ChatML on failure.
                 let tmpl = template.clone();
@@ -290,8 +334,43 @@ impl PromptRenderer {
                     ChatTemplateFamily::ChatML.render_messages(messages)
                 })
             }
-            PromptRenderer::Family(family) => family.render_messages(messages),
+            PromptRenderer::Family { family, .. } => family.render_messages(messages),
+        };
+
+        if env_flag("SHIMMY_DEBUG_PROMPT_RENDER") {
+            match self {
+                PromptRenderer::Jinja {
+                    enable_thinking,
+                    thinking_policy_source,
+                    ..
+                } => {
+                    eprintln!(
+                        "[PromptRenderer] mode=jinja enable_thinking={:?} policy={} rendered_prompt={:?}",
+                        enable_thinking,
+                        thinking_policy_source,
+                        rendered
+                    );
+                }
+                PromptRenderer::Family { family, source } => {
+                    let family_name = match family {
+                        ChatTemplateFamily::TinyLlama => "TinyLlama",
+                        ChatTemplateFamily::ChatML => "ChatML",
+                        ChatTemplateFamily::Llama3 => "Llama3",
+                        ChatTemplateFamily::Gemma2 => "Gemma2",
+                        ChatTemplateFamily::MiniCpmV => "MiniCpmV",
+                        ChatTemplateFamily::Completion => "Completion",
+                    };
+                    eprintln!(
+                        "[PromptRenderer] mode=family family={} source={} rendered_prompt={:?}",
+                        family_name,
+                        source,
+                        rendered
+                    );
+                }
+            }
         }
+
+        rendered
     }
 }
 
@@ -306,6 +385,33 @@ fn make_prompt_renderer(
     model_path: &str,
 ) -> PromptRenderer {
     if let Some(GgufValue::String(template)) = metadata.get("tokenizer.chat_template") {
+        let model_lower = spec.model_name.to_ascii_lowercase();
+        let path_lower = model_path.to_ascii_lowercase();
+        let env_thinking = std::env::var("SHIMMY_ENABLE_THINKING").ok().and_then(|v| {
+            if v == "1" || v.eq_ignore_ascii_case("true") {
+                Some(true)
+            } else if v == "0" || v.eq_ignore_ascii_case("false") {
+                Some(false)
+            } else {
+                None
+            }
+        });
+        let (thinking_policy_source, thinking_default) = if let Some(v) = env_thinking {
+            ("env", Some(v))
+        } else if model_lower.contains("qwen")
+            || model_lower.contains("qwq")
+            || path_lower.contains("qwen")
+            || path_lower.contains("qwq")
+            || model_lower.contains("deepseek-r1")
+            || path_lower.contains("deepseek-r1")
+        {
+            // Reasoning families often default-open <think>; keep no-think
+            // behavior by default for these models unless overridden.
+            ("heuristic_no_think", Some(false))
+        } else {
+            // Let template/model default behavior apply.
+            ("template_default", None)
+        };
         let bos_id = tokenizer.bos_token();
         let eos_id = tokenizer.eos_token();
         let bos = tokenizer
@@ -314,13 +420,34 @@ fn make_prompt_renderer(
         let eos = tokenizer
             .token_to_piece(eos_id)
             .unwrap_or_else(|_| "</s>".to_string());
+        if env_flag("SHIMMY_DEBUG_PROMPT_RENDER") {
+            eprintln!(
+                "[PromptRenderer] selected=jinja enable_thinking={:?} policy={}",
+                thinking_default,
+                thinking_policy_source
+            );
+        }
         PromptRenderer::Jinja {
             template: template.as_str().into(),
             bos,
             eos,
+            enable_thinking: thinking_default,
+            thinking_policy_source,
         }
     } else {
-        PromptRenderer::Family(chat_template_family_for_model(spec, model_path))
+        let (family, source) = chat_template_family_for_model(spec, model_path);
+        if env_flag("SHIMMY_DEBUG_PROMPT_RENDER") {
+            let family_name = match family {
+                ChatTemplateFamily::TinyLlama => "TinyLlama",
+                ChatTemplateFamily::ChatML => "ChatML",
+                ChatTemplateFamily::Llama3 => "Llama3",
+                ChatTemplateFamily::Gemma2 => "Gemma2",
+                ChatTemplateFamily::MiniCpmV => "MiniCpmV",
+                ChatTemplateFamily::Completion => "Completion",
+            };
+            eprintln!("[PromptRenderer] selected=family family={} source={}", family_name, source);
+        }
+        PromptRenderer::Family { family, source }
     }
 }
 
@@ -350,6 +477,9 @@ impl ChatCompletionRequest {
             debug_trace_max_steps: None,
             debug_trace_include_prefill: None,
             image_payload: None,
+            prompt_renderer_mode: Some(renderer.mode_name().to_string()),
+            prompt_renderer_family: renderer.family_name().map(|v| v.to_string()),
+            prompt_template_source: Some(renderer.template_source().to_string()),
         }
     }
 }
@@ -386,6 +516,10 @@ pub struct InferenceRequest {
     /// `pixels_hwc`: packed H×W×3 u8 RGB bytes (base64-encoded in JSON).
     /// `h`, `w`: image dimensions in pixels.
     pub image_payload: Option<ImagePayload>,
+    /// Metadata for prompt renderer decisioning.
+    pub prompt_renderer_mode: Option<String>,
+    pub prompt_renderer_family: Option<String>,
+    pub prompt_template_source: Option<String>,
 }
 
 /// Raw RGB image attached to a multimodal inference request.

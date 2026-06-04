@@ -32,6 +32,9 @@ AGENTS.md
 artifacts/model_smoke/smoke_*.csv
 artifacts/model_smoke/smoke_*.log
 
+# Generated debug traces / probe outputs (local analysis artifacts)
+artifacts/debug/
+
 # Internal spike / planning docs (never commit to public repo)
 SPIKE_*.md
 VISION_OPTION_*.md

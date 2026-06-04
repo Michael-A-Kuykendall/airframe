@@ -126,6 +126,10 @@ pub struct InferenceTracePackage {
     pub schema_version: u32,
     pub model_arch: String,
     pub prompt_mode: String,
+    pub prompt_renderer_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_renderer_family: Option<String>,
+    pub prompt_template_source: String,
     pub seed: u64,
     pub max_tokens: usize,
     pub temperature: f32,
