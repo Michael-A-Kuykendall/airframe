@@ -41,6 +41,7 @@ $KnownLimitationModels = @(
     ,@("Phi-3.5-mini-instruct.Q4_K_M.gguf", "Fused QKV projection not yet supported (single attn tensor covers Q+K+V).")
     ,@("phi3-mini-4k-instruct-q4.gguf",     "Fused QKV projection not yet supported (single attn tensor covers Q+K+V).")
     ,@("LFM2.5-VL-1.6B/LFM2.5-VL-1.6B-Q4_0.gguf", "Vision/multimodal model - deferred to feat/vision-multimodal branch.")
+    ,@("minicpm-v-2.6/ggml-model-Q4_K_M.gguf",     "Vision/multimodal model - deferred to feat/vision-multimodal branch.")
 )
 
 # 7B models — larger VRAM footprint, run only with -IncludeLarge.
@@ -49,8 +50,7 @@ $KnownLimitationModels = @(
 $LargeModels = @(
     @("deepseek-llm-7b-chat.Q4_K_M.gguf",               "Paris",  "The capital of France is"),
     @("deepseek-coder-6.7b-instruct.Q4_K_M.gguf",       "def ",   "def hello_world():"),
-    @("qwen2-7b-instruct-q4_k_m.gguf",                  "Paris",  "The capital of France is"),
-    @("minicpm-v-2.6/ggml-model-Q4_K_M.gguf",           "Paris",  "The capital of France is")
+    @("qwen2-7b-instruct-q4_k_m.gguf",                  "Paris",  "The capital of France is")
 )
 
 $Models = $VerifiedModels + $BlobModels
