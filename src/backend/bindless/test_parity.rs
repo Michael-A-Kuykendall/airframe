@@ -177,6 +177,8 @@ mod parity_tests {
             post_norm_enabled: 0,
             qk_norm_enabled: 0,
             layer_norm_enabled: 0,
+            ffn_kind_policy: 0,
+            qkv_layout_policy: 0,
         };
 
         let (mid_vec, gpu_output) = pipeline.run_layer_stepwise_test(

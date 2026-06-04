@@ -124,6 +124,8 @@ pub struct TokenTrace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceTracePackage {
     pub schema_version: u32,
+    pub route_version: u32,
+    pub route_digest: String,
     pub model_arch: String,
     pub norm_eps: f32,
     pub layer_norm_enabled: u32,

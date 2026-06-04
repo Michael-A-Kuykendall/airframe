@@ -277,6 +277,8 @@ async fn async_main() -> Result<()> {
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
         layer_norm_enabled: 0,
+        ffn_kind_policy: 0,
+        qkv_layout_policy: 0,
     };
 
     eprintln!("[GPU vs CPU] comparing {} layers ...", spec.n_layer);

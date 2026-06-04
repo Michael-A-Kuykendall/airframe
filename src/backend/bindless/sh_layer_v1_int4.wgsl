@@ -43,6 +43,8 @@ struct LayerParams {
     post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
     qk_norm_enabled: u32,     // 1 = apply per-head Q/K RMSNorm before attention (Qwen3); 0 = disabled
     layer_norm_enabled: u32,  // 1 = LayerNorm path (Phi); 0 = RMSNorm
+    ffn_kind_policy: u32,     // 0 = infer from offsets, 1 = gated, 2 = non-gated
+    qkv_layout_policy: u32,   // 0 = infer from offsets, 1 = separate, 2 = fused
 };
 
 struct CacheParams {
@@ -73,6 +75,16 @@ struct CacheParams {
 @group(0) @binding(11) var<storage, read> kv_cache_k_scale:  array<f32>;  // K scales  [max_seq, n_head_kv]
 @group(0) @binding(12) var<storage, read> kv_cache_v_packed: array<u32>;  // V nibbles [max_seq, n_head_kv, head_dim/8]
 @group(0) @binding(13) var<storage, read> kv_cache_v_scale:  array<f32>;  // V scales  [max_seq, n_head_kv]
+
+fn is_non_gated() -> bool {
+    if (params.ffn_kind_policy == 2u) {
+        return true;
+    }
+    if (params.ffn_kind_policy == 1u) {
+        return false;
+    }
+    return offsets.ffn_gate == 0u;
+}
 
 // Helper functions for Q4_0 dequant
 fn unpack_q4_0(block_val: u32, idx_in_block: u32) -> f32 {
@@ -310,7 +322,7 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let normed = centered * inv_std * norm_w + norm_b;
     temp_state[temp_base + idx] = normed;
 
-    if (params.layer_norm_enabled != 0u || offsets.ffn_gate == 0u) {
+    if (params.layer_norm_enabled != 0u || is_non_gated()) {
         temp_state[temp_base + params.ffn_dim * 2u + idx] = normed;
     }
 }

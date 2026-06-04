@@ -7,6 +7,7 @@ use super::*;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
+use airframe::core::routing::ModelRoutePlan;
 use airframe::control::{ControlDecision, InferenceControl, InferenceEvent};
 use airframe::core::spec::ModelSpec;
 use airframe::debug_trace::{
@@ -632,6 +633,8 @@ fn run_inference_completion(
         post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
         qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
         layer_norm_enabled: layer_norm_mode,
+        ffn_kind_policy: 0,
+        qkv_layout_policy: 0,
     };
 
     let mut generated_text = String::new();
@@ -640,8 +643,22 @@ fn run_inference_completion(
     let mut stop_reason = "max_tokens";
     let mut metrics_violation = None;
     let mut generated_count: usize = 0;
+    let mut route_plan = ModelRoutePlan::from_spec_and_tensors(spec, |name| {
+        model.metadata.tensor_offsets.contains_key(name)
+    });
+    route_plan.apply_prompt_routing(
+        req.prompt_renderer_mode
+            .clone()
+            .unwrap_or_else(|| "none".to_string()),
+        req.prompt_renderer_family.clone(),
+        req.prompt_template_source
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
+    );
     let mut trace_package = trace_config.as_ref().map(|_| InferenceTracePackage {
         schema_version: 1,
+        route_version: route_plan.route_version,
+        route_digest: route_plan.digest.clone(),
         model_arch: spec.arch_string().to_string(),
         norm_eps: spec.rms_eps,
         layer_norm_enabled: layer_params.layer_norm_enabled,

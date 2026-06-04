@@ -86,6 +86,8 @@ pub struct LayerParams {
     pub post_norm_enabled: u32,  // 1 = apply post-attn and post-ffw norm (Gemma-2); 0 = disabled
     pub qk_norm_enabled: u32,    // 1 = apply per-head Q/K RMSNorm before RoPE (Qwen3); 0 = disabled
     pub layer_norm_enabled: u32, // 1 = use LayerNorm math in layer norms (Phi-family)
+    pub ffn_kind_policy: u32,    // 0 = infer from offsets (compat), 1 = gated, 2 = non-gated
+    pub qkv_layout_policy: u32,  // 0 = infer from offsets (compat), 1 = separate, 2 = fused
 }
 
 /// Uniform params for the quantize_kv.wgsl dispatch (TurboQuant).

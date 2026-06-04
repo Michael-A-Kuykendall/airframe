@@ -2,6 +2,7 @@
 // TODO: break run_full_model_prefill_chunked_with_cache_state into a separate chunking helper once prefill chunking is the default path.
 use super::*;
 use super::super::loader::BindlessModel;
+use crate::core::routing::ModelRoutePlan;
 use wgpu::util::DeviceExt;
 
 impl BindlessPipeline {
@@ -193,6 +194,23 @@ impl BindlessPipeline {
         // C. Layer Params (computed per-layer below; placeholder base for struct copy)
         // NOTE: quant_type varies per layer in mixed-quant models (e.g. Q4_K_M).
         //       Per-layer params buffers are created inside the layer loop.
+        let use_route_v2_layer_params = std::env::var("SHIMMY_ROUTE_V2_LAYER_PARAMS")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let route_plan = use_route_v2_layer_params.then(|| {
+            ModelRoutePlan::from_spec_and_tensors(spec, |name| {
+                model.metadata.tensor_offsets.contains_key(name)
+            })
+        });
+        let ffn_kind_policy = route_plan
+            .as_ref()
+            .map(ModelRoutePlan::ffn_kind_policy_code)
+            .unwrap_or(ModelRoutePlan::FFN_KIND_INFER);
+        let qkv_layout_policy = route_plan
+            .as_ref()
+            .map(ModelRoutePlan::qkv_layout_policy_code)
+            .unwrap_or(ModelRoutePlan::QKV_LAYOUT_INFER);
+
         let params_base = LayerParams {
             dim,
             head_count: spec.n_head as u32,
@@ -211,6 +229,8 @@ impl BindlessPipeline {
             } else {
                 0
             },
+            ffn_kind_policy,
+            qkv_layout_policy,
         };
 
         // D. Output Logits

@@ -212,6 +212,8 @@ impl GpuRuntime {
             post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
             qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
             layer_norm_enabled: 0,
+                ffn_kind_policy: 0,
+                qkv_layout_policy: 0,
         };
 
         let norm_weight_offset = gpu_model

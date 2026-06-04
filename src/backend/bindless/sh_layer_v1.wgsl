@@ -39,6 +39,8 @@ struct LayerParams {
     post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
     qk_norm_enabled: u32,     // 1 = apply per-head Q/K RMSNorm before attention (Qwen3); 0 = disabled
     layer_norm_enabled: u32,  // 1 = LayerNorm (mean+variance), 0 = RMSNorm
+    ffn_kind_policy: u32,     // 0 = infer from offsets, 1 = gated, 2 = non-gated
+    qkv_layout_policy: u32,   // 0 = infer from offsets, 1 = separate, 2 = fused
 };
 
 struct CacheParams {
@@ -78,6 +80,16 @@ fn read_blob(word_idx: u32) -> u32 {
 @group(0) @binding(7) var<storage, read_write> kv_cache_k: array<f32>;    // K cache [max_seq * n_head_kv * head_dim]
 @group(0) @binding(8) var<storage, read_write> kv_cache_v: array<f32>;    // V cache [max_seq * n_head_kv * head_dim]
 @group(0) @binding(9) var<uniform> cache_params: CacheParams;             // Sequence position tracking
+
+fn is_non_gated() -> bool {
+    if (params.ffn_kind_policy == 2u) {
+        return true;
+    }
+    if (params.ffn_kind_policy == 1u) {
+        return false;
+    }
+    return offsets.ffn_gate == 0u;
+}
 
 // Helper functions for Q4_0 dequant
 fn unpack_q4_0(block_val: u32, idx_in_block: u32) -> f32 {
@@ -317,7 +329,7 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Phi uses a shared pre-attention normalized input for both branches.
     // Keep existing non-gated behavior as well.
-    if (params.layer_norm_enabled != 0u || offsets.ffn_gate == 0u) {
+    if (params.layer_norm_enabled != 0u || is_non_gated()) {
         temp_state[temp_base + params.ffn_dim * 2u + idx] = normed;
     }
 }
@@ -872,7 +884,7 @@ fn main_ffn_norm(
 
     // For Phi (layer_norm_enabled) and non-gated FFN blocks, use the staged
     // pre-attention normalized stream from main_attn_norm.
-    if (params.layer_norm_enabled != 0u || offsets.ffn_gate == 0u) { return; }
+    if (params.layer_norm_enabled != 0u || is_non_gated()) { return; }
 
     let act_base  = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;
@@ -954,7 +966,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= ffn_dim * 2u || token_idx >= cache_params.batch_size) { return; }
 
     // Non-gated FFN (phi-2, GPT-2): up slot is unused; write 1.0 so gate*up = GELU(gate).
-    if (offsets.ffn_gate == 0u && idx >= ffn_dim) {
+    let non_gated = is_non_gated();
+
+    if (non_gated && idx >= ffn_dim) {
         temp_state[token_idx * params.temp_stride + idx] = 1.0;
         return;
     }
@@ -962,7 +976,6 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let act_base  = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;
 
-    let non_gated = offsets.ffn_gate == 0u;
     var rms = 1.0;
     var norm_offset_base: u32 = 0u;
     if (!non_gated) {
@@ -982,7 +995,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (idx < ffn_dim) {
         // Non-gated (phi-2, GPT-2): use ffn_up for the single proj that feeds the gate slot.
-        weight_off = select(offsets.ffn_gate, offsets.ffn_up, offsets.ffn_gate == 0u);
+        weight_off = select(offsets.ffn_gate, offsets.ffn_up, non_gated);
     } else {
         weight_off = offsets.ffn_up; // Up
         row_idx = idx - ffn_dim;
@@ -1075,7 +1088,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx < ffn_dim) {
         var activated: f32;
         // Non-gated uses GELU; Gemma-2 (GeGLU) also uses GELU; gated uses SiLU.
-        if (offsets.ffn_gate == 0u || params.attn_logit_softcap > 0.0) {
+        if (non_gated || params.attn_logit_softcap > 0.0) {
             // GELU approximate (PyTorch tanh variant): 0.5*x*(1+tanh(sqrt(2/π)*(x+0.044715*x³)))
             activated = 0.5 * dot * (1.0 + tanh(0.7978845608f * (dot + 0.044715f * dot * dot * dot)));
         } else {

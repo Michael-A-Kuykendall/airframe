@@ -22,6 +22,8 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Serialize)]
 struct RouteCheckReport {
+    route_version: u32,
+    route_digest: String,
     model_name: String,
     model_path: String,
     arch: String,
@@ -33,6 +35,8 @@ struct RouteCheckReport {
     post_norm_enabled: bool,
     qkv_layout: String,
     ffn_mode: String,
+    hard_errors: Vec<String>,
+    strict_mode_pass: bool,
     reasons: Vec<String>,
     warnings: Vec<String>,
 }
@@ -1444,12 +1448,20 @@ fn run_minimum_route_check(
     let prompt_renderer_mode = prompt_renderer.mode_name().to_string();
     let prompt_renderer_family = prompt_renderer.family_name().map(|s| s.to_string());
     let prompt_template_source = prompt_renderer.template_source().to_string();
-    route.reasons.push(format!(
-        "prompt renderer selected mode={} source={}",
-        prompt_renderer_mode, prompt_template_source
-    ));
+    route.apply_prompt_routing(
+        prompt_renderer_mode.clone(),
+        prompt_renderer_family.clone(),
+        prompt_template_source.clone(),
+    );
+
+    let strict_fail_hard = env_flag("SHIMMY_ROUTE_CHECK_STRICT");
+    let strict_fail_warn = env_flag("SHIMMY_ROUTE_CHECK_FAIL_ON_WARN");
+    route.strict_mode_pass = route.hard_errors.is_empty()
+        && (!strict_fail_warn || route.warnings.is_empty());
 
     let report = RouteCheckReport {
+        route_version: route.route_version,
+        route_digest: route.digest.clone(),
         model_name: spec.model_name.clone(),
         model_path: model_path.to_string(),
         arch: route.arch.clone(),
@@ -1461,19 +1473,28 @@ fn run_minimum_route_check(
         post_norm_enabled: route.post_norm_enabled,
         qkv_layout: route.qkv_layout.as_str().to_string(),
         ffn_mode: route.ffn_kind.as_str().to_string(),
-        reasons: route.reasons,
-        warnings: route.warnings,
+        hard_errors: route.hard_errors.clone(),
+        strict_mode_pass: route.strict_mode_pass,
+        reasons: route.reasons.clone(),
+        warnings: route.warnings.clone(),
     };
 
-    let strict = env_flag("SHIMMY_ROUTE_CHECK_STRICT");
     let warnings_count = report.warnings.len();
+    let hard_error_count = report.hard_errors.len();
     let serialized = serde_json::to_string(&report)
         .map_err(|e| format!("route check serialization failed: {}", e))?;
     eprintln!("[ROUTE_CHECK] {}", serialized);
 
-    if strict && warnings_count > 0 {
+    if strict_fail_hard && hard_error_count > 0 {
         return Err(format!(
-            "minimum route check failed in strict mode with {} warning(s)",
+            "minimum route check failed in strict mode with {} hard error(s)",
+            hard_error_count
+        ));
+    }
+
+    if strict_fail_warn && warnings_count > 0 {
+        return Err(format!(
+            "minimum route check failed in warning-fail mode with {} warning(s)",
             warnings_count
         ));
     }
