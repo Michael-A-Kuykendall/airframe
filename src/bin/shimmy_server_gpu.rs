@@ -6,6 +6,7 @@ use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::BindlessPipeline;
 use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0};
 use airframe::core::model::GgufTensorInfo;
+use airframe::core::routing::ModelRoutePlan;
 use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
 use aho_corasick::AhoCorasick;
 use std::sync::OnceLock;
@@ -18,6 +19,23 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+#[derive(Serialize)]
+struct RouteCheckReport {
+    model_name: String,
+    model_path: String,
+    arch: String,
+    prompt_renderer_mode: String,
+    prompt_renderer_family: Option<String>,
+    prompt_template_source: String,
+    norm_mode: String,
+    qk_norm_enabled: bool,
+    post_norm_enabled: bool,
+    qkv_layout: String,
+    ffn_mode: String,
+    reasons: Vec<String>,
+    warnings: Vec<String>,
+}
 
 /// Xorshift64* PRNG — fast, deterministic, no external dep
 
@@ -850,6 +868,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&http_bind_addr).await?;
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
     let prompt_renderer = make_prompt_renderer(&gpu_model.metadata.gguf_metadata, &spec, &tokenizer, &model_path);
+    if let Err(err) = run_minimum_route_check(&spec, &gpu_model.metadata, &prompt_renderer, &model_path) {
+        eprintln!("[ROUTE_CHECK_FAIL] {}", err);
+        return Err(err.into());
+    }
     let models_for_http = Arc::clone(&discovered_models);
     let kv_quant_int4_for_http = kv_quant_int4;
     tokio::spawn(async move {
@@ -1401,6 +1423,62 @@ async fn read_http_request(
     }
 
     Ok(buffer)
+}
+
+/// Minimal startup routing self-check.
+///
+/// This check is intentionally lightweight and model-local:
+/// it validates that a loaded GGUF maps to one coherent prompt/math route plan
+/// and emits a structured debug report with explicit reasons.
+///
+/// Set SHIMMY_ROUTE_CHECK_STRICT=1 to fail startup on hard mismatches.
+fn run_minimum_route_check(
+    spec: &ModelSpec,
+    metadata: &airframe::backend::bindless::metadata::BindlessMetadata,
+    prompt_renderer: &PromptRenderer,
+    model_path: &str,
+) -> Result<(), String> {
+    let has = |name: &str| metadata.tensor_offsets.contains_key(name);
+    let mut route = ModelRoutePlan::from_spec_and_tensors(spec, has);
+
+    let prompt_renderer_mode = prompt_renderer.mode_name().to_string();
+    let prompt_renderer_family = prompt_renderer.family_name().map(|s| s.to_string());
+    let prompt_template_source = prompt_renderer.template_source().to_string();
+    route.reasons.push(format!(
+        "prompt renderer selected mode={} source={}",
+        prompt_renderer_mode, prompt_template_source
+    ));
+
+    let report = RouteCheckReport {
+        model_name: spec.model_name.clone(),
+        model_path: model_path.to_string(),
+        arch: route.arch.clone(),
+        prompt_renderer_mode,
+        prompt_renderer_family,
+        prompt_template_source,
+        norm_mode: route.norm_kind.as_str().to_string(),
+        qk_norm_enabled: route.qk_norm_enabled,
+        post_norm_enabled: route.post_norm_enabled,
+        qkv_layout: route.qkv_layout.as_str().to_string(),
+        ffn_mode: route.ffn_kind.as_str().to_string(),
+        reasons: route.reasons,
+        warnings: route.warnings,
+    };
+
+    let strict = env_flag("SHIMMY_ROUTE_CHECK_STRICT");
+    let warnings_count = report.warnings.len();
+    let serialized = serde_json::to_string(&report)
+        .map_err(|e| format!("route check serialization failed: {}", e))?;
+    eprintln!("[ROUTE_CHECK] {}", serialized);
+
+    if strict && warnings_count > 0 {
+        return Err(format!(
+            "minimum route check failed in strict mode with {} warning(s)",
+            warnings_count
+        ));
+    }
+
+    Ok(())
 }
 
 /// Architecture tensor registry: verify required tensors are present for the detected arch.
