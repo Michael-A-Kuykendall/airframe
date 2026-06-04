@@ -198,7 +198,9 @@ impl ModelSpec {
                         "feed_forward_length"               => { if let GgufValue::U32(v) = value { ff_dim       = Some(*v as usize); } }
                         "attention.head_count"              => { if let GgufValue::U32(v) = value { n_head       = Some(*v as usize); } }
                         "attention.head_count_kv"           => { if let GgufValue::U32(v) = value { n_head_kv    = Some(*v as usize); } }
-                        "attention.layer_norm_rms_epsilon"  => { if let GgufValue::F32(v) = value { rms_eps      = Some(*v); } }
+                        "attention.layer_norm_rms_epsilon"
+                        | "attention.layer_norm_epsilon"
+                        | "layer_norm_epsilon"              => { if let GgufValue::F32(v) = value { rms_eps      = Some(*v); } }
                         "rope.freq_base"                    => { if let GgufValue::F32(v) = value { rope_base    = Some(*v); } }
                         "rope.dimension_count"              => { if let GgufValue::U32(v) = value { rope_dim     = Some(*v as usize); } }
                         "context_length"                    => { if let GgufValue::U32(v) = value { n_ctx        = Some(*v as usize); } }
@@ -351,6 +353,19 @@ impl ModelSpec {
     /// Row byte size for a weight matrix in the dominant quant type
     pub fn quant_row_bytes(&self, cols: usize) -> usize {
         (cols / self.quant_block_size()) * self.quant_block_bytes()
+    }
+
+    /// Whether this architecture should run LayerNorm math (mean+variance)
+    /// instead of RMSNorm in bindless kernels and final norm.
+    pub fn uses_layer_norm(&self) -> bool {
+        match &self.arch {
+            ModelArch::Phi => true,
+            ModelArch::Other(s) => {
+                let a = s.to_ascii_lowercase();
+                a.contains("gpt2") || a.contains("starcoder") || a.contains("falcon")
+            }
+            _ => false,
+        }
     }
 }
 

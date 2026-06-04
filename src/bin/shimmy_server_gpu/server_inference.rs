@@ -609,6 +609,15 @@ fn run_inference_completion(
         .get_tensor_type("blk.0.ffn_down.weight")
         .unwrap_or(qt_main);
     let packed_quant_type = qt_main | (qt_v << 8) | (qt_ffn_down << 16);
+    let layer_norm_mode = if spec.uses_layer_norm() { 1 } else { 0 };
+    eprintln!(
+        "[GPU Server] Norm mode: arch={} layer_norm_enabled={} output_norm_type={} eps={} quant=0x{:08x}",
+        spec.arch_string(),
+        layer_norm_mode,
+        layer_norm_mode,
+        spec.rms_eps,
+        packed_quant_type
+    );
     let layer_params = LayerParams {
         dim,
         head_count: spec.n_head as u32,
@@ -622,7 +631,7 @@ fn run_inference_completion(
         attn_logit_softcap: spec.attn_logit_softcap,
         post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
         qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
-        layer_norm_enabled: if matches!(spec.arch, ModelArch::Phi) { 1 } else { 0 },
+        layer_norm_enabled: layer_norm_mode,
     };
 
     let mut generated_text = String::new();
@@ -634,6 +643,11 @@ fn run_inference_completion(
     let mut trace_package = trace_config.as_ref().map(|_| InferenceTracePackage {
         schema_version: 1,
         model_arch: spec.arch_string().to_string(),
+        norm_eps: spec.rms_eps,
+        layer_norm_enabled: layer_params.layer_norm_enabled,
+        post_norm_enabled: layer_params.post_norm_enabled,
+        qk_norm_enabled: layer_params.qk_norm_enabled,
+        packed_quant_type: layer_params.quant_type,
         prompt_mode: prompt_mode.clone(),
         prompt_renderer_mode: req
             .prompt_renderer_mode
@@ -703,7 +717,7 @@ fn run_inference_completion(
         weights_offset: (norm_weight_offset / 4) as u32, // word index (byte_offset / 4) — matches sh_rmsnorm.wgsl read_blob() convention
         bias_offset: norm_bias_offset,
         eps: spec.rms_eps,
-        norm_type: if matches!(spec.arch, ModelArch::Phi) { 1 } else { 0 },
+        norm_type: layer_norm_mode,
     };
     let disable_output_norm = env_flag("SHIMMY_DISABLE_OUTPUT_NORM");
 

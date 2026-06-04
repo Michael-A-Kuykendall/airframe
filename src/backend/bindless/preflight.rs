@@ -159,11 +159,7 @@ impl PreflightResources {
         // post_attention_norm / post_ffw_norm only exist in Gemma / Gemma2 architectures.
         // For all other models (Llama, Mistral, Phi, Qwen…) their absence is expected and
         // should not produce a warning.
-        let has_post_norms = matches!(
-            spec.arch,
-            crate::core::spec::ModelArch::Gemma
-                | crate::core::spec::ModelArch::Other(_)
-        );
+        let has_post_norms = matches!(spec.arch, crate::core::spec::ModelArch::Gemma);
         let is_phi_arch = matches!(spec.arch, crate::core::spec::ModelArch::Phi);
 
         // Helper to copy — warn on missing only when `warn` is true.

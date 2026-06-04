@@ -206,7 +206,7 @@ impl BindlessPipeline {
             attn_logit_softcap: spec.attn_logit_softcap,
             post_norm_enabled: if spec.arch_string() == "gemma2" { 1 } else { 0 },
             qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
-            layer_norm_enabled: if matches!(spec.arch, crate::core::spec::ModelArch::Phi) {
+            layer_norm_enabled: if spec.uses_layer_norm() {
                 1
             } else {
                 0

@@ -125,6 +125,11 @@ pub struct TokenTrace {
 pub struct InferenceTracePackage {
     pub schema_version: u32,
     pub model_arch: String,
+    pub norm_eps: f32,
+    pub layer_norm_enabled: u32,
+    pub post_norm_enabled: u32,
+    pub qk_norm_enabled: u32,
+    pub packed_quant_type: u32,
     pub prompt_mode: String,
     pub prompt_renderer_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
