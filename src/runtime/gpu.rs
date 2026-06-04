@@ -221,6 +221,7 @@ impl GpuRuntime {
         let norm_params = RMSNormParams {
             count: dim,
             weights_offset: norm_weight_offset,
+            bias_offset: 0,
             eps: spec.rms_eps,
             norm_type: 0,
         };

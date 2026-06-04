@@ -684,9 +684,15 @@ fn run_inference_completion(
         .metadata
         .get_tensor_offset("output_norm.weight")
         .expect("output_norm.weight not found");
+    let norm_bias_offset = model
+        .metadata
+        .get_tensor_offset("output_norm.bias")
+        .map(|off| (off / 4) as u32)
+        .unwrap_or(0);
     let norm_params = RMSNormParams {
         count: dim,
         weights_offset: (norm_weight_offset / 4) as u32, // word index (byte_offset / 4) — matches sh_rmsnorm.wgsl read_blob() convention
+        bias_offset: norm_bias_offset,
         eps: spec.rms_eps,
         norm_type: if matches!(spec.arch, ModelArch::Phi) { 1 } else { 0 },
     };

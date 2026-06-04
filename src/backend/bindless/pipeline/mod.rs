@@ -41,6 +41,7 @@ pub struct MatMulParams {
 pub struct RMSNormParams {
     pub count: u32,
     pub weights_offset: u32,
+    pub bias_offset: u32, // 0 = disabled; otherwise word index (byte_offset / 4)
     pub eps: f32,
     pub norm_type: u32, // 0 = RMSNorm, 1 = LayerNorm (mean+variance)
 }
@@ -51,11 +52,13 @@ pub struct RMSNormParams {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LayerOffsets {
     pub attn_norm: u32,
+    pub attn_norm_bias: u32,  // byte offset of attn norm bias (F32); 0 = disabled
     pub attn_q: u32,
     pub attn_k: u32,
     pub attn_v: u32,
     pub attn_out: u32,
     pub ffn_norm: u32,
+    pub ffn_norm_bias: u32,   // byte offset of ffn norm bias (F32); 0 = disabled
     pub ffn_gate: u32,
     pub ffn_down: u32,
     pub ffn_up: u32,

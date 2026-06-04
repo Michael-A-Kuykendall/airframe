@@ -237,13 +237,21 @@ impl BindlessMetadata {
                     ffn_norm_off = attn_norm_off;
                 }
 
+                let attn_norm_bias_off = opt(&absolute_offsets, layer_idx, "attn_norm.bias");
+                let mut ffn_norm_bias_off = opt(&absolute_offsets, layer_idx, "ffn_norm.bias");
+                if is_phi_arch && ffn_norm_bias_off == 0 {
+                    ffn_norm_bias_off = attn_norm_bias_off;
+                }
+
                 let offsets = super::pipeline::LayerOffsets {
                     attn_norm: attn_norm_off,
+                    attn_norm_bias: attn_norm_bias_off,
                     attn_q:    attn_q_off,
                     attn_k:    attn_k_off,
                     attn_v:    attn_v_off,
                     attn_out:  p(&absolute_offsets, layer_idx, "attn_output.weight"),
                     ffn_norm:  ffn_norm_off,
+                    ffn_norm_bias: ffn_norm_bias_off,
                     ffn_gate:  p(&absolute_offsets, layer_idx, "ffn_gate.weight"),
                     ffn_down:  p(&absolute_offsets, layer_idx, "ffn_down.weight"),
                     ffn_up:    p(&absolute_offsets, layer_idx, "ffn_up.weight"),
@@ -324,11 +332,13 @@ impl BindlessMetadata {
 
         Some(super::pipeline::LayerOffsets {
             attn_norm: p("attn_norm.weight"),
+            attn_norm_bias: self.tensor_offsets.get(&format!("blk.{}.attn_norm.bias", layer_idx)).copied().unwrap_or(0) as u32,
             attn_q: p("attn_q.weight"),
             attn_k: p("attn_k.weight"),
             attn_v: p("attn_v.weight"),
             attn_out: p("attn_output.weight"),
             ffn_norm: p("ffn_norm.weight"),
+            ffn_norm_bias: self.tensor_offsets.get(&format!("blk.{}.ffn_norm.bias", layer_idx)).copied().unwrap_or(0) as u32,
             ffn_gate: p("ffn_gate.weight"),
             ffn_down: p("ffn_down.weight"),
             ffn_up: p("ffn_up.weight"),

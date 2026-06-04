@@ -5,6 +5,7 @@
 struct Params {
     count: u32,
     weight_offset: u32, // Word index (byte_offset / 4) to the start of the weight tensor in GGUF blob
+    bias_offset: u32,   // Word index (byte_offset / 4) to bias tensor; 0 disables bias
     eps: f32,
     norm_type: u32, // 0 = RMSNorm, 1 = LayerNorm (mean+variance)
 };
@@ -86,8 +87,9 @@ fn main(
         // Reinterpret u32 bits as f32
         let w_bits = read_blob(w_u32_start + i);
         let w_val = bitcast<f32>(w_bits);
+        let b_val = select(0.0, bitcast<f32>(read_blob(params.bias_offset + i)), params.bias_offset != 0u);
 
         let centered = select(val, val - mean, params.norm_type == 1u);
-        output[i] = centered * scale * w_val;
+        output[i] = centered * scale * w_val + b_val;
     }
 }

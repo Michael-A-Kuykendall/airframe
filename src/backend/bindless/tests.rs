@@ -355,6 +355,7 @@ mod tests {
         let params = RMSNormParams {
             count: 4,
             weights_offset: 0, // Weights st start of buffer
+            bias_offset: 0,
             eps: 0.0,          // Simplify math
             norm_type: 0,
         };
@@ -453,6 +454,7 @@ mod tests {
         let rms_params = RMSNormParams {
             count: 32,
             weights_offset: 0,
+            bias_offset: 0,
             eps: 0.0,
             norm_type: 0,
         };

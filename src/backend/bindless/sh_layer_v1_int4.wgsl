@@ -14,11 +14,13 @@ const BLOCK_SIZE: u32 = 32u; // Q4_0 Block Size
 
 struct LayerOffsets {
     attn_norm: u32,
+    attn_norm_bias: u32,
     attn_q: u32,
     attn_k: u32,
     attn_v: u32,
     attn_out: u32,
     ffn_norm: u32,
+    ffn_norm_bias: u32,
     ffn_gate: u32,
     ffn_down: u32,
     ffn_up: u32,
@@ -303,8 +305,9 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let norm_offset_base = offsets.layer_idx * 4u * params.dim;
     let norm_w = norm_bank[norm_offset_base + idx];
+    let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.attn_norm_bias / 4u + idx]), offsets.attn_norm_bias != 0u);
     let centered = select(activation_in[act_base + idx], activation_in[act_base + idx] - mean, params.layer_norm_enabled != 0u);
-    let normed = centered * inv_std * norm_w;
+    let normed = centered * inv_std * norm_w + norm_b;
     temp_state[temp_base + idx] = normed;
 
     if (params.layer_norm_enabled != 0u || offsets.ffn_gate == 0u) {
@@ -880,8 +883,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
                 let norm_w = norm_bank[norm_offset_base + col];
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
-                let seq_x = activation_in[act_base + col] * rms * norm_w;
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
                 let val_x = select(seq_x, staged_x, use_staged_ffn);
                 dot += val_x * dequant_q6k_elem(bb, e);
             }
@@ -894,8 +898,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
                 let norm_w = norm_bank[norm_offset_base + col];
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
-                let seq_x = activation_in[act_base + col] * rms * norm_w;
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
                 let val_x = select(seq_x, staged_x, use_staged_ffn);
                 dot += val_x * dequant_q5k_elem(bb, e);
             }
@@ -908,8 +913,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
                 let norm_w = norm_bank[norm_offset_base + col];
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
-                let seq_x = activation_in[act_base + col] * rms * norm_w;
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
                 let val_x = select(seq_x, staged_x, use_staged_ffn);
                 dot += val_x * dequant_q4k_elem(block_base_k, e);
             }
@@ -922,8 +928,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var e = 0u; e < 32u; e++) {
                 let col = b * 32u + e;
                 let norm_w = norm_bank[norm_offset_base + col];
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
-                let seq_x = activation_in[act_base + col] * rms * norm_w;
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
                 let val_x = select(seq_x, staged_x, use_staged_ffn);
                 dot += val_x * dequant_q8_0_elem(bb, e);
             }
@@ -932,8 +939,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_off + (row_idx * params.dim + col) * 2u;
             let norm_w = norm_bank[norm_offset_base + col];
+            let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
             let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
-            let seq_x = activation_in[act_base + col] * rms * norm_w;
+            let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
             let val_x = select(seq_x, staged_x, use_staged_ffn);
             dot += val_x * dequant_f16_at(w_byte);
         }
@@ -941,8 +949,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_off / 4u + row_idx * params.dim + col;
             let norm_w = norm_bank[norm_offset_base + col];
+            let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
             let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
-            let seq_x = activation_in[act_base + col] * rms * norm_w;
+            let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
             let val_x = select(seq_x, staged_x, use_staged_ffn);
             dot += val_x * bitcast<f32>(gguf_blob[w_idx]);
         }
@@ -958,8 +967,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var i = 0u; i < 32u; i++) {
                 let col = b * 32u + i;
                 let norm_w = norm_bank[norm_offset_base + col];
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
-                let seq_x = activation_in[act_base + col] * rms * norm_w;
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
                 let val_x = select(seq_x, staged_x, use_staged_ffn);
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;

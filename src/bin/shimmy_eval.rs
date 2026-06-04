@@ -1429,6 +1429,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
     let params = RMSNormParams {
         count: dim as u32,
         weights_offset: norm_offset as u32,
+        bias_offset: 0,
         eps: spec.rms_eps,
         norm_type: 0,
     };
@@ -1569,6 +1570,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         let ffn_norm_params = RMSNormParams {
             count: dim as u32,
             weights_offset: ffn_norm_offset as u32,
+            bias_offset: 0,
             eps: spec.rms_eps,
             norm_type: 0,
         };

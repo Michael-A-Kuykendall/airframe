@@ -392,9 +392,15 @@ impl BindlessPipeline {
             .metadata
             .get_tensor_offset("output_norm.weight")
             .expect("output_norm missing");
+        let norm_bias = model
+            .metadata
+            .get_tensor_offset("output_norm.bias")
+            .map(|off| (off / 4) as u32)
+            .unwrap_or(0);
         let norm_params = RMSNormParams {
             count: dim,
             weights_offset: (norm_weight / 4) as u32, // word index (byte_offset / 4); safe: 4.4GB/4 = 1.1B < u32::MAX
+            bias_offset: norm_bias,
             eps: spec.rms_eps,
             norm_type: if matches!(spec.arch, crate::core::spec::ModelArch::Phi) {
                 1
