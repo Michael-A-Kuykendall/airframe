@@ -1,7 +1,7 @@
 # Airframe Local Test Plan — RTX 3060 12 GB
 <!-- Auditable step-by-step regimen. Check off each step as you go. -->
-<!-- Branch target: feat/gpu-large-model (post-merge with master) -->
-<!-- Last updated: 2026-06-03 -->
+<!-- Branch target: feat/fse-control-plane-unification -->
+<!-- Last updated: 2026-06-04 -->
 
 ---
 
@@ -17,6 +17,37 @@
 | Readiness probe | `GET http://127.0.0.1:8086/api/repro/queue` |
 
 **Rule:** Kill any running server before starting the next.  Never run two instances simultaneously — the second crashes silently.
+
+---
+
+## Current Resume Sequence
+
+This document started as the `feat/gpu-large-model` validation plan, but it is now the working text-model validation checklist for `feat/fse-control-plane-unification` after the Phi-2 repair work.
+
+Current branch reality:
+
+- Vision and multimodal work are deferred off this branch
+- Phi-2 is fixed by the standard harness in `scripts/phi_smoke_formula.sh`
+- The next work is the text-model sweep, not more free-form Phi debugging
+- `scripts/model_smoke_test.ps1` remains the authoritative model inventory and expected-response matrix
+
+Run in this order unless a specific regression forces a narrower hop:
+
+1. Phi harness confirmation after any norm, RoPE, shader-layout, INT4, or trace-control change
+2. Baseline seven-model text sweep
+3. Gemma 2 2B blob-gate check
+4. Baseline plus Gemma in INT4 mode
+5. Math interception checks if control-plane or routing code changed
+6. 7B INT4 sweep on conservative context settings
+
+Current expected state:
+
+- Phi harness: PASS
+- Baseline seven-model sweep: pending re-run on this branch head
+- Gemma 2 2B blob gate: pending re-run on this branch head
+- INT4 baseline plus Gemma: pending re-run on this branch head
+- Math interception: run only if touched
+- 7B INT4 sweep: pending after smaller-model green path
 
 ---
 
@@ -52,15 +83,15 @@
 
 ## Pre-flight Checklist
 
-- [ ] **P0** Confirm you are on `feat/gpu-large-model` branch
+- [ ] **P0** Confirm you are on `feat/fse-control-plane-unification`
   ```bash
   git branch --show-current
-  # must print: feat/gpu-large-model
+  # must print: feat/fse-control-plane-unification
   ```
-- [ ] **P1** Confirm master has been merged into `feat/gpu-large-model` (merge step not yet done as of 2026-06-03)
+- [ ] **P1** Confirm the recent text-serving and Phi fixes are present on HEAD
   ```bash
-  git log --oneline feat/gpu-large-model..master | wc -l
-  # must print: 0  (zero commits ahead on master)
+  git log --oneline --max-count=6
+  # should include: b4af20a, ca32181, 8a4a9e1, 0f2851d, 4d696c5, 84608eb
   ```
 - [ ] **P2** Build release binary
   ```bash
@@ -88,8 +119,8 @@
 
 ## Phase 1 — Verified Models, F32 KV (Regression Baseline)
 
-**Goal:** Confirm the 7 historically passing models still pass after all master merges.  
-**Branch:** `feat/gpu-large-model` (post-merge)  
+**Goal:** Confirm the 7 historically passing models still pass on the current stabilization branch head.  
+**Branch:** `feat/fse-control-plane-unification`  
 **INT4:** off  
 **Expected result:** 7 PASS, 0 FAIL
 
@@ -117,8 +148,8 @@ $env:SHIMMY_MAX_CTX = "4096"
 ## Phase 2 — Blob Fix Gate (gemma-2-2b)
 
 **Goal:** Confirm the >2 GB blob split + GPU lm_head u32 word-offset fix actually works.  
-This is the primary deliverable of `feat/gpu-large-model`.  
-**Branch:** `feat/gpu-large-model` (post-merge)  
+This remains the key large-model gate inherited from `feat/gpu-large-model`.  
+**Branch:** `feat/fse-control-plane-unification`  
 **INT4:** off first, then on
 
 ### 2a — F32 KV
@@ -149,7 +180,7 @@ Remove-Item Env:SHIMMY_KV_QUANT
 ## Phase 3 — INT4 KV Regression (All Verified Models)
 
 **Goal:** Confirm TurboShimmy INT4 KV (from master, `bab91dd`) is not broken by the blob-split merge.  
-**Branch:** `feat/gpu-large-model` (post-merge)
+**Branch:** `feat/fse-control-plane-unification`
 
 ```powershell
 $env:SHIMMY_PORT     = "8086"
