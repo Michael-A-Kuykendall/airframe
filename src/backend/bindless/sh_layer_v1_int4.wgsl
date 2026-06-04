@@ -32,6 +32,7 @@ struct LayerParams {
     head_count: u32,    // 32
     head_count_kv: u32, // 4 (GQA)
     head_dim: u32,      // 64
+    rope_dim: u32,      // rotary sub-dimension (may be < head_dim for partial RoPE)
     rms_eps: f32,       // 1e-5
     ffn_dim: u32,       // Feed-forward intermediate dim (e.g. 5632)
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
@@ -571,6 +572,7 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let kv_head_idx = head_idx / gqa_ratio;
     let q_base     = temp_base + params.dim + head_idx * params.head_dim;
     let n_pairs    = params.head_dim / 2u;
+    let rope_pairs = params.rope_dim / 2u;
     let compact_query_pos = cache_params.current_pos + token_idx;
     let logical_query_pos = cache_params.logical_pos_base + compact_query_pos;
 
@@ -601,9 +603,13 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k_base = pos * params.head_count_kv * params.head_dim
                    + kv_head_idx * params.head_dim;
         for (var p = 0u; p < n_pairs; p++) {
-            let tbl   = rel * n_pairs * 2u + p * 2u;
-            let cos_a = rope_table[tbl];
-            let sin_a = rope_table[tbl + 1u];
+            var cos_a = 1.0;
+            var sin_a = 0.0;
+            if (p < rope_pairs) {
+                let tbl = rel * rope_pairs * 2u + p * 2u;
+                cos_a = rope_table[tbl];
+                sin_a = rope_table[tbl + 1u];
+            }
             let doff  = p * 2u;
             let q_re  = temp_state[q_base + doff];
             let q_im  = temp_state[q_base + doff + 1u];
@@ -1127,6 +1133,7 @@ fn main_attn_out_int4(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let kv_head_idx = head_idx / gqa_ratio;
     let q_base     = temp_base + params.dim + head_idx * params.head_dim;
     let n_pairs    = params.head_dim / 2u;
+    let rope_pairs = params.rope_dim / 2u;
     let hd8        = params.head_dim / 8u;  // U32s per head-vector
     let compact_query_pos = cache_params.current_pos + token_idx;
     let logical_query_pos = cache_params.logical_pos_base + compact_query_pos;
@@ -1156,9 +1163,13 @@ fn main_attn_out_int4(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k_flat_base = pos * params.head_count_kv * params.head_dim
                         + kv_head_idx * params.head_dim;
         for (var p = 0u; p < n_pairs; p++) {
-            let tbl   = rel * n_pairs * 2u + p * 2u;
-            let cos_a = rope_table[tbl];
-            let sin_a = rope_table[tbl + 1u];
+            var cos_a = 1.0;
+            var sin_a = 0.0;
+            if (p < rope_pairs) {
+                let tbl = rel * rope_pairs * 2u + p * 2u;
+                cos_a = rope_table[tbl];
+                sin_a = rope_table[tbl + 1u];
+            }
             let doff  = p * 2u;
             let q_re  = temp_state[q_base + doff];
             let q_im  = temp_state[q_base + doff + 1u];
