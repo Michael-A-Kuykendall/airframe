@@ -164,6 +164,7 @@ impl PreflightResources {
             crate::core::spec::ModelArch::Gemma
                 | crate::core::spec::ModelArch::Other(_)
         );
+        let is_phi_arch = matches!(spec.arch, crate::core::spec::ModelArch::Phi);
 
         // Helper to copy — warn on missing only when `warn` is true.
         let mut copy_tensor_inner = |name: &str, dest_offset_bytes: usize, warn: bool| {
@@ -189,7 +190,12 @@ impl PreflightResources {
 
             let layer_base = i * 4 * (block_size as usize);
             copy_tensor_inner(&attn_name, layer_base, true);
-            copy_tensor_inner(&ffn_name, layer_base + (block_size as usize), true);
+            if is_phi_arch && metadata.get_tensor_offset(&ffn_name).is_none() {
+                // Phi-family checkpoints may omit a distinct FFN norm tensor.
+                copy_tensor_inner(&attn_name, layer_base + (block_size as usize), false);
+            } else {
+                copy_tensor_inner(&ffn_name, layer_base + (block_size as usize), true);
+            }
             copy_tensor_inner(&post_attn_name, layer_base + 2 * (block_size as usize), has_post_norms);
             copy_tensor_inner(&post_ffw_name, layer_base + 3 * (block_size as usize), has_post_norms);
         }

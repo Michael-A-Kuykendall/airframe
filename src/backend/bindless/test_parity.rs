@@ -176,6 +176,7 @@ mod parity_tests {
             attn_logit_softcap: 0.0,
             post_norm_enabled: 0,
             qk_norm_enabled: 0,
+            layer_norm_enabled: 0,
         };
 
         let (mid_vec, gpu_output) = pipeline.run_layer_stepwise_test(

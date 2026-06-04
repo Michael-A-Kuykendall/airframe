@@ -120,6 +120,8 @@ struct TraceConfig {
     start_step: usize,
     max_steps: Option<usize>,
     top_k: usize,
+    focus_step: Option<usize>,
+    focus_layer: Option<usize>,
 }
 
 fn default_trace_path_for_profile(profile: &str) -> Option<String> {
@@ -143,15 +145,28 @@ impl TraceConfig {
             .or_else(|| profile.as_deref().and_then(default_trace_path_for_profile))?;
 
         let profile_active = profile.as_deref().map(|v| !v.trim().is_empty()).unwrap_or(false);
+        let trace_light_mode = env_flag("SHIMMY_TRACE_LIGHT_MODE");
+        let focus_step = env_usize("SHIMMY_TRACE_FOCUS_STEP");
+        let focus_layer = env_usize("SHIMMY_TRACE_FOCUS_LAYER");
         Some(Self {
             path,
             include_values: req
                 .debug_trace_full
-                .unwrap_or_else(|| env_flag("SHIMMY_INFERENCE_TRACE_FULL") || profile_active),
+                .unwrap_or_else(|| {
+                    if trace_light_mode {
+                        false
+                    } else {
+                        env_flag("SHIMMY_INFERENCE_TRACE_FULL") || profile_active
+                    }
+                }),
             include_prefill: req
                 .debug_trace_include_prefill
                 .unwrap_or_else(|| {
-                    profile_active || !matches!(std::env::var("SHIMMY_INFERENCE_TRACE_INCLUDE_PREFILL"), Ok(v) if v == "0" || v.eq_ignore_ascii_case("false"))
+                    if trace_light_mode {
+                        false
+                    } else {
+                        profile_active || !matches!(std::env::var("SHIMMY_INFERENCE_TRACE_INCLUDE_PREFILL"), Ok(v) if v == "0" || v.eq_ignore_ascii_case("false"))
+                    }
                 }),
             start_step: req
                 .debug_trace_start_step
@@ -160,18 +175,43 @@ impl TraceConfig {
             max_steps: req
                 .debug_trace_max_steps
                 .or_else(|| env_usize("SHIMMY_INFERENCE_TRACE_MAX_STEPS"))
-                .or(if profile_active { Some(16) } else { None }),
-            top_k: env_usize("SHIMMY_INFERENCE_TRACE_TOPK").unwrap_or(if profile_active { 16 } else { 8 }),
+                .or_else(|| {
+                    if trace_light_mode {
+                        Some(4)
+                    } else if profile_active {
+                        Some(16)
+                    } else {
+                        None
+                    }
+                }),
+            top_k: env_usize("SHIMMY_INFERENCE_TRACE_TOPK").unwrap_or_else(|| {
+                if trace_light_mode {
+                    8
+                } else if profile_active {
+                    16
+                } else {
+                    8
+                }
+            }),
+            focus_step,
+            focus_layer,
         })
     }
 
     fn should_capture_step(&self, step_index: usize) -> bool {
+        if let Some(focus) = self.focus_step {
+            return step_index == focus;
+        }
         if step_index < self.start_step {
             return false;
         }
         self.max_steps.map_or(true, |limit| {
             step_index.saturating_sub(self.start_step) < limit
         })
+    }
+
+    fn should_capture_layer(&self, layer_idx: usize) -> bool {
+        self.focus_layer.map_or(true, |focus| focus == layer_idx)
     }
 }
 
@@ -432,6 +472,18 @@ fn run_inference_completion(
         &EncodeOptions::with_parse_special(true, true),
     )?;
     let trace_config = TraceConfig::from_request(req);
+    if let Some(cfg) = trace_config.as_ref() {
+        eprintln!(
+            "[TRACE_CFG] path={} include_prefill={} include_values={} focus_step={:?} focus_layer={:?} max_steps={:?} top_k={}",
+            cfg.path,
+            cfg.include_prefill,
+            cfg.include_values,
+            cfg.focus_step,
+            cfg.focus_layer,
+            cfg.max_steps,
+            cfg.top_k
+        );
+    }
     if !prior_tokens.is_empty() {
         prompt_tokens = prior_tokens
             .iter()
@@ -570,6 +622,7 @@ fn run_inference_completion(
         attn_logit_softcap: spec.attn_logit_softcap,
         post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
         qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
+        layer_norm_enabled: if matches!(spec.arch, ModelArch::Phi) { 1 } else { 0 },
     };
 
     let mut generated_text = String::new();
@@ -635,8 +688,9 @@ fn run_inference_completion(
         count: dim,
         weights_offset: (norm_weight_offset / 4) as u32, // word index (byte_offset / 4) — matches sh_rmsnorm.wgsl read_blob() convention
         eps: spec.rms_eps,
-        padding: 0,
+        norm_type: if matches!(spec.arch, ModelArch::Phi) { 1 } else { 0 },
     };
+    let disable_output_norm = env_flag("SHIMMY_DISABLE_OUTPUT_NORM");
 
     let prefill_logits_f32 = if let Some(cfg) = trace_config.as_ref() {
         if cfg.include_prefill {
@@ -686,7 +740,7 @@ fn run_inference_completion(
                         )
                     };
 
-                    if cfg.should_capture_step(prefill_step) {
+                    if cfg.should_capture_step(prefill_step) && cfg.should_capture_layer(layer_idx) {
                         layer_traces.push(build_layer_trace(
                             layer_idx,
                             cache_len_before,
@@ -705,8 +759,11 @@ fn run_inference_completion(
                     layer_output = gpu_output;
                 }
 
-                let normed_output =
-                    pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
+                let normed_output = if disable_output_norm {
+                    layer_output.clone()
+                } else {
+                    pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params)
+                };
                 {
                     let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() { "output.weight" } else { "token_embd.weight" };
                     let head_off = (model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) / 4) as u32;
@@ -1081,19 +1138,21 @@ fn run_inference_completion(
                     )
                 };
 
-                step_layer_traces.push(build_layer_trace(
-                    layer_idx,
-                    current_pos,
-                    current_pos + 1,
-                    logical_pos_base,
-                    cfg.include_values,
-                    &gpu_q,
-                    &gpu_k,
-                    &gpu_v,
-                    &gpu_post_attn,
-                    &gpu_ffn_out,
-                    &gpu_output,
-                ));
+                if cfg.should_capture_layer(layer_idx) {
+                    step_layer_traces.push(build_layer_trace(
+                        layer_idx,
+                        current_pos,
+                        current_pos + 1,
+                        logical_pos_base,
+                        cfg.include_values,
+                        &gpu_q,
+                        &gpu_k,
+                        &gpu_v,
+                        &gpu_post_attn,
+                        &gpu_ffn_out,
+                        &gpu_output,
+                    ));
+                }
 
                 layer_output = gpu_output;
             }
@@ -1124,8 +1183,11 @@ fn run_inference_completion(
             cache.increment().map_err(|e| e)?;
         }
 
-        let normed_output =
-            pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params);
+        let normed_output = if disable_output_norm {
+            layer_output.clone()
+        } else {
+            pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params)
+        };
 
         {
             let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() { "output.weight" } else { "token_embd.weight" };

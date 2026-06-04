@@ -42,7 +42,7 @@ pub struct RMSNormParams {
     pub count: u32,
     pub weights_offset: u32,
     pub eps: f32,
-    pub padding: u32,
+    pub norm_type: u32, // 0 = RMSNorm, 1 = LayerNorm (mean+variance)
 }
 
 /// Offsets for a single Transformer Layer (TinyLlama/Llama 2).
@@ -82,6 +82,7 @@ pub struct LayerParams {
     pub attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
     pub post_norm_enabled: u32,  // 1 = apply post-attn and post-ffw norm (Gemma-2); 0 = disabled
     pub qk_norm_enabled: u32,    // 1 = apply per-head Q/K RMSNorm before RoPE (Qwen3); 0 = disabled
+    pub layer_norm_enabled: u32, // 1 = use LayerNorm math in layer norms (Phi-family)
 }
 
 /// Uniform params for the quantize_kv.wgsl dispatch (TurboQuant).

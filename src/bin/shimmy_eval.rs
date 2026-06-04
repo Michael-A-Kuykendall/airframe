@@ -1430,7 +1430,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         count: dim as u32,
         weights_offset: norm_offset as u32,
         eps: spec.rms_eps,
-        padding: 0,
+        norm_type: 0,
     };
 
     let gpu_l02 = pipeline.run_rmsnorm_test(&device, &queue, &model, input, params);
@@ -1542,6 +1542,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
+        layer_norm_enabled: 0,
     };
 
     let (gpu_l04_mid, gpu_l0_final) = pipeline.run_layer_stepwise_test(
@@ -1569,7 +1570,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
             count: dim as u32,
             weights_offset: ffn_norm_offset as u32,
             eps: spec.rms_eps,
-            padding: 0,
+            norm_type: 0,
         };
         pipeline.run_rmsnorm_test(&device, &queue, &model, &gpu_l04_mid, ffn_norm_params)
     };

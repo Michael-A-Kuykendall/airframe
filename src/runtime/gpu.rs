@@ -211,6 +211,7 @@ impl GpuRuntime {
             attn_logit_softcap: spec.attn_logit_softcap,
             post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
             qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
+            layer_norm_enabled: 0,
         };
 
         let norm_weight_offset = gpu_model
@@ -221,7 +222,7 @@ impl GpuRuntime {
             count: dim,
             weights_offset: norm_weight_offset,
             eps: spec.rms_eps,
-            padding: 0,
+            norm_type: 0,
         };
 
         let eos_token = tokenizer.eos_token();

@@ -36,6 +36,7 @@ struct LayerParams {
     attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
     post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
     qk_norm_enabled: u32,     // 1 = apply per-head Q/K RMSNorm before attention (Qwen3); 0 = disabled
+    layer_norm_enabled: u32,  // 1 = LayerNorm (mean+variance), 0 = RMSNorm
 };
 
 struct CacheParams {
@@ -286,19 +287,34 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let temp_base = token_idx * params.temp_stride;
 
     var sum_sq = 0.0;
+    var sum = 0.0;
     for (var i = 0u; i < params.dim; i++) {
         let val = activation_in[act_base + i];
         sum_sq += val * val;
+        sum += val;
     }
+    let mean = sum / f32(params.dim);
     let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    var inv_std = rms;
+    if (params.layer_norm_enabled != 0u) {
+        var var_sum = 0.0;
+        for (var i = 0u; i < params.dim; i++) {
+            let d = activation_in[act_base + i] - mean;
+            var_sum += d * d;
+        }
+        inv_std = inverseSqrt(var_sum / f32(params.dim) + params.rms_eps);
+    }
 
     let norm_offset_base = offsets.layer_idx * 4u * params.dim;
     let norm_w = norm_bank[norm_offset_base + idx];
-    let normed = activation_in[act_base + idx] * rms * norm_w;
+    let centered = select(activation_in[act_base + idx], activation_in[act_base + idx] - mean, params.layer_norm_enabled != 0u);
+    let normed = centered * inv_std * norm_w;
     temp_state[temp_base + idx] = normed;
 
-    // Non-gated FFN (phi-2, GPT-2): preserve pre-attention norm(x) for FFN.
-    if (offsets.ffn_gate == 0u) {
+    // Phi uses a shared pre-attention normalized input for both branches.
+    // Keep existing non-gated behavior as well.
+    if (params.layer_norm_enabled != 0u || offsets.ffn_gate == 0u) {
         temp_state[temp_base + params.ffn_dim * 2u + idx] = normed;
     }
 }
@@ -851,19 +867,38 @@ fn main_ffn_norm(
     // so this early-return is uniform and does not break workgroupBarrier.
     if (token_idx >= cache_params.batch_size) { return; }
 
-    // Non-gated FFN already staged pre-attention norm(x) in main_attn_norm.
-    // Keep that stash intact for parallel FFN models (phi-2, GPT-2).
-    if (offsets.ffn_gate == 0u) { return; }
+    // For Phi (layer_norm_enabled) and non-gated FFN blocks, use the staged
+    // pre-attention normalized stream from main_attn_norm.
+    if (params.layer_norm_enabled != 0u || offsets.ffn_gate == 0u) { return; }
 
     let act_base  = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;
 
     // ── 1. Each thread accumulates its strided partial sum-of-squares ──────
     var partial = 0.0;
+    var partial_sum = 0.0;
     for (var i = lx; i < params.dim; i += 256u) {
         let v = activation_in[act_base + i];
         partial += v * v;
+        partial_sum += v;
     }
+    wg_rms_partial[lx] = partial;
+    workgroupBarrier();
+
+    // Reduce mean sum in-place when LayerNorm is enabled.
+    if (params.layer_norm_enabled != 0u) {
+        wg_rms_partial[lx] = partial_sum;
+        workgroupBarrier();
+        for (var stride = 128u; stride > 0u; stride = stride >> 1u) {
+            if (lx < stride) {
+                wg_rms_partial[lx] += wg_rms_partial[lx + stride];
+            }
+            workgroupBarrier();
+        }
+    }
+    let mean = select(0.0, wg_rms_partial[0] / f32(params.dim), params.layer_norm_enabled != 0u);
+
+    // Restore sum-of-squares for RMS/variance path.
     wg_rms_partial[lx] = partial;
     workgroupBarrier();
 
@@ -875,14 +910,31 @@ fn main_ffn_norm(
         workgroupBarrier();
     }
 
-    let rms = inverseSqrt(wg_rms_partial[0] / f32(params.dim) + params.rms_eps);
+    var inv_std = inverseSqrt(wg_rms_partial[0] / f32(params.dim) + params.rms_eps);
+    if (params.layer_norm_enabled != 0u) {
+        var var_partial = 0.0;
+        for (var i = lx; i < params.dim; i += 256u) {
+            let d = activation_in[act_base + i] - mean;
+            var_partial += d * d;
+        }
+        wg_rms_partial[lx] = var_partial;
+        workgroupBarrier();
+        for (var stride = 128u; stride > 0u; stride = stride >> 1u) {
+            if (lx < stride) {
+                wg_rms_partial[lx] += wg_rms_partial[lx + stride];
+            }
+            workgroupBarrier();
+        }
+        inv_std = inverseSqrt(wg_rms_partial[0] / f32(params.dim) + params.rms_eps);
+    }
 
     // ── 3. Write normalized + norm-weight-scaled activations ────────────────
     let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
     for (var j = lx; j < params.dim; j += 256u) {
         let norm_w = norm_bank[norm_offset_base + j];
+        let centered = select(activation_in[act_base + j], activation_in[act_base + j] - mean, params.layer_norm_enabled != 0u);
         temp_state[temp_base + params.ffn_dim * 2u + j] =
-            activation_in[act_base + j] * rms * norm_w;
+            centered * inv_std * norm_w;
     }
 }
 

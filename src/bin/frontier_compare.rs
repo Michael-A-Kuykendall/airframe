@@ -276,6 +276,7 @@ async fn async_main() -> Result<()> {
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
+        layer_norm_enabled: 0,
     };
 
     eprintln!("[GPU vs CPU] comparing {} layers ...", spec.n_layer);
@@ -345,7 +346,7 @@ async fn async_main() -> Result<()> {
         count: dim,
         weights_offset: norm_weight_offset,
         eps: spec.rms_eps,
-        padding: 0,
+        norm_type: 0,
     };
     let gpu_norm = pipeline.run_rmsnorm_test(&device, &queue, &gpu_model, &gpu_hidden, norm_params);
     let gpu_logits = pipeline.run_matmul_f32(

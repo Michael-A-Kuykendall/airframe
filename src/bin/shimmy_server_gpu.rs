@@ -56,6 +56,9 @@ enum ChatTemplateFamily {
     Llama3,
     Gemma2,
     MiniCpmV,
+    /// Base / completion models (gpt2, phi-2 base, starcoder2, etc.).
+    /// No chat wrapper — user message content is passed through as raw text.
+    Completion,
 }
 
 impl ChatTemplateFamily {
@@ -136,6 +139,16 @@ impl ChatTemplateFamily {
                 }
                 prompt
             }
+            ChatTemplateFamily::Completion => {
+                // Base / completion models: pass the last user message as raw text.
+                // No special tokens — the model expects plain text input.
+                messages
+                    .iter()
+                    .filter(|m| m.role == "user")
+                    .map(|m| m.content.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
         }
     }
 }
@@ -207,7 +220,27 @@ fn chat_template_family_for_model(spec: &ModelSpec, model_path: &str) -> ChatTem
     if lower.contains("minicpm") || path_lower.contains("minicpm") {
         return ChatTemplateFamily::MiniCpmV;
     }
-    // Single pass over model name; all family markers checked simultaneously.
+    // Architecture-based detection — uses the GGUF `general.architecture` field
+    // which is always present and unambiguous. This fires only when the GGUF has
+    // no embedded Jinja template (make_prompt_renderer takes the Jinja path first).
+    match &spec.arch {
+        // phi2/phi3 base models: no chat tokens, raw completion.
+        ModelArch::Phi => return ChatTemplateFamily::Completion,
+        // Gemma architecture → Gemma2 turn format.
+        ModelArch::Gemma => return ChatTemplateFamily::Gemma2,
+        // Qwen2/3 without embedded template → ChatML (they use <|im_start|>/<|im_end|>).
+        ModelArch::Qwen2 | ModelArch::Qwen3 => return ChatTemplateFamily::ChatML,
+        // Llama/Mistral: fall through to token-marker scan below.
+        ModelArch::Llama | ModelArch::Mistral => {}
+        // Catch-all for architectures not yet in the enum.
+        ModelArch::Other(arch) => {
+            let a = arch.to_ascii_lowercase();
+            if a.contains("gpt2") || a.contains("starcoder") || a.contains("falcon") {
+                return ChatTemplateFamily::Completion;
+            }
+        }
+    }
+    // Fall back to scanning the model name for known chat-token markers.
     classify_template(&lower).unwrap_or(ChatTemplateFamily::ChatML)
 }
 
@@ -243,6 +276,9 @@ impl PromptRenderer {
                 ctx.set_var("bos_token", bos.as_str());
                 ctx.set_var("eos_token", eos.as_str());
                 ctx.set_flag("add_generation_prompt", true);
+                // Qwen3 templates enable "thinking" mode by default (outputs a <think> block
+                // before the answer).  Disable it so the model responds directly.
+                ctx.set_flag("enable_thinking", false);
                 // catch_unwind guards against unsupported template constructs
                 // that slip through; falls back to ChatML on failure.
                 let tmpl = template.clone();
@@ -267,6 +303,7 @@ fn make_prompt_renderer(
     metadata: &std::collections::HashMap<String, GgufValue>,
     spec: &ModelSpec,
     tokenizer: &Tokenizer,
+    model_path: &str,
 ) -> PromptRenderer {
     if let Some(GgufValue::String(template)) = metadata.get("tokenizer.chat_template") {
         let bos_id = tokenizer.bos_token();
@@ -283,7 +320,7 @@ fn make_prompt_renderer(
             eos,
         }
     } else {
-        PromptRenderer::Family(chat_template_family_for_model(spec, ""))
+        PromptRenderer::Family(chat_template_family_for_model(spec, model_path))
     }
 }
 
@@ -649,7 +686,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let http_bind_addr = shimmy_bind_addr.clone();
     let listener = tokio::net::TcpListener::bind(&http_bind_addr).await?;
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
-    let prompt_renderer = make_prompt_renderer(&gpu_model.metadata.gguf_metadata, &spec, &tokenizer);
+    let prompt_renderer = make_prompt_renderer(&gpu_model.metadata.gguf_metadata, &spec, &tokenizer, &model_path);
     let models_for_http = Arc::clone(&discovered_models);
     let kv_quant_int4_for_http = kv_quant_int4;
     tokio::spawn(async move {
@@ -1214,7 +1251,7 @@ fn log_arch_tensor_registry(spec: &ModelSpec, metadata: &airframe::backend::bind
         spec.arch_string(), spec.n_layer, spec.n_vocab, spec.n_head_kv, spec.head_dim
     );
     // Universal tensors required in every supported architecture
-    for name in &["token_embd.weight", "output_norm.weight", "blk.0.attn_norm.weight", "blk.0.ffn_norm.weight"] {
+    for name in &["token_embd.weight", "output_norm.weight", "blk.0.attn_norm.weight"] {
         if !has(name) {
             eprintln!("[ARCH_TENSOR_MISSING] REQUIRED (universal): {}  arch={}", name, spec.arch_string());
         }

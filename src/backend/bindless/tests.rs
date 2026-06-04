@@ -356,7 +356,7 @@ mod tests {
             count: 4,
             weights_offset: 0, // Weights st start of buffer
             eps: 0.0,          // Simplify math
-            padding: 0,
+            norm_type: 0,
         };
 
         let result = pipeline.run_rmsnorm_test(&device, &queue, &model, &input, params);
@@ -454,7 +454,7 @@ mod tests {
             count: 32,
             weights_offset: 0,
             eps: 0.0,
-            padding: 0,
+            norm_type: 0,
         };
         let rms_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("RMS Params"),

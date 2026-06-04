@@ -127,6 +127,10 @@ impl BindlessMetadata {
         // FSE compiled-layer table: single pass over layer indices at load time.
         // Eliminates per-token format!/HashMap overhead from the inference hot path.
         let mut compiled_layers = Vec::new();
+        let is_phi_arch = matches!(
+            gguf_metadata.get("general.architecture"),
+            Some(GgufValue::String(v)) if v == "phi"
+        );
         {
             let p = |offsets: &HashMap<String, u64>, layer: usize, s: &str| -> u32 {
                 offsets.get(&format!("blk.{}.{}", layer, s))
@@ -226,13 +230,20 @@ impl BindlessMetadata {
                     (0u32, 0u32, 0u32)
                 };
 
+                let attn_norm_off = p(&absolute_offsets, layer_idx, "attn_norm.weight");
+                let mut ffn_norm_off = p(&absolute_offsets, layer_idx, "ffn_norm.weight");
+                if is_phi_arch && ffn_norm_off == 0 {
+                    // Phi-family checkpoints can ship a single per-block norm; reuse attn_norm.
+                    ffn_norm_off = attn_norm_off;
+                }
+
                 let offsets = super::pipeline::LayerOffsets {
-                    attn_norm: p(&absolute_offsets, layer_idx, "attn_norm.weight"),
+                    attn_norm: attn_norm_off,
                     attn_q:    attn_q_off,
                     attn_k:    attn_k_off,
                     attn_v:    attn_v_off,
                     attn_out:  p(&absolute_offsets, layer_idx, "attn_output.weight"),
-                    ffn_norm:  p(&absolute_offsets, layer_idx, "ffn_norm.weight"),
+                    ffn_norm:  ffn_norm_off,
                     ffn_gate:  p(&absolute_offsets, layer_idx, "ffn_gate.weight"),
                     ffn_down:  p(&absolute_offsets, layer_idx, "ffn_down.weight"),
                     ffn_up:    p(&absolute_offsets, layer_idx, "ffn_up.weight"),

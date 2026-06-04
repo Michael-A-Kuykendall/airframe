@@ -6,7 +6,7 @@ struct Params {
     count: u32,
     weight_offset: u32, // Word index (byte_offset / 4) to the start of the weight tensor in GGUF blob
     eps: f32,
-    padding: u32,
+    norm_type: u32, // 0 = RMSNorm, 1 = LayerNorm (mean+variance)
 };
 
 @group(0) @binding(0)  var<storage, read> blob_0: array<u32>;
@@ -31,6 +31,7 @@ fn read_blob(word_idx: u32) -> u32 {
 
 const BLOCK_SIZE: u32 = 256;
 var<workgroup> s_sum: array<f32, BLOCK_SIZE>;
+var<workgroup> s_sum_sq: array<f32, BLOCK_SIZE>;
 
 @compute @workgroup_size(256)
 fn main(
@@ -41,30 +42,38 @@ fn main(
     let tid = local_id.x;
     let count = params.count;
 
-    // 1. Accumulate Sum of Squares
+    // 1. Accumulate sums needed for RMSNorm/LayerNorm
+    var sum = 0.0;
     var sum_sq = 0.0;
     for (var i = tid; i < count; i += BLOCK_SIZE) {
         let val = input[i]; // Assuming single row for now (group_id.x can handle batch later)
+        sum += val;
         sum_sq += val * val;
     }
 
     // 2. Reduce in Shared Memory
-    s_sum[tid] = sum_sq;
+    s_sum[tid] = sum;
+    s_sum_sq[tid] = sum_sq;
     workgroupBarrier();
 
     // Tree reduction for 256 threads
     for (var s = BLOCK_SIZE / 2u; s > 0u; s >>= 1u) {
         if (tid < s) {
             s_sum[tid] += s_sum[tid + s];
+            s_sum_sq[tid] += s_sum_sq[tid + s];
         }
         workgroupBarrier();
     }
 
-    // 3. Compute Scale
-    // Only thread 0 computes the final scale, but we need to broadcast or everyone recomputes?
-    // Everyone reads s_sum[0]
+    // 3. Compute normalization scale
     let mean = s_sum[0] / f32(count);
-    let scale = inverseSqrt(mean + params.eps);
+    let mean_sq = s_sum_sq[0] / f32(count);
+    let variance = max(mean_sq - mean * mean, 0.0);
+    let scale = select(
+        inverseSqrt(mean_sq + params.eps),
+        inverseSqrt(variance + params.eps),
+        params.norm_type == 1u,
+    );
 
     // 4. Apply Scale and Weight
     // weight_offset is already a word index (byte_offset / 4), passed from Rust as (byte_offset / 4) as u32.
@@ -78,6 +87,7 @@ fn main(
         let w_bits = read_blob(w_u32_start + i);
         let w_val = bitcast<f32>(w_bits);
 
-        output[i] = val * scale * w_val;
+        let centered = select(val, val - mean, params.norm_type == 1u);
+        output[i] = centered * scale * w_val;
     }
 }

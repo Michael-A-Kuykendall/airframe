@@ -95,6 +95,7 @@ mod layer_dump_tests {
             attn_logit_softcap: 0.0,
             post_norm_enabled: 0,
             qk_norm_enabled: 0,
+            layer_norm_enabled: 0,
         };
 
         // Process sequence: BOS (1), "Hello" (15043), then 1 decode step

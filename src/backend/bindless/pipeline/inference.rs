@@ -184,7 +184,9 @@ impl BindlessPipeline {
         let temp_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Temp State"),
             size: temp_buffer_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -204,6 +206,11 @@ impl BindlessPipeline {
             attn_logit_softcap: spec.attn_logit_softcap,
             post_norm_enabled: if spec.arch_string() == "gemma2" { 1 } else { 0 },
             qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
+            layer_norm_enabled: if matches!(spec.arch, crate::core::spec::ModelArch::Phi) {
+                1
+            } else {
+                0
+            },
         };
 
         // D. Output Logits
@@ -389,7 +396,11 @@ impl BindlessPipeline {
             count: dim,
             weights_offset: (norm_weight / 4) as u32, // word index (byte_offset / 4); safe: 4.4GB/4 = 1.1B < u32::MAX
             eps: spec.rms_eps,
-            padding: 0,
+            norm_type: if matches!(spec.arch, crate::core::spec::ModelArch::Phi) {
+                1
+            } else {
+                0
+            },
         };
         let norm_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Final Norm Params"),
@@ -570,6 +581,9 @@ impl BindlessPipeline {
         let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+        let disable_output_norm = std::env::var("SHIMMY_DISABLE_OUTPUT_NORM")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
 
 // Loop Layers
         for (i, bg) in layer_bind_groups.iter().enumerate() {
@@ -736,7 +750,10 @@ impl BindlessPipeline {
 
         // Final Norm — separate pass so wgpu inserts a memory barrier before the
         // LM Head pass reads from temp_buffer (same region that norm writes).
-        {
+        if disable_output_norm {
+            // Diagnostic mode: feed LM head directly from the last-token activation.
+            encoder.copy_buffer_to_buffer(&activation_buffer, last_token_offset, &temp_buffer, 0, (dim as u64) * 4u64);
+        } else {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Final Norm"),
                 timestamp_writes: None,
