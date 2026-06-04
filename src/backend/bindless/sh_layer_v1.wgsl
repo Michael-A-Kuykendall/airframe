@@ -998,11 +998,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let bb = row_start + b * 210u;
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let val_x = select(
-                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
-                    temp_state[temp_base + params.ffn_dim * 2u + col],
-                    non_gated
-                );
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 dot += val_x * dequant_q6k_elem(bb, e);
             }
         }
@@ -1013,11 +1009,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let bb = row_start + b * 176u;
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let val_x = select(
-                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
-                    temp_state[temp_base + params.ffn_dim * 2u + col],
-                    non_gated
-                );
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 dot += val_x * dequant_q5k_elem(bb, e);
             }
         }
@@ -1028,11 +1020,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let block_base_k = row_start_byte_k + (b * 144u);
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
-                let val_x = select(
-                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
-                    temp_state[temp_base + params.ffn_dim * 2u + col],
-                    non_gated
-                );
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 dot += val_x * dequant_q4k_elem(block_base_k, e);
             }
         }
@@ -1043,22 +1031,14 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let bb = row_start + b * 34u;
             for (var e = 0u; e < 32u; e++) {
                 let col = b * 32u + e;
-                let val_x = select(
-                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
-                    temp_state[temp_base + params.ffn_dim * 2u + col],
-                    non_gated
-                );
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 dot += val_x * dequant_q8_0_elem(bb, e);
             }
         }
     } else if (((params.quant_type >> 24u) & 0xFFu) == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_off + (row_idx * params.dim + col) * 2u;
-            let val_x = select(
-                activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
-                temp_state[temp_base + params.ffn_dim * 2u + col],
-                non_gated
-            );
+            let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
             dot += val_x * dequant_f16_at(w_byte);
         }
     } else if (((params.quant_type >> 24u) & 0xFFu) == 0u) { // F32
@@ -1082,11 +1062,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let qs_byte_start = block_base + 2u;
             for (var i = 0u; i < 32u; i++) {
                 let col = b * 32u + i;
-                let val_x = select(
-                    activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
-                    temp_state[temp_base + params.ffn_dim * 2u + col],
-                    non_gated
-                );
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;
                 let qs_word = read_blob(qs_idx / 4u);

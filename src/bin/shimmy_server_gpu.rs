@@ -267,6 +267,7 @@ enum PromptRenderer {
     Family {
         family: ChatTemplateFamily,
         source: &'static str,
+        bos: Option<String>,
     },
 }
 
@@ -311,9 +312,15 @@ impl PromptRenderer {
             } => {
                 let shimmy_msgs: Vec<shimmyjinja::ChatMessage> = messages
                     .iter()
-                    .map(|m| shimmyjinja::ChatMessage {
-                        role: m.role.clone(),
-                        content: m.content.clone(),
+                    .map(|m| {
+                        let mut content = m.content.clone();
+                        if matches!(enable_thinking, Some(false)) && m.role != "assistant" && !content.ends_with("/nothink") {
+                            content.push_str("\n/nothink");
+                        }
+                        shimmyjinja::ChatMessage {
+                            role: m.role.clone(),
+                            content,
+                        }
                     })
                     .collect();
                 let mut ctx = shimmyjinja::RenderContext::new();
@@ -329,12 +336,23 @@ impl PromptRenderer {
                 let result = std::panic::catch_unwind(move || {
                     shimmyjinja::render_chat_template_with_context(&tmpl, &shimmy_msgs, &ctx)
                 });
-                result.unwrap_or_else(|_| {
+                let rendered = result.unwrap_or_else(|_| {
                     eprintln!("[PromptRenderer] shimmyjinja panic; falling back to ChatML");
                     ChatTemplateFamily::ChatML.render_messages(messages)
-                })
+                });
+                rendered
             }
-            PromptRenderer::Family { family, .. } => family.render_messages(messages),
+            PromptRenderer::Family { family, bos, .. } => {
+                let rendered = family.render_messages(messages);
+                if matches!(family, ChatTemplateFamily::Completion) {
+                    match bos.as_deref() {
+                        Some(prefix) if !prefix.is_empty() => format!("{}{}{}", prefix, rendered, prefix),
+                        _ => rendered,
+                    }
+                } else {
+                    rendered
+                }
+            }
         };
 
         if env_flag("SHIMMY_DEBUG_PROMPT_RENDER") {
@@ -351,7 +369,7 @@ impl PromptRenderer {
                         rendered
                     );
                 }
-                PromptRenderer::Family { family, source } => {
+                PromptRenderer::Family { family, source, .. } => {
                     let family_name = match family {
                         ChatTemplateFamily::TinyLlama => "TinyLlama",
                         ChatTemplateFamily::ChatML => "ChatML",
@@ -384,6 +402,15 @@ fn make_prompt_renderer(
     tokenizer: &Tokenizer,
     model_path: &str,
 ) -> PromptRenderer {
+    let bos_id = tokenizer.bos_token();
+    let eos_id = tokenizer.eos_token();
+    let bos = tokenizer
+        .token_to_piece(bos_id)
+        .unwrap_or_else(|_| "<s>".to_string());
+    let eos = tokenizer
+        .token_to_piece(eos_id)
+        .unwrap_or_else(|_| "</s>".to_string());
+
     if let Some(GgufValue::String(template)) = metadata.get("tokenizer.chat_template") {
         let model_lower = spec.model_name.to_ascii_lowercase();
         let path_lower = model_path.to_ascii_lowercase();
@@ -412,14 +439,6 @@ fn make_prompt_renderer(
             // Let template/model default behavior apply.
             ("template_default", None)
         };
-        let bos_id = tokenizer.bos_token();
-        let eos_id = tokenizer.eos_token();
-        let bos = tokenizer
-            .token_to_piece(bos_id)
-            .unwrap_or_else(|_| "<s>".to_string());
-        let eos = tokenizer
-            .token_to_piece(eos_id)
-            .unwrap_or_else(|_| "</s>".to_string());
         if env_flag("SHIMMY_DEBUG_PROMPT_RENDER") {
             eprintln!(
                 "[PromptRenderer] selected=jinja enable_thinking={:?} policy={}",
@@ -447,7 +466,11 @@ fn make_prompt_renderer(
             };
             eprintln!("[PromptRenderer] selected=family family={} source={}", family_name, source);
         }
-        PromptRenderer::Family { family, source }
+        PromptRenderer::Family {
+            family,
+            source,
+            bos: matches!(family, ChatTemplateFamily::Completion).then_some(bos),
+        }
     }
 }
 
@@ -1527,6 +1550,15 @@ fn send_error(mut stream: TcpStream, msg: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_empty_think_block_removes_stub() {
+        let prompt = "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
+        assert_eq!(
+            strip_empty_think_block(prompt),
+            "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
+        );
+    }
 
     #[test]
     fn build_templated_prompt_raw_passthrough() {

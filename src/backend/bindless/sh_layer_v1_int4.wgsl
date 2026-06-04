@@ -886,7 +886,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
                 let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
-                let val_x = select(seq_x, staged_x, use_staged_ffn);
+                let val_x = seq_x;
                 dot += val_x * dequant_q6k_elem(bb, e);
             }
         }
@@ -901,7 +901,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
                 let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
-                let val_x = select(seq_x, staged_x, use_staged_ffn);
+                let val_x = seq_x;
                 dot += val_x * dequant_q5k_elem(bb, e);
             }
         }
@@ -916,7 +916,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
                 let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
-                let val_x = select(seq_x, staged_x, use_staged_ffn);
+                let val_x = seq_x;
                 dot += val_x * dequant_q4k_elem(block_base_k, e);
             }
         }
@@ -931,7 +931,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
                 let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
-                let val_x = select(seq_x, staged_x, use_staged_ffn);
+                let val_x = seq_x;
                 dot += val_x * dequant_q8_0_elem(bb, e);
             }
         }
@@ -942,7 +942,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
             let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
             let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
-            let val_x = select(seq_x, staged_x, use_staged_ffn);
+            let val_x = seq_x;
             dot += val_x * dequant_f16_at(w_byte);
         }
     } else if ((params.quant_type & 0xFFu) == 0u) { // F32
@@ -952,7 +952,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
             let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
             let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
-            let val_x = select(seq_x, staged_x, use_staged_ffn);
+            let val_x = seq_x;
             dot += val_x * bitcast<f32>(gguf_blob[w_idx]);
         }
     } else { // Q4_0
@@ -970,7 +970,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
                 let staged_x = temp_state[temp_base + params.ffn_dim * 2u + col];
                 let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
-                let val_x = select(seq_x, staged_x, use_staged_ffn);
+                let val_x = seq_x;
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;
                 let qs_word = gguf_blob[qs_idx / 4u];
