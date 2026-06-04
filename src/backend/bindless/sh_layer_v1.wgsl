@@ -1044,11 +1044,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else if (((params.quant_type >> 24u) & 0xFFu) == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_off / 4u + row_idx * params.dim + col;
-            let val_x = select(
-                activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
-                temp_state[temp_base + params.ffn_dim * 2u + col],
-                non_gated
-            );
+            let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
             dot += val_x * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Q4_0

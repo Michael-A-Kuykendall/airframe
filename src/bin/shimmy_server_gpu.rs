@@ -346,7 +346,13 @@ impl PromptRenderer {
                 let rendered = family.render_messages(messages);
                 if matches!(family, ChatTemplateFamily::Completion) {
                     match bos.as_deref() {
-                        Some(prefix) if !prefix.is_empty() => format!("{}{}{}", prefix, rendered, prefix),
+                        Some(prefix) if !prefix.is_empty() => {
+                            if rendered.starts_with(prefix) {
+                                rendered
+                            } else {
+                                format!("{}{}", prefix, rendered)
+                            }
+                        }
                         _ => rendered,
                     }
                 } else {
