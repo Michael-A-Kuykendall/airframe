@@ -225,3 +225,92 @@ impl ModelRoutePlan {
         format!("{:016x}", hasher.finish())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::spec::{GgufFileType, ModelArch};
+
+    fn base_spec() -> ModelSpec {
+        ModelSpec {
+            n_vocab: 32000,
+            n_embd: 2048,
+            n_layer: 22,
+            n_head: 32,
+            n_head_kv: 4,
+            ff_dim: 5632,
+            rms_eps: 1e-5,
+            rope_base: 10000.0,
+            rope_scale: 1.0,
+            rope_dim: 64,
+            yarn_alpha: 1.0,
+            yarn_beta: 32.0,
+            n_ctx: 2048,
+            attn_logit_softcap: 0.0,
+            final_logit_softcap: 0.0,
+            has_qk_norm: false,
+            head_dim: 64,
+            gqa_ratio: 8,
+            kv_dim: 256,
+            arch: ModelArch::Llama,
+            file_type: GgufFileType::Q4_0,
+            model_name: "unit-test-model".to_string(),
+            temp_buffer_size: 16384,
+            kv_cache_size_per_layer: 2048 * 4 * 64 * 4,
+        }
+    }
+
+    #[test]
+    fn digest_is_deterministic_for_same_inputs() {
+        let spec = base_spec();
+        let has = |name: &str| {
+            matches!(
+                name,
+                "blk.0.attn_q.weight"
+                    | "blk.0.attn_k.weight"
+                    | "blk.0.attn_v.weight"
+                    | "blk.0.ffn_gate.weight"
+            )
+        };
+
+        let a = ModelRoutePlan::from_spec_and_tensors(&spec, has);
+        let b = ModelRoutePlan::from_spec_and_tensors(&spec, has);
+
+        assert_eq!(a.digest, b.digest);
+    }
+
+    #[test]
+    fn digest_changes_when_prompt_policy_changes() {
+        let spec = base_spec();
+        let has = |name: &str| {
+            matches!(
+                name,
+                "blk.0.attn_q.weight"
+                    | "blk.0.attn_k.weight"
+                    | "blk.0.attn_v.weight"
+                    | "blk.0.ffn_gate.weight"
+            )
+        };
+
+        let mut route = ModelRoutePlan::from_spec_and_tensors(&spec, has);
+        let before = route.digest.clone();
+        route.apply_prompt_routing(
+            "family".to_string(),
+            Some("ChatML".to_string()),
+            "fallback".to_string(),
+        );
+        let after = route.digest;
+
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn strict_mode_pass_false_when_hard_errors_present() {
+        let spec = base_spec();
+        let has_none = |_name: &str| false;
+        let route = ModelRoutePlan::from_spec_and_tensors(&spec, has_none);
+
+        assert!(!route.hard_errors.is_empty());
+        assert!(!route.strict_mode_pass);
+    }
+}

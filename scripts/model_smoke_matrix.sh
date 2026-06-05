@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+export PYTHONIOENCODING="UTF-8"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
@@ -28,11 +30,42 @@ CSV_FILE="$OUTPUT_DIR/smoke_${TIMESTAMP}.csv"
 TMP_DIR="$(mktemp -d)"
 SERVER_PID=""
 
-cleanup() {
-    if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
-        kill "$SERVER_PID" 2>/dev/null || true
-        wait "$SERVER_PID" 2>/dev/null || true
+wait_for_pid_exit() {
+    local pid="$1"
+    local timeout_s="$2"
+    local waited=0
+    while kill -0 "$pid" 2>/dev/null; do
+        if (( waited >= timeout_s )); then
+            return 1
+        fi
+        sleep 1
+        ((waited+=1))
+    done
+    return 0
+}
+
+terminate_pid() {
+    local pid="$1"
+    local timeout_s="${2:-10}"
+    if [[ -z "$pid" ]]; then
+        return 0
     fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    kill "$pid" 2>/dev/null || true
+    if wait_for_pid_exit "$pid" "$timeout_s"; then
+        return 0
+    fi
+
+    taskkill //F //PID "$pid" >/dev/null 2>&1 || true
+    wait_for_pid_exit "$pid" 5 || true
+    return 0
+}
+
+cleanup() {
+    terminate_pid "$SERVER_PID" 10 || true
     taskkill //F //IM shimmy_server_gpu.exe 2>/dev/null || true
     rm -rf "$TMP_DIR"
 }
@@ -111,10 +144,7 @@ wait_ready() {
 }
 
 stop_server() {
-    if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
-        kill "$SERVER_PID" 2>/dev/null || true
-        wait "$SERVER_PID" 2>/dev/null || true
-    fi
+    terminate_pid "$SERVER_PID" 10 || true
     SERVER_PID=""
     taskkill //F //IM shimmy_server_gpu.exe 2>/dev/null || true
 }
@@ -316,8 +346,41 @@ run_case() {
     fi
 
     local text finish_reason
-    text="$(json_field "$out_json" 'choices[0].text')"
-    finish_reason="$(json_field "$out_json" 'choices[0].finish_reason')"
+    text="$(python - "$out_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], 'r', encoding='utf-8') as handle:
+    data = json.load(handle)
+
+choices = data.get('choices') or []
+if not choices:
+    print('')
+    raise SystemExit(0)
+
+choice0 = choices[0]
+text = choice0.get('text')
+if text is None:
+    msg = choice0.get('message') or {}
+    text = msg.get('content', '')
+print(text or '')
+PY
+)"
+    finish_reason="$(python - "$out_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], 'r', encoding='utf-8') as handle:
+    data = json.load(handle)
+
+choices = data.get('choices') or []
+if not choices:
+    print('')
+    raise SystemExit(0)
+
+print(choices[0].get('finish_reason') or '')
+PY
+)"
     if [[ -z "$text" ]]; then
         log "FAIL  ${label}${model_file} -- empty response"
         append_result "$label$model_file" 'FAIL' 'empty response'
