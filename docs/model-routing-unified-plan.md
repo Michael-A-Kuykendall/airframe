@@ -188,6 +188,17 @@ Protocol D: Regression Safety
 5. Run semantic protocol matrix and smoke gates per phase.
 6. Remove compatibility path after two consecutive clean sweeps.
 
+## Execution Status (2026-06-04)
+
+1. Control-plane route selection matrix completed with current release binary.
+2. Artifact: `artifacts/route_check/route_check_20260604T233346Z.csv`.
+3. Coverage: TinyLlama, Llama-3.2-1B/3B, phi-2, starcoder2-3b, gpt2, Qwen3-0.6B, gemma-2-2b.
+4. Result: PASS=8, FAIL=0, SKIP=0 for route-plan selection and startup route-check invariants.
+5. Scope note: this validates routing selection correctness, not output-quality pass/fail semantics.
+6. Contract manifest added: `fixtures/control_plane_route_manifest.json` with expected per-model routing fields.
+7. Manifest validator added: `scripts/validate_route_manifest.py`.
+8. Contract validation result: PASS against `artifacts/route_check/route_check_20260605T005239Z.csv`.
+
 ## Document Governance
 
 This document is the single routing-plan authority.

@@ -1,0 +1,105 @@
+{
+  "manifest_version": 1,
+  "description": "Expected control-plane route selections for baseline validation models.",
+  "models": {
+    "TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf": {
+      "RouteVersion": 2,
+      "Arch": "llama",
+      "PromptMode": "jinja",
+      "TemplateSource": "embedded",
+      "NormMode": "rms_norm",
+      "QkvLayout": "separate",
+      "FfnMode": "gated",
+      "HardErrors": 0,
+      "Warnings": 0,
+      "StrictPass": true
+    },
+    "Llama-3.2-1B-Instruct-Q4_K_M.gguf": {
+      "RouteVersion": 2,
+      "Arch": "llama",
+      "PromptMode": "jinja",
+      "TemplateSource": "embedded",
+      "NormMode": "rms_norm",
+      "QkvLayout": "separate",
+      "FfnMode": "gated",
+      "HardErrors": 0,
+      "Warnings": 0,
+      "StrictPass": true
+    },
+    "Llama-3.2-3B-Instruct-Q4_K_M.gguf": {
+      "RouteVersion": 2,
+      "Arch": "llama",
+      "PromptMode": "jinja",
+      "TemplateSource": "embedded",
+      "NormMode": "rms_norm",
+      "QkvLayout": "separate",
+      "FfnMode": "gated",
+      "HardErrors": 0,
+      "Warnings": 0,
+      "StrictPass": true
+    },
+    "phi-2.Q4_K_M.gguf": {
+      "RouteVersion": 2,
+      "Arch": "phi",
+      "PromptMode": "family",
+      "PromptFamily": "Completion",
+      "TemplateSource": "fallback_arch",
+      "NormMode": "layer_norm",
+      "QkvLayout": "fused",
+      "FfnMode": "non_gated",
+      "HardErrors": 0,
+      "Warnings": 0,
+      "StrictPass": true
+    },
+    "starcoder2-3b-Q4_K_M.gguf": {
+      "RouteVersion": 2,
+      "Arch": "starcoder2",
+      "PromptMode": "family",
+      "PromptFamily": "Completion",
+      "TemplateSource": "fallback_arch_other",
+      "NormMode": "layer_norm",
+      "QkvLayout": "separate",
+      "FfnMode": "non_gated",
+      "HardErrors": 0,
+      "Warnings": 0,
+      "StrictPass": true
+    },
+    "gpt2.Q4_K_M.gguf": {
+      "RouteVersion": 2,
+      "Arch": "gpt2",
+      "PromptMode": "family",
+      "PromptFamily": "Completion",
+      "TemplateSource": "fallback_arch_other",
+      "NormMode": "layer_norm",
+      "QkvLayout": "fused",
+      "FfnMode": "non_gated",
+      "HardErrors": 0,
+      "Warnings": 0,
+      "StrictPass": true
+    },
+    "Qwen3-0.6B-Q4_K_M.gguf": {
+      "RouteVersion": 2,
+      "Arch": "qwen3",
+      "PromptMode": "jinja",
+      "TemplateSource": "embedded",
+      "NormMode": "rms_norm",
+      "QkvLayout": "separate",
+      "FfnMode": "gated",
+      "HardErrors": 0,
+      "Warnings": 0,
+      "StrictPass": true
+    },
+    "gemma-2-2b-it-Q4_K_M.gguf": {
+      "RouteVersion": 2,
+      "Arch": "gemma2",
+      "PromptMode": "jinja",
+      "TemplateSource": "embedded",
+      "NormMode": "rms_norm",
+      "QkvLayout": "separate",
+      "FfnMode": "gated",
+      "HardErrors": 0,
+      "Warnings": 0,
+      "StrictPass": true
+    }
+  }
+}
