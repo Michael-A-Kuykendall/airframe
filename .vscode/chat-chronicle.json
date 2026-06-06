@@ -1,0 +1,3739 @@
+{
+  "version": 1,
+  "sessions": {
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\3074d793-2da8-4dcd-8004-03b39247c2b5.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZHplcm8tY2Fz\\2bb2e2c1-1990-4bb3-b6fa-f703e44f60ef.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Real-time & Messaging",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcY2hhdC1jaHJvbmljbGU_\\5d2a36ef-086a-4b9b-b1bd-047e9913ac2c.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcY2hhdC1jaHJvbmljbGU_\\de6c2669-dea9-439f-9e4f-0813f407ea5a.json": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcY2hhdC1jaHJvbmljbGU_\\6155293c-8621-4867-a924-fa46e98c8632.json": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZHplcm8tY2Fz\\35533260-12ca-4409-be2f-39edca7ec0df.json": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZHplcm8tY2Fz\\0800747b-d576-4235-b0e8-fef4f0380d50.json": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcY2hhdC1jaHJvbmljbGU_\\d2377aba-dcae-4305-bc3b-2dbad16729c0.json": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZ2F0ZXdhcmRlbg__\\4d0e5d1d-6dd0-49d0-803e-c3527908e3e0.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZHplcm8tY2Fz\\b9032bb9-2239-4186-9e7e-1dcacb8b1513.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcY2hhdC1jaHJvbmljbGU_\\ba4c4e26-e4f3-42b5-ba86-0dd07be354b9.json": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZHplcm8tY2Fz\\f617352a-77e4-4271-8b8d-721e6aa0e3d3.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZ2F0ZXdhcmRlbg__\\50922ded-d111-4b56-af13-be6b0757ae12.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\67e37a35-19c1-4410-8c19-fec2b77e3263.jsonl": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZ2F0ZXdhcmRlbg__\\0cab7f10-7938-466e-ab8d-4f8344068e6b.json": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "MCP/Tools",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZ2F0ZXdhcmRlbg__\\1ee84b25-d33b-48fa-985a-31bc581c4bd6.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\081ccc80aa7a8e16b13320a742b1a227\\chatSessions\\d3d5125f-53f6-4653-b745-c4313071e3ea.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\056203a8-841d-41cd-a81a-a928725adf2b.jsonl": {
+      "autoTopicsOverride": [
+        "VS Code Extension",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Team Insights",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\9e470c05-067b-40b9-ae7e-28492576c180.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\081ccc80aa7a8e16b13320a742b1a227\\chatSessions\\989a37a4-21ba-4b64-83bb-91891c1eadcd.jsonl": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\90e97161-7543-4932-a494-a53a6d14eea1.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "VS Code Extension",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\ec988fb2-c0b2-42ac-9569-041aa5416efc.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\26567d6302df194acf267b7d42249e6b\\chatSessions\\7f64bc61-a2f3-498a-aa91-57415cf3ff56.jsonl": {
+      "autoTopicsOverride": [
+        "Logging & Monitoring",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f640b313bba138a12a6559545775dbb0\\chatSessions\\66179c4a-bea4-4c44-a432-5272449b412b.jsonl": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Data Storage",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a32af399d40cd15e05ecf2c1a105ff13\\chatSessions\\baf76d61-0120-436c-9853-9976cfc05adb.jsonl": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "API Integration",
+        "Data Storage",
+        "State Management",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b71c7c0bbb4cb0130f180f3be682828a\\chatSessions\\510dbc7d-11b4-4d8d-b561-b8270f8b9f14.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "Real-time & Messaging",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\9e43ee5a8f79081d4d9fcccb985ae848\\chatSessions\\510dbc7d-11b4-4d8d-b561-b8270f8b9f14.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "Real-time & Messaging"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b71c7c0bbb4cb0130f180f3be682828a\\chatSessions\\2106c898-e65f-4ffb-8e7f-c9294702cdb0.jsonl": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\9e43ee5a8f79081d4d9fcccb985ae848\\chatSessions\\2106c898-e65f-4ffb-8e7f-c9294702cdb0.jsonl": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\1aad4775-0cb1-48af-82de-96874817b49d.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "MCP/Tools",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\bdb84d91-7e0d-4c30-b199-0f8c14db153f.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "State Management",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\486a467e-c051-474c-8299-300c255fb40e.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\49b55382-e55c-47e6-9bfc-2aa5de45dfc6.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Git"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\43d33946-e894-4743-bcb7-8c32f7d84059.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\fe3ede3d68bbac83da15dd03a9a80f58\\chatSessions\\b08674c6-a082-4e3c-a3fa-e3ecde0007dc.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "Real-time & Messaging",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\ed3cbeea-66fe-4bd3-9e85-bd9233b5bbb1.jsonl": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "API Integration",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\3f03b48b-1a16-45e0-a925-98b016e235c4.jsonl": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\ebdde950-8b3f-40cc-b0fd-ff51d4b12083.jsonl": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "State Management"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\0ca4b812-2e06-4fb0-aea5-a12a369675d2.jsonl": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "VS Code Extension",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\05f916df-6554-422c-ad13-a0a660a3e6a1.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "API Integration"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f7ef3289b85b6523d43c374872334741\\chatSessions\\d3197f47-9d27-4fb1-a197-4b81af8c184a.jsonl": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\9b296fa5-82da-4628-bd6e-c45159029b3c.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "VS Code Extension",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6aecc6bd715112da3ff88ec1f0d0ed37\\chatSessions\\8a60ecc3-0166-4d28-b6ae-2ea266e451d6.jsonl": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\83fb2556-bd9d-475a-834e-40a8b46fa2c6.jsonl": {
+      "autoTopicsOverride": [
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\7d709881-0df5-400b-8c4d-e87402da28ea.jsonl": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "VS Code Extension",
+        "Performance",
+        "TypeScript/Node",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6aecc6bd715112da3ff88ec1f0d0ed37\\chatSessions\\545879cb-1d81-479e-bb45-a979e8ba984d.jsonl": {
+      "autoTopicsOverride": [
+        "Git",
+        "Frontend/UI",
+        "Logging & Monitoring",
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\.claude\\projects\\c--Users-micha-repos-greased-lightnin\\f679e7df-5a67-4995-90ba-8d9e977a1d46\\subagents\\agent-acompact-ce5ae0a0dce2683f.jsonl": {
+      "autoTopicsOverride": [
+        "MCP/Tools"
+      ]
+    },
+    "C:\\Users\\micha\\.claude\\projects\\c--Users-micha-repos-greased-lightnin\\f679e7df-5a67-4995-90ba-8d9e977a1d46\\subagents\\agent-a44a2ae1de181bff7.jsonl": {
+      "autoTopicsOverride": [
+        "Performance"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6aecc6bd715112da3ff88ec1f0d0ed37\\chatSessions\\a4386410-3bdb-4371-8a7f-994b9e1838d8.jsonl": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\3ce65962-4683-4795-a7f3-4bcf1bd2fc8e.jsonl": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c7647cd32b9af7d3b0d7cc410f545db3\\chatSessions\\235b6229-876c-48bc-8224-89567e959705.jsonl": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "API Integration",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\04a812b5187d9f6fce98a78a893570ba\\chatSessions\\8a6e07b0-ad71-491b-9b76-87c1eb926965.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\816aec3b9201eee625eeb9be5c91ddf0\\chatSessions\\f115d619-bb74-460f-9219-982f8a43bbfd.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "TypeScript/Node",
+        "Real-time & Messaging"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c7647cd32b9af7d3b0d7cc410f545db3\\chatSessions\\16bed79a-1c0b-4e69-844a-0df2effe411d.jsonl": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d287f877e7be6202222715f049bd157e\\chatSessions\\99cbedf8-20b1-4116-8496-efecf73b545b.jsonl": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "CI/CD",
+        "Frontend/UI",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\c953239e-2df4-4c0d-8d7d-d749f6c8b690.jsonl": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "Frontend/UI",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4145c6d77b10944e3888d41817816aaa\\chatSessions\\e470dc55-9e42-4d61-8942-32e4cfe6827f.jsonl": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\04a812b5187d9f6fce98a78a893570ba\\chatSessions\\642518d0-fa67-4279-b09a-f1007df826a5.jsonl": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\04a812b5187d9f6fce98a78a893570ba\\chatSessions\\33e1e316-b91a-4130-97e8-612802905c6f.jsonl": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\57fe227eb21f1e41f7ae0211abd7e3b3\\chatSessions\\4ba6a403-1e50-4ae5-bb73-52d7447b2a42.jsonl": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\6ee2f13f-173d-48c1-b218-3814ec1c9f64.jsonl": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\c9406054-cc84-4868-afc0-778c0feaa7c9.jsonl": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\0d8fe663-37d9-420d-9ca1-943a13cff482.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Data Storage",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\bb7bb9a3-dce9-418e-afdf-6d9973e03b09.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Cloud Platforms",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\afc9428c694d764bda85ff4070f8b887\\chatSessions\\1c36fa74-90b9-4cdc-a824-9c01b3623180.jsonl": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\d6b70df8-5a2a-4b46-a7a1-8c9700a35faf.jsonl": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\3a2352f8-1184-4ff1-a823-4975b6bcf4f5.jsonl": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\009a9e33-2ac2-4f5a-8ef8-dfbb13ec85d8.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\da6e2924-e419-4203-a7ed-ca20a303454e.jsonl": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\816aec3b9201eee625eeb9be5c91ddf0\\chatSessions\\652ac3ef-27a4-4510-b708-b60bcb4abbf8.jsonl": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\6015c594-a798-4daa-97f4-83df3d21117f.jsonl": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\46ddd9f8-092c-45ba-8a18-719b0c1c379a.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\816aec3b9201eee625eeb9be5c91ddf0\\chatSessions\\092ea011-52b5-4ef3-a5d6-79509d5a9167.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\31acca1e84f8be01991fbcafe35c0711\\chatSessions\\b48a2af8-d0a4-4825-b8db-3403d38545a4.jsonl": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Security/Auth",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7d213faf91b83d993ee09a765e4019ec\\chatSessions\\c919555e-5d80-48ca-9c10-b06f47e2bb49.jsonl": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\6af48bbf-3993-4f12-a3dc-9a465f17064a.jsonl": {
+      "autoTopicsOverride": [
+        "Real-time & Messaging",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\7e7f5c3f-3170-4480-9b96-e11630d0eee9.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\dba9c01f-2e34-461a-9a1d-9dd24f9e6ddc.jsonl": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7d213faf91b83d993ee09a765e4019ec\\chatSessions\\2ebe7a8b-ce31-4b50-92c9-59f140da4885.jsonl": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\816aec3b9201eee625eeb9be5c91ddf0\\chatSessions\\0840b02e-b580-424f-9407-9803b9abbe35.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7d213faf91b83d993ee09a765e4019ec\\chatSessions\\11b3a4c8-e7f7-4832-bcfe-005886970dfd.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "TypeScript/Node",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7d213faf91b83d993ee09a765e4019ec\\chatSessions\\60553a01-c4c1-4d2a-b623-d973e4bba9ba.jsonl": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7d213faf91b83d993ee09a765e4019ec\\chatSessions\\6a5e1973-5925-47bf-96fc-a928f81e141a.jsonl": {
+      "autoTopicsOverride": [
+        "Git",
+        "Frontend/UI",
+        "Data Storage",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\75028a5e-9cab-4830-9746-e4cc9bdca4a3.jsonl": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7d213faf91b83d993ee09a765e4019ec\\chatSessions\\c3c1fe07-0055-48bd-90ee-6fe3178f3130.jsonl": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\816aec3b9201eee625eeb9be5c91ddf0\\chatSessions\\140bf81d-71c5-43f6-b23b-24bf35f27ed3.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\77b1ec47-4db0-47c8-bd75-a68171991ba1.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\fff33bea4f97ea92514e8229757d594f\\chatSessions\\155dcea7-a5be-4de3-8445-45280206e19b.jsonl": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "State Management",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\d82412fe-ea08-46e0-94ce-f7b74cfd9ebd.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Security/Auth",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\26567d6302df194acf267b7d42249e6b\\chatSessions\\37b44e20-fc10-4947-85c6-696d679a98a6.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "Frontend/UI",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\42716e0a-7a64-44ed-847d-9add19688916.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "API Integration",
+        "Data Storage",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\dbe095cf-3904-4959-9dc5-b3f8dd32b7a2.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\fcec5b6f-f631-4a7c-8df8-7325f32980cf.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Git",
+        "VS Code Extension",
+        "TypeScript/Node",
+        "State Management",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\816aec3b9201eee625eeb9be5c91ddf0\\chatSessions\\f0f1fcd8-4380-4374-8831-7eb8a4f66c7a.jsonl": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\07d92eb4-6a50-47a3-b896-014fc0acd7e0.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Performance",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\58d79399-8cfd-4018-84ab-29382a922346.jsonl": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\6d45276d-5818-4adb-826b-d5ba53bf18b1.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\a9c8de78-27d8-44b5-82b8-52762fec3cb1.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\5fb995fe1a8386bc7ed9a8c0e30fdfc9\\chatSessions\\59cd29fb-1851-4966-b8e8-a2afad3d0bab.jsonl": {
+      "autoTopicsOverride": [
+        "VS Code Extension"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6c0a142d793505e1d54e499ca1cc77c8\\chatSessions\\0a21c79d-32b5-4412-a717-66dc15b81c23.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\fe5ff5ce-1ff2-40a0-a9d3-9a39eeff719f.jsonl": {
+      "autoTopicsOverride": [
+        "VS Code Extension",
+        "Frontend/UI",
+        "TypeScript/Node",
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\2428ab64b6f80e582b294ed7f22393eb\\chatSessions\\d2e442f5-2a5b-42fc-9d04-853a39db818c.jsonl": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\816aec3b9201eee625eeb9be5c91ddf0\\chatSessions\\7312a08e-c59a-452b-a483-12ce5002dc52.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\a626baf5-6e74-48a9-828b-3540be504d68.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "API Integration",
+        "Performance",
+        "TypeScript/Node",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\0150aa23-954f-4196-b1a9-c1c44c2e9ad2.jsonl": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "Data Storage"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\71cb74fd077eb743e1bbf87dcbfb208f\\chatSessions\\218c47c8-95ef-42cf-a752-c5080eee9715.jsonl": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Git",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\92eb203e-4e7d-49d2-b55b-1a3798ddb9d3.jsonl": {
+      "autoTopicsOverride": [
+        "Real-time & Messaging",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\7e4be3fe-1f40-4daa-8e80-0c419df9b4f4.jsonl": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "API Integration",
+        "Data Storage",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\9047fd3f-20f1-4b85-86d5-15c5e6619fdf.jsonl": {
+      "autoTopicsOverride": [
+        "API Integration"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\639c0033cddf677b36186a8b4065aff1\\chatSessions\\f51b638f-6df6-4b68-a496-be9ba90a4532.jsonl": {
+      "autoTopicsOverride": [
+        "Git",
+        "Frontend/UI",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Team Insights"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d35f007474eb3d9f4641f02d92b92cac\\chatSessions\\529f04cb-5711-40af-992f-978582481d6f.jsonl": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Performance",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\982fde25-44fd-49a3-b074-bc761d2eda7d.jsonl": {
+      "autoTopicsOverride": [
+        "Build Tooling"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\5aca1742e0a6d94479be6ca3f4825ce7\\chatSessions\\168439e7-c953-49b9-a314-50c3641d4ecb.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a32af399d40cd15e05ecf2c1a105ff13\\chatSessions\\6967333f-5196-4056-9d1f-61e32fad60aa.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "Frontend/UI",
+        "Data Storage",
+        "Logging & Monitoring",
+        "State Management",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\dc8171efe733a2d1f6e7dee7964a8106\\chatSessions\\92cf234d-ea5c-44cf-b1a9-a676b74829c2.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6aecc6bd715112da3ff88ec1f0d0ed37\\chatSessions\\0309225c-0fff-4832-bf78-231447bf8d1e.json": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "State Management",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\9d317b1874d9a65a59e31eab72cb3495\\chatSessions\\ca7dc9bb-0627-492f-88cb-054e5354234c.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\78a5c8a023ba52775f857b7df7a54cd2\\chatSessions\\ce6f6566-fb55-419f-b985-0c9eb9af449b.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\65142512275138d4945655668ee420e4\\chatSessions\\a7e3e45e-9d63-4578-a66b-aa7866b5c4e8.json": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f7ef3289b85b6523d43c374872334741\\chatSessions\\c0787cc0-6adc-4c7b-881c-f627ca91111a.json": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\9b68fab4b54b81a56209a07b6e0e1485\\chatSessions\\16a888cd-385a-4ff9-94b0-c413a1dcd073.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "API Integration",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\dc2f59f1dbcf10c342a2ca5c30dc8fa5\\chatSessions\\16a2f730-0106-46e3-b942-851b5c055193.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a32af399d40cd15e05ecf2c1a105ff13\\chatSessions\\81fa4919-4e71-4f0e-a81d-1fe0d09ba4af.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0467b2e920814512eca247e155621588\\chatSessions\\28877b9f-f3e9-4e64-9745-c225747b064c.json": {
+      "autoTopicsOverride": [
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b41203c162b0bd37bbfecdb2ad795fa\\chatSessions\\7b52195e-4b0b-46af-8755-9ae96b2f9dc5.json": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\d424abff-9900-4593-b9a5-f066732a4c16.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "API Integration",
+        "Cloud Platforms",
+        "Real-time & Messaging",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\95b13df4-89aa-425f-9011-47b84988c034.json": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "CI/CD",
+        "API Integration",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\eb861e8fc157b76e5b13208a4817ade8\\chatSessions\\c4fb837d-4e45-44c1-b0f6-d485e87d46ba.json": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\40d0bf33-5ed3-4811-b004-6577e128cf99.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\e01fd7fa-c75b-444f-87d1-9c18b20cb5be.json": {
+      "autoTopicsOverride": [
+        "VS Code Extension",
+        "API Integration",
+        "Security/Auth",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\5da0cd91-3a14-413b-bd8f-ce399252bc2f.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "State Management",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\557ef8d7be787a48813330420f7c0f89\\chatSessions\\96eceaa5-c488-4f34-899e-d37941f596f1.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d33731c5acb4d32121a798c7a10a210c\\chatSessions\\e2901ab8-bb33-4c8c-83fd-2e7bc0d189b6.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Data Storage",
+        "Performance"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\5007071a-c7e4-4977-8baa-a60639d09a6c.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\3c65742fb6a9f49764be3efa526c44ec\\chatSessions\\c3d58cbb-444a-4787-a68e-fb952f844e53.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\e95b5c6c-f53d-46c8-9e75-46bbe51390ae.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "Data Storage",
+        "Security/Auth",
+        "State Management",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\8a5b6c3403cb6b5a27ed1299962b6753\\chatSessions\\7dd09d47-63ba-44b0-a8c2-ad41451c80ce.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\af451b88-252a-4379-95da-8b909a6cdb7f.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "API Integration",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\8b334a65-f10f-479c-bbdb-8cc9d5e45f40.json": {
+      "autoTopicsOverride": [
+        "Git"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\fae64c4c-f626-4cf4-909f-c089eabfcfa6.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\8a5b6c3403cb6b5a27ed1299962b6753\\chatSessions\\2a046c26-ef4f-4104-a049-b49a95df4980.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0467b2e920814512eca247e155621588\\chatSessions\\f1059337-4fe4-4e65-9e19-6c13265e4036.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\aa489048-c2dd-4a50-91ce-fd0fb99598a9.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Git",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ec5c523856d8461b55198d23f95f7a30\\chatSessions\\fdbb3f12-63dd-4fd6-a567-ecd098f7c892.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\e1210219-3356-4352-9ce3-cceaabcacaf3.json": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "MCP/Tools"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\f1f392cf-5620-4754-a449-2ae1cbc3e865.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\2a8d628564e81066d7d00ea1dac09487\\chatSessions\\ca85e0d8-fee0-4961-8328-f6a21e51f830.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\e8976a92-6114-48d3-a9a5-23ee7a57c7c3.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Git",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\459622ad73e3488a3c6b534a3ba73cc8\\chatSessions\\c76fcca1-6832-42c6-ba8c-fe4e6ada16a0.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\dc8171efe733a2d1f6e7dee7964a8106\\chatSessions\\6deb8548-da46-408f-bc8a-327f6018ff1a.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\4294b6cf-812e-4ce3-9b21-3361381cc24b.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\ecb5c9b5-f490-4fb1-8f8b-4612df7fb7a3.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\bc6a8e4a-1e8f-472b-8b5b-c06168f6d0a7.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Frontend/UI",
+        "Data Storage",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\db1ad518-88b4-4f40-a9e9-1c7870ec1b32.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\296c3b33-484a-458d-ac11-6ff437917cc2.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Git",
+        "API Integration",
+        "Security/Auth",
+        "TypeScript/Node",
+        "State Management"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\83fdc603-c8b6-4557-9908-82601761bb8c.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\ce266b79-ce6c-4003-a5bb-3697238dc8fb.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\afc9428c694d764bda85ff4070f8b887\\chatSessions\\a34187be-1193-410e-b0fd-0e035309eb41.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6ac2e892f128ad85345d5f4a91288a29\\chatSessions\\1443a802-d23d-48e7-b25b-3fad6f22bfc0.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "Dependencies",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\016e0bf9cfc88e8f49b43d102141a181\\chatSessions\\1443a802-d23d-48e7-b25b-3fad6f22bfc0.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "Dependencies",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\5125e4cf-6291-414d-9842-1f3982fde8bc.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\016e0bf9cfc88e8f49b43d102141a181\\chatSessions\\5bccf8fb-64ee-4c09-84fe-9a504a4e90b4.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6ac2e892f128ad85345d5f4a91288a29\\chatSessions\\5bccf8fb-64ee-4c09-84fe-9a504a4e90b4.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6c0a142d793505e1d54e499ca1cc77c8\\chatSessions\\3b543df9-5b09-439a-985d-dcd055a9b989.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Git",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\e4bd8bcf-2a08-4f8e-9b57-9c1f800a1b2d.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\016e0bf9cfc88e8f49b43d102141a181\\chatSessions\\be921ad4-b3ac-423c-a9a0-6cb5193a0a83.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6ac2e892f128ad85345d5f4a91288a29\\chatSessions\\be921ad4-b3ac-423c-a9a0-6cb5193a0a83.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\698f2b31-cb35-4a25-a5c6-5898cfda4a4f.json": {
+      "autoTopicsOverride": [
+        "Testing"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\016e0bf9cfc88e8f49b43d102141a181\\chatSessions\\1d2b606d-9033-43ac-88db-19cc27983182.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Logging & Monitoring"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6ac2e892f128ad85345d5f4a91288a29\\chatSessions\\1d2b606d-9033-43ac-88db-19cc27983182.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Logging & Monitoring"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\016e0bf9cfc88e8f49b43d102141a181\\chatSessions\\685429e5-91f6-4144-a459-46c01bc4ba71.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6ac2e892f128ad85345d5f4a91288a29\\chatSessions\\685429e5-91f6-4144-a459-46c01bc4ba71.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\d412191e-6704-47e8-8415-d6c8658f08c0.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "API Integration",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0596c35a2e6ab553993c40cfa3e9c6df\\chatSessions\\ebc02265-f5f8-49b6-985d-9ebef8345b79.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Performance",
+        "TypeScript/Node",
+        "Code Quality",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0596c35a2e6ab553993c40cfa3e9c6df\\chatSessions\\0538d314-32d2-4d46-aea0-cc11fa390666.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0596c35a2e6ab553993c40cfa3e9c6df\\chatSessions\\cb509b05-a2f4-4cb3-9631-c5e452a4ef6d.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\e78b865a-b4d6-416c-81c6-a225f654e2a5.json": {
+      "autoTopicsOverride": [
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\f958f361-8eb7-42f6-8c44-1e8e2db14499.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\a8659b4d-1972-46c7-8e2b-c25a8161a513.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\99de9139-e02e-4025-aaa9-e2b8847cea33.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\df73792f-0e65-45dd-98d7-897e4c9a2cee.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\329052c3-db54-490a-87fa-903d7203bf26.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\2e448a37-c862-45a6-8858-2462f7e27e94.json": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Performance",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\4b4ff454-886e-43d8-9129-9cd8b7d32b8a.json": {
+      "autoTopicsOverride": [
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\098666a4-eb3a-4ab3-a466-86679b8fe8d9.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "API Integration",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\c6a73670-be88-4d3f-a610-da7ad632e0da.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\34a48c24-4b40-43d2-9156-48152a91ac39.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\b49996a0-612a-4514-83bd-24ce11cb9a5b.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\e3ef673a-dfe4-4194-a6d6-5cc27c54c70d.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\a6d0d334-2f69-4441-abc6-9eff935fbdcf.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0596c35a2e6ab553993c40cfa3e9c6df\\chatSessions\\d936d8f3-511f-4f79-8769-7ad5869b4e06.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\31ea2d44-0484-4a40-8710-85caf9133670.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\4bab4200-9237-463f-99df-eff833f74212.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust",
+        "MCP/Tools",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\1d3eb6fb-0f78-478f-a222-35dbc754d181.json": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\f1370075-c9c7-4611-aafd-94f3ed919c1f.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\f1370075-c9c7-4611-aafd-94f3ed919c1f.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\9da354bc-335b-46f6-8269-946261edf975.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\acf85006-8c02-4a38-a7bc-c52d0e4aa77e.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "VS Code Extension",
+        "Data Storage",
+        "Code Quality",
+        "Real-time & Messaging",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ec5c523856d8461b55198d23f95f7a30\\chatSessions\\a5cf9973-196f-4906-bdbf-b1f5a43f4d3e.json": {
+      "autoTopicsOverride": [
+        "Git",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\44e19269-770d-4868-9395-9c2207351e17.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Security/Auth",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\fe3ede3d68bbac83da15dd03a9a80f58\\chatSessions\\0022ab6b-85e4-40b3-9c24-61fe75394ef1.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\fe3ede3d68bbac83da15dd03a9a80f58\\chatSessions\\4cb11077-71aa-4952-a6f3-9e1b7fa3a705.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\3a1cee58-4408-4016-83c9-13682eda46ff.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\fe3ede3d68bbac83da15dd03a9a80f58\\chatSessions\\64e02920-463c-464d-b441-870a5632ab9e.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\3206d515-ae46-4170-bef7-dc332d8c7128.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "Code Quality",
+        "Real-time & Messaging",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\80ad985c-08a5-44f6-947c-8e6ebc333065.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "CI/CD",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\f3331d45-5abe-47bf-98a1-0a2a2febd0fd.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f7ef3289b85b6523d43c374872334741\\chatSessions\\193435ce-d099-4ae6-92b7-e79844267482.json": {
+      "autoTopicsOverride": [
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\2233a958-c7fe-4a78-8074-7fa860e01151.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Data Storage",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\82ee3a4f-51e6-4811-a53d-734cd1e7771e.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "VS Code Extension",
+        "API Integration",
+        "Security/Auth",
+        "Real-time & Messaging"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d0840d15b0dd268997e5b34d978773df\\chatSessions\\0b718f0c-6754-4380-83bc-d98feb473e3e.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b8b01b06fd45a516646876ec54b16660\\chatSessions\\4fee96fc-28f2-4c75-9707-125c1bdd7ba1.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\ed898a22-e260-406d-8976-60b50f4d0b80.json": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\fc984a5c-20cc-4ed4-b17d-6e85d2912934.json": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\bc90421a-626f-4c2c-8c72-1eb5aeab2b71.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\fe3ede3d68bbac83da15dd03a9a80f58\\chatSessions\\e58ca722-9dfb-44ec-8e15-2364620a2747.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Frontend/UI",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f640b313bba138a12a6559545775dbb0\\chatSessions\\f7e56942-2970-4487-a19c-5518cc67a0b8.json": {
+      "autoTopicsOverride": [
+        "Git",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\bc41c27e51c0048cb9efc6c67b7be1c6\\chatSessions\\f58b4d5e-5cbf-4165-9cea-03a454b43441.json": {
+      "autoTopicsOverride": [
+        "VS Code Extension"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\78334b17-f317-48b1-81ea-d82868ea2b63.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Git",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a2da47bd28384c0ab9bbcc84bd4e2c44\\chatSessions\\e0461bbd-9b48-4815-8bf7-65d0580286f5.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Refactor/Maintenance",
+        "API Integration",
+        "Data Storage",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b8b01b06fd45a516646876ec54b16660\\chatSessions\\aa4b2bc8-258c-4a43-8509-125fdb158c28.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "WASM/Rust",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a2da47bd28384c0ab9bbcc84bd4e2c44\\chatSessions\\d1842036-2f6a-4e2d-a20f-bf7bfe2960a1.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0596c35a2e6ab553993c40cfa3e9c6df\\chatSessions\\072ee01f-01ae-46a0-a293-0e1c4148db26.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0596c35a2e6ab553993c40cfa3e9c6df\\chatSessions\\d36e766a-420b-4181-ae4a-79e38f4a997c.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\2a8d628564e81066d7d00ea1dac09487\\chatSessions\\75e66439-5ef3-4c4b-988c-f08eaed60255.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\52462ed31fac8c1830395b44ccfca833\\chatSessions\\676921fe-361a-4486-91ad-324e38d163bf.json": {
+      "autoTopicsOverride": [
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1b19e2217cd551c9a24db808082d2f82\\chatSessions\\9a5f3bf8-7711-449d-8d5a-8f2da1d5e6ce.json": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "TypeScript/Node",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\5fb995fe1a8386bc7ed9a8c0e30fdfc9\\chatSessions\\6ff77993-7f3f-4069-a8f1-b78eb73eadc8.json": {
+      "autoTopicsOverride": [
+        "VS Code Extension",
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f7ef3289b85b6523d43c374872334741\\chatSessions\\f16b5ce5-a54d-4518-b0b2-04de8b6af875.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Git"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\98ff11b0-6b41-4c00-af7c-4a4f15357f2c.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\30567df1-6f55-4a7c-83d8-52d914279f18.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Data Storage",
+        "Security/Auth",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\aebfc620-7a8b-413c-8f67-1bf6080ba4c8.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\04f15eda-23ff-4342-825f-5c3c860bc181.json": {
+      "autoTopicsOverride": [
+        "Debugging"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\77c208c3-19b8-4398-861e-2e43d35928a8.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Data Storage",
+        "Security/Auth"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\51691928-e7f4-44fa-8297-f0c104c407d1.json": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\f6b8c821-51af-40c9-b42e-434dc0a5192d.json": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\7c03f9da-58e3-4032-ac44-4fca77a283a8.json": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\a3860303-994f-462a-872a-bea2941fd703.json": {
+      "autoTopicsOverride": [
+        "Debugging"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\708ad1f0-2aa6-472b-bc4f-a94449850f06.json": {
+      "autoTopicsOverride": [
+        "MCP/Tools"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\5c64f1d9-12aa-4531-92db-0aefc0d9f961.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\0788e3f2-759f-4220-bd95-cd741cf06f78.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Cursor\\User\\workspaceStorage\\655a007ac1f36bd6dd6fadb35ee659b2\\state.vscdb#46d00291-20a6-4ff5-bbb1-3b7d413aa79b": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Cursor\\User\\workspaceStorage\\655a007ac1f36bd6dd6fadb35ee659b2\\state.vscdb#a3709bdb-1b91-4d1a-a2f0-980376455fbb": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Frontend/UI",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\655a007ac1f36bd6dd6fadb35ee659b2\\chatSessions\\ef2d30a0-7076-4c05-9aec-4cce67170950.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\9e4e532bfc59b270d6883614f0495a62\\chatSessions\\f9357d4d-f4b5-426a-8238-b2bdf3f6f022.json": {
+      "autoTopicsOverride": [
+        "Performance",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\9e4e532bfc59b270d6883614f0495a62\\chatSessions\\a74074ef-2d37-4691-9c5b-179c7eacb891.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\9e4e532bfc59b270d6883614f0495a62\\chatSessions\\8994d487-a04b-47d9-bf22-a02d02666290.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Refactor/Maintenance"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\2a8d628564e81066d7d00ea1dac09487\\chatSessions\\e15a8543-398d-48a1-a6e9-0d6293e240d8.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "VS Code Extension",
+        "TypeScript/Node",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\407cc87d6fc8c83568bef60ce8a22d0a\\chatSessions\\349b5430-c6de-4149-95b8-abc9dce3e350.json": {
+      "autoTopicsOverride": [
+        "Performance",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\407cc87d6fc8c83568bef60ce8a22d0a\\chatSessions\\99dca821-6549-4f04-9bce-6f93c32ab0aa.json": {
+      "autoTopicsOverride": [
+        "Performance",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\e037b42c2a00e2aeaaf4d60ab81df963\\chatSessions\\1c981c5a-8c66-4fd1-8c63-b0c40dc56412.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Git",
+        "Frontend/UI",
+        "API Integration",
+        "TypeScript/Node",
+        "State Management",
+        "Cloud Platforms",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\5aca1742e0a6d94479be6ca3f4825ce7\\chatSessions\\f0d47ff6-3e34-416c-9601-e28cf6889dd8.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\79d818a4-0c94-4b56-b652-eef1a9be09c7.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Frontend/UI",
+        "Data Storage",
+        "TypeScript/Node",
+        "State Management",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\79d818a4-0c94-4b56-b652-eef1a9be09c7.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Frontend/UI",
+        "Data Storage",
+        "TypeScript/Node",
+        "State Management",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\f9edc4cc-d452-4ab6-931d-2ad459d37744.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ec5c523856d8461b55198d23f95f7a30\\chatSessions\\396607f3-e1e2-4c0a-b57c-fd4269ad4f28.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b7f357cccceb1479a89e8b22a927ce34\\chatSessions\\5661a5fd-3cd4-4997-8bb2-5daee5d03203.json": {
+      "autoTopicsOverride": [
+        "Performance"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3Ncc2hpbW15\\3b28c809-3c19-435f-ac72-625800ede73b.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "MCP/Tools"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\4eebeb71-4bbc-48b7-9989-5444422ab595.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3Ncc2hpbW15\\0aecd0cf-1139-4f3a-86e1-e802fb5f911c.json": {
+      "autoTopicsOverride": [
+        "MCP/Tools"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\50fa95bb-b410-4ba1-aa8d-4a4fd0d6a24e.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\6d6e068d-099b-4462-90aa-a8f1c9cdd285.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\db6e49ac-f668-47c6-9a2d-b8b6cc112314.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\76b17bf2-8d60-4c10-aa9a-750610fcf5bb.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\d71f68e3-19b5-4d56-a806-b4d9889976a8.json": {
+      "autoTopicsOverride": [
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\19c595f1-7220-4990-a17e-121fed2e5d92.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Data Storage"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcbGlic2hpbW15\\9cda5a40-ab9e-496c-b39b-92020881be65.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\b748dbe4-e6a4-4714-9737-bb0f4c3edb72.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Dependencies",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\d10e87b9-842f-48f0-b494-73d38dff62fe.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "API Integration",
+        "TypeScript/Node",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\4f4dd9b6-f009-4622-9e66-ecc84ad68785.json": {
+      "autoTopicsOverride": [
+        "Debugging"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\14c465524f060f882be26c5e5c9bb2cf\\chatSessions\\0a92095d-ba45-4c5f-933c-1bce13926941.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\341d35c6-454d-4c13-b421-b77fa02461ec.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Dependencies",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\54696d1b-c02a-4022-b63e-37b8c3ad58bc.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\0c9dd6c4-d7a1-44da-acf9-61ce5749738b.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\ef9a3224-16c9-4393-905c-f37c6c7f10e3.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a316c1ea5f3feccfce082ed28fd0ff13\\chatSessions\\9195bfac-fc4c-437d-b739-fe70558357dd.json": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "Security/Auth",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\ad446f2d-cfbe-4109-84ec-7b86de2b2b89.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "TypeScript/Node",
+        "MCP/Tools",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\36c43669-ba0c-465e-82b6-c4e1d1d6240c.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\3b7e7706-af34-4381-ad8d-bdb79c060603.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "State Management",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ec5c523856d8461b55198d23f95f7a30\\chatSessions\\45a8b7b8-0162-42ca-b646-e39ae972faf5.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7b3c13905ace7f7357fa718631720ef3\\chatSessions\\efd8d242-285a-454b-a842-650570f858f4.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\38a48b57-84bc-46e1-a313-a29224819811.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7bee9ce17010bd6c868fb5f096659451\\chatSessions\\62ebc0cb-8293-4cac-a02c-dfb501c07fa0.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7a1cfbaf47e36abe455bf002f8d31c63\\chatSessions\\8f473ccd-2b09-4304-84dc-337ade05fc40.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\2a8d628564e81066d7d00ea1dac09487\\chatSessions\\d6fb3a18-3aca-492d-82f2-0408b8e48c82.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Data Storage",
+        "Security/Auth",
+        "Logging & Monitoring",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b4284649de502ce9a4322d02993f06ed\\chatSessions\\418eb8b5-a9f5-4e44-abdf-1755b857fd39.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\08c42a1a23589e762608e03374b60ee1\\chatSessions\\405caeff-f9ef-46fa-8976-91014383205b.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Refactor/Maintenance",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\13930eb0dcb74caad63ef954e30d99bc\\chatSessions\\b1da0665-1473-4cc1-995b-c61e38e02b23.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "Git",
+        "Refactor/Maintenance",
+        "VS Code Extension",
+        "Data Storage",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\8a5b6c3403cb6b5a27ed1299962b6753\\chatSessions\\e8ac4026-f793-4b86-a87f-3fc222ee85bd.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Security/Auth",
+        "WASM/Rust",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\7d010fce-637d-4da6-a863-03a9ab15f3b4.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Git",
+        "Refactor/Maintenance",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "WASM/Rust",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\9342e0ee634dc1d7fc7d1a0e29d866ff\\chatSessions\\f7bd352c-9333-4e83-882c-5df256782b76.json": {
+      "autoTopicsOverride": [
+        "Performance"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1eea790517c5f2af1d9c14badcff4234\\chatSessions\\28c4df34-8286-4f78-9f29-8272cdead62b.json": {
+      "autoTopicsOverride": [
+        "Security/Auth"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f80b99f00e2c9fc340e0521b12c0f7d6\\chatSessions\\dac47e31-abaf-4fe0-becb-25c0bf345ba2.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\89cccbc3-29bd-4713-bafa-edab74cafebb.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c6faa65d1ae55424acecfb0dbb3c8155\\chatSessions\\65edd8cc-09fd-4f0f-8995-0348e6f079a9.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Frontend/UI",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c9d1fbe2d556985177fcb31e23555cf2\\chatSessions\\2c9de8a8-7be7-48ef-8445-7635fa412c88.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f7ef3289b85b6523d43c374872334741\\chatSessions\\4022e3a9-4696-494c-a520-03005beed52d.json": {
+      "autoTopicsOverride": [
+        "Git",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d95bc806ced0f96fb20811df35f94abf\\chatSessions\\0fc74938-4335-4ac2-a632-fb40e0882632.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f640b313bba138a12a6559545775dbb0\\chatSessions\\cb7e7fcd-7b75-47c1-b761-4d91b96bee80.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "Code Quality",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\503c3f4b-1d06-4e9f-8d09-75f92d20ba83.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Refactor/Maintenance",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "Code Quality",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\dcfc5606527c3ed08c3d14f9f469e74c\\chatSessions\\a6ee1725-149c-44a0-b0b1-c9b858fc9737.json": {
+      "autoTopicsOverride": [
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\6aecc6bd715112da3ff88ec1f0d0ed37\\chatSessions\\60ae2e41-9a04-4a69-a4ac-45eebb5109c2.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\224203690cf8ca1e735c796cf472debd\\chatSessions\\bfe6d694-a3d6-48e3-9cf6-613ec8b91d67.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\10ff76de78b9646d35b5e4108ce6b860\\chatSessions\\7a194215-e8df-48d2-9ce5-f6d059654048.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\00ebf148b082377a354c6fb92d2e122c\\chatSessions\\79619c35-7ece-49c5-8a2c-32aadc71abec.json": {
+      "autoTopicsOverride": [
+        "WASM/Rust"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0467b2e920814512eca247e155621588\\chatSessions\\13dbd1da-5c1b-4d19-981a-895cfc525061.json": {
+      "autoTopicsOverride": [
+        "VS Code Extension",
+        "TypeScript/Node",
+        "State Management"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d95bc806ced0f96fb20811df35f94abf\\chatSessions\\71a06bc4-929d-4e75-8e36-55e05f0d9f0b.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\7b3c13905ace7f7357fa718631720ef3\\chatSessions\\921b07b6-2d7e-4171-854d-e7bf895712f7.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f50e8e6ffc0ec02263bc8a5d971709c5\\chatSessions\\b69fb1cc-91a8-4f9c-8991-5eb4679a34d7.json": {
+      "autoTopicsOverride": [
+        "MCP/Tools"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\f938b293-17db-416f-9789-c09427e92cf0.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\124945d6-1976-4a75-a0d3-def4c822bdd5.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "WASM/Rust",
+        "State Management",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b2d6980cba2f0f128457f1537eeb8eba\\chatSessions\\e77f0d7b-f524-428e-9169-58a47ef34ba9.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Performance",
+        "WASM/Rust",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\33bc81fd-26f6-4e16-af1e-7063d1c35eeb.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Git",
+        "API Integration",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\33bc81fd-26f6-4e16-af1e-7063d1c35eeb.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Git",
+        "API Integration",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\506a5f2632c1258cafc6c6f001751df9\\chatSessions\\c25fbd12-63c9-4dae-9718-28fec73f2a81.json": {
+      "autoTopicsOverride": [
+        "Debugging"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f7ef3289b85b6523d43c374872334741\\chatSessions\\862d95b3-1651-4101-b947-493acfebe13c.json": {
+      "autoTopicsOverride": [
+        "Team Insights",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\48899a15-5022-4753-bf7c-127f3d54c894.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\f6b2b052-cdd3-4fbc-8c10-2235624c9ebd.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Git",
+        "API Integration",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Team Insights",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\f6b2b052-cdd3-4fbc-8c10-2235624c9ebd.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Git",
+        "API Integration",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Team Insights",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\ceff747e-5dde-467e-80ae-322ded94da9f.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "VS Code Extension",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\ceff747e-5dde-467e-80ae-322ded94da9f.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "VS Code Extension",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\044a02a2-ef7d-4e3f-bb55-2df1b27003f4.json": {
+      "autoTopicsOverride": [
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\18584945-91f5-4fbe-bce9-fc5e384d73b8.json": {
+      "autoTopicsOverride": [
+        "Refactor/Maintenance"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4e4121f0c7f4b92c6d74297e95d8146c\\chatSessions\\7951861c-091d-4382-9fe1-14906369bfc4.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Git",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "State Management",
+        "Team Insights",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\1b403a8d-bdfd-4e95-8659-18625407cb07.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\cd95085e27ec39af4950fb52798788eb\\chatSessions\\b8645412-e557-44fa-870d-dafcccaa78ad.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Refactor/Maintenance",
+        "VS Code Extension",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d95bc806ced0f96fb20811df35f94abf\\chatSessions\\c7d18d42-1203-4817-b487-1bcd468fb69d.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b9b4ab92126b69f9511416483d9e2f78\\chatSessions\\a09f98e0-751a-4db5-998b-8702b7891b66.json": {
+      "autoTopicsOverride": [
+        "Performance",
+        "WASM/Rust"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\a553c198-1e04-429d-9e75-c875c6af2e72.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\a553c198-1e04-429d-9e75-c875c6af2e72.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\ad67628d-4f5b-4be3-b744-b7fa6c246f4a.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\ad67628d-4f5b-4be3-b744-b7fa6c246f4a.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\7478ca26-8419-43e1-bea4-0dcfd79cd09f.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Frontend/UI",
+        "Data Storage",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\7478ca26-8419-43e1-bea4-0dcfd79cd09f.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Frontend/UI",
+        "Data Storage",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\b3ec5f7f032b2a57abc075571f6d302b\\chatSessions\\83e5ec43-1bd2-4bdb-af7c-199bd54387d3.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\1d742c1f-1fca-44a9-a8ed-9415322ade44.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "Dependencies",
+        "Refactor/Maintenance",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "WASM/Rust",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\36e02daa8c518139954f237bd7d732b6\\chatSessions\\ec651967-c7ed-404f-aa89-b3b12433c822.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\21707bddb509c2b3d31a9f46b375d07d\\chatSessions\\3f40db4a-2425-4a21-833b-aa779b7ae2b1.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Refactor/Maintenance",
+        "Frontend/UI",
+        "TypeScript/Node",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c651ab54c7ffaa9a2b110341cf4d788e\\chatSessions\\8a8a03b3-e592-4c04-92cb-22c3f4b42e38.json": {
+      "autoTopicsOverride": [
+        "Git",
+        "Refactor/Maintenance",
+        "Frontend/UI"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1a00fcee035691f935f02accc4225bc5\\chatSessions\\b3ec2b38-1b8b-4a02-9de4-ab7aba233b82.json": {
+      "autoTopicsOverride": [
+        "VS Code Extension",
+        "Frontend/UI",
+        "WASM/Rust",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4e4121f0c7f4b92c6d74297e95d8146c\\chatSessions\\edf727e0-2d10-49f3-8c16-ce5c46dd5bb7.json": {
+      "autoTopicsOverride": [
+        "Data Storage",
+        "TypeScript/Node",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\8781885d-fb94-4942-8cb9-135c00571aca.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Data Storage",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\cd95085e27ec39af4950fb52798788eb\\chatSessions\\c798aa9f-8548-4b3d-9184-6388552b8bfc.json": {
+      "autoTopicsOverride": [
+        "Git"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\ef9d4d2c-d9c7-4c1e-993c-fc13420bee14.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\ef9d4d2c-d9c7-4c1e-993c-fc13420bee14.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\e4239607e9a0998d362dcdb4e9e939ba\\chatSessions\\f90364ad-f9ad-45dc-8842-6158c8b73427.json": {
+      "autoTopicsOverride": [
+        "Git",
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\aedb99795e7779f6097316be6d09c856\\chatSessions\\f346a53c-eec5-4248-a001-d78b55d1167a.json": {
+      "autoTopicsOverride": [
+        "Git",
+        "Security/Auth",
+        "State Management"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\0efa891d-4aab-449b-8972-67a72a1c9e8b.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\0efa891d-4aab-449b-8972-67a72a1c9e8b.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\d82194a8-54f7-4567-a0b1-0abb97562a59.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\d82194a8-54f7-4567-a0b1-0abb97562a59.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\dae6e89d-affb-434d-964a-d4c3dd66ad74.json": {
+      "autoTopicsOverride": [
+        "State Management",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\d7a32459-cd4b-4f0d-b1a7-fba681e70167.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\3465525c-704a-4b32-9c52-980c627f0a07.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "State Management",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\3465525c-704a-4b32-9c52-980c627f0a07.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "State Management",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\25e65044-739e-4359-9a73-9b3837b81c77.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\25e65044-739e-4359-9a73-9b3837b81c77.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\22deb46b04884627e70c94e89032d4aa\\chatSessions\\1e9ec2d3-f14d-4a3c-acf2-75a3fd80c340.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\a533c7164716c31deec2ec44e15c0f40\\chatSessions\\1e9ec2d3-f14d-4a3c-acf2-75a3fd80c340.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\a14f3b49-60d4-4b0b-b0b5-39b963a7b551.json": {
+      "autoTopicsOverride": [
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\eb0988cc-2dd1-4cae-a114-fd9c21934cf0.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\abadba28-3cfe-4009-b1d2-07ff663db332.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\77d428a3-ca54-43a8-83cb-e55b6cf0479b.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "State Management",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\2ca54470-dadc-4bbe-8d66-049f4abd4526.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Security/Auth",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\ee0be6a7-375a-44ac-b337-b51008ab4a26.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "API Integration",
+        "Performance",
+        "State Management",
+        "Real-time & Messaging",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\8adfac1f-8bc2-49f8-a237-f347c8b07fc4.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\b353fa54-4b2c-4d3b-a9fb-92ea45389ef3.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Logging & Monitoring",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\ca2756e6-bad6-4a77-8991-0eee149e8628.json": {
+      "autoTopicsOverride": [
+        "Refactor/Maintenance",
+        "Security/Auth",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\adcfa077b8959b25cefa8b40986e5301\\chatSessions\\e19aa3b8-6dcf-432a-8abc-7d2bdb5f5a16.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d55278d27bc818c4921bfa3ee76345c8\\chatSessions\\5d4cc647-4173-48be-945a-617b0641b60a.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Cloud Platforms",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1a00fcee035691f935f02accc4225bc5\\chatSessions\\271ee80e-c1e2-418f-81bb-694451097bae.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Frontend/UI",
+        "TypeScript/Node",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\3bf6b3d7-41b4-4831-a0ad-ade836bc119d.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Frontend/UI",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Code Quality",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\4f6359220fa58a349d7019fd741adfba\\chatSessions\\538cfd47-a167-43e4-8c0e-afa54aa2cb18.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Code Quality",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\749c240d-e0d2-45aa-87fc-2396ab5503a8.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Git",
+        "Refactor/Maintenance",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "State Management",
+        "Cloud Platforms",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\2eb9ed9476e6be98fa1995214a961241\\chatSessions\\11d4e8a3-52e8-4525-a6a2-85dcd70b7485.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "Data Storage",
+        "Performance",
+        "Cloud Platforms",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\5e9194d55e3464656581bf8873124398\\chatSessions\\0f1d27c4-cc3d-415b-80aa-0da30060828f.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "API Integration",
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\e726e8446d26a0b3c37e33671e157be4\\chatSessions\\7a6abe8f-5109-4c9d-86ae-3bbca54cbde7.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\e726e8446d26a0b3c37e33671e157be4\\chatSessions\\06f66c09-4a7b-4077-ba67-cd78f898bf36.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d55278d27bc818c4921bfa3ee76345c8\\chatSessions\\62a251c5-b3ed-48ef-8710-cd30fcc4dc0a.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\225220044616762d6d91250aad3e57a9\\chatSessions\\b0d28784-dc92-4db1-8c36-bcb4c538e805.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Refactor/Maintenance",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "WASM/Rust",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\2bed0099-9218-4305-9eeb-80883ea4c2bd.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Data Storage",
+        "State Management"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\33155dac-fea3-4a48-9115-4754fc3f50e0.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Data Storage",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\666ea7e0-cf2a-43d4-8318-e50d6787679e.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\09a7af6e2bd7128a7875c8d50ed00a06\\chatSessions\\78e4cc45-92c2-4fa6-a006-d5cac79ac41b.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Frontend/UI",
+        "Data Storage",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\225220044616762d6d91250aad3e57a9\\chatSessions\\93632307-f77d-4127-9ac2-99927c57eaa5.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Refactor/Maintenance",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c651ab54c7ffaa9a2b110341cf4d788e\\chatSessions\\cf560a27-88b9-4465-931a-670e9992b498.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\225220044616762d6d91250aad3e57a9\\chatSessions\\43f80cb9-9b37-41b5-8bdd-3b4ac9c4d0a6.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "VS Code Extension",
+        "API Integration",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\4b1dbb7d-317e-4995-9c3d-785bd9ca44b8.json": {
+      "autoTopicsOverride": [
+        "TypeScript/Node"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\a3c5e580-d54f-45e8-8de5-77d6a543dbe7.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\8fe11330-8aee-4ab4-b491-34cd9d7b4222.json": {
+      "autoTopicsOverride": [
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\69374a90-9349-40b3-8382-bb39b8c489d5.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Git",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c4192be51a7752683987a0156946405b\\chatSessions\\4b389792-4886-41c5-8e63-8312adcfcd21.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c4192be51a7752683987a0156946405b\\chatSessions\\dfe7f1f6-3079-495a-93bc-f3b0888c129a.json": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\c4192be51a7752683987a0156946405b\\chatSessions\\2eae0f16-a5ae-4751-9679-f8d0c04fc79e.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0665e9afabbdf578797448c80479748c\\chatSessions\\4f3054eb-8907-4fc8-a142-cdf3758b527d.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "API Integration",
+        "Data Storage",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\37ceb48c-ea15-4c6b-bfde-66dd9fabd1e1.json": {
+      "autoTopicsOverride": [
+        "State Management",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\4a34f797-df50-4e31-8c3d-5b33c3c70b7b.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\b476c07f-6738-4304-9270-57ec50a23174.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Logging & Monitoring",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\62ccb0e7d680d343c7c3534ff97b7f84\\chatSessions\\b023e7fd-afb2-41f2-815e-fba89e0d377f.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "MCP/Tools",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\7b68205b-c719-4526-a744-2376292cd114.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Refactor/Maintenance",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\1b72d3e7-9bfe-4d17-944c-b273ce81c015.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Git",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ab72de3e74ae80348556bc4bf963fb28\\chatSessions\\72dd16d6-cf54-42cf-b589-df3a5c744da8.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Git",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "State Management",
+        "Cloud Platforms",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\e95aa3d1-ef00-43f4-a0d7-ba053b152295.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Refactor/Maintenance",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "WASM/Rust",
+        "TypeScript/Node",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d12439049939ce0664805233b5b9f893\\chatSessions\\6fb97226-6ce1-4b01-8380-9a8aa90c2000.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f5a15dfd4ded1cd4793c7819dd6db640\\chatSessions\\2e33413a-836e-485d-997e-b1553b33ac88.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "Multi-Source Ingestion",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\f5a15dfd4ded1cd4793c7819dd6db640\\chatSessions\\1a223f32-0bef-4af9-9824-022a3c446f77.json": {
+      "autoTopicsOverride": [
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\0108843ddcc78659fc1bcde7600737ba\\chatSessions\\b71bd5d0-c9d8-45cf-a4da-c4e80c2de50f.json": {
+      "autoTopicsOverride": [
+        "State Management"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\cad0b89d4e2eeac056e337e2cccefbfa\\chatSessions\\3791c300-db58-449b-b320-1781db271681.json": {
+      "autoTopicsOverride": [
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\225220044616762d6d91250aad3e57a9\\chatSessions\\bee8c5c4-5f41-4b77-9935-a13601bf175a.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "VS Code Extension",
+        "API Integration",
+        "Security/Auth",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\cad0b89d4e2eeac056e337e2cccefbfa\\chatSessions\\e7fe74e9-811b-4525-916e-58f825cb0791.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "State Management",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\cad0b89d4e2eeac056e337e2cccefbfa\\chatSessions\\edd01803-7eeb-4e15-a97a-795ffb33760d.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Build Tooling",
+        "API Integration",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\cad0b89d4e2eeac056e337e2cccefbfa\\chatSessions\\718a204e-04cb-44f5-b847-cd14db125571.json": {
+      "autoTopicsOverride": [
+        "Build Tooling",
+        "State Management",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\225220044616762d6d91250aad3e57a9\\chatSessions\\553626fb-4c0e-4b41-8e13-6ea050575b4a.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "CI/CD",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\2b3a2ac5-d2f1-4c53-acad-a942ea0ae212.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "Performance",
+        "TypeScript/Node",
+        "Code Quality",
+        "Logging & Monitoring",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\0ccc8c1b-4656-4f96-bae2-708efa59fbc1.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d95bc806ced0f96fb20811df35f94abf\\chatSessions\\0997c003-45dd-485b-8fb1-10b3625241a6.json": {
+      "autoTopicsOverride": [
+        "Frontend/UI",
+        "API Integration",
+        "Multi-Source Ingestion"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\e03ef0e2-0fa5-4015-a50d-88883e687ad8.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Git",
+        "Refactor/Maintenance",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Security/Auth",
+        "TypeScript/Node",
+        "State Management",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\b84255a0-4313-49e9-97e1-299c06f517bb.json": {
+      "autoTopicsOverride": [
+        "Testing",
+        "Frontend/UI",
+        "TypeScript/Node",
+        "Multi-Source Ingestion",
+        "Audit/Review"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\2b381b5b-9113-4967-aa23-134e10cbeb4a.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Data Storage",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "Multi-Source Ingestion",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\1e090ee1-9c19-4de1-ada0-9814e1a5eca3.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "VS Code Extension",
+        "Frontend/UI",
+        "API Integration",
+        "Security/Auth",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\1e3ee4f3-e5a5-47e7-b906-4d7062ffa6fc.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Dependencies",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\10ac1793-375c-412f-bfc8-5400a5056d92.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "Git",
+        "Refactor/Maintenance",
+        "Frontend/UI",
+        "API Integration",
+        "Data Storage",
+        "Performance",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\1222d98c152f30b305ca314fbe4787af\\chatSessions\\7a0bfe9e-baf6-4b18-8446-f7715cb425ea.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "Build Tooling",
+        "CI/CD",
+        "Dependencies",
+        "Git",
+        "Refactor/Maintenance",
+        "VS Code Extension",
+        "API Integration",
+        "Data Storage",
+        "TypeScript/Node",
+        "Logging & Monitoring",
+        "State Management",
+        "Real-time & Messaging",
+        "MCP/Tools",
+        "Multi-Source Ingestion",
+        "Team Insights",
+        "Audit/Review",
+        "Docs/Planning"
+      ]
+    },
+    "C:\\Users\\micha\\AppData\\Roaming\\Code\\User\\workspaceStorage\\d95bc806ced0f96fb20811df35f94abf\\chatSessions\\1cdd8c84-fbce-48d0-bfa8-b38dad70ff75.json": {
+      "autoTopicsOverride": [
+        "Debugging",
+        "Testing",
+        "CI/CD",
+        "TypeScript/Node",
+        "State Management"
+      ]
+    }
+  },
+  "userTopicColors": {}
+}
