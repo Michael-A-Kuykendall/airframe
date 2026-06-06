@@ -98,8 +98,9 @@ async fn verify_final_norm_algebraic_isolation() -> Result<(), Box<dyn std::erro
         RMSNormParams {
             count: dim as u32,
             weights_offset: 0,
+            bias_offset: 0,
             eps,
-            padding: 0,
+            norm_type: 0,
         },
     );
 

@@ -261,6 +261,10 @@ impl BindlessMetadata {
                     attn_q_bias: attn_q_bias_off,
                     attn_k_bias: attn_k_bias_off,
                     attn_v_bias: attn_v_bias_off,
+                    // For Q4_K_M mixed quantization: determine if V and ffn_down are Q4_K or Q6_K
+                    // Q4_K = type 12, Q6_K = type 14
+                    v_is_q4k: if t(&tensor_types, layer_idx, "attn_v.weight") == 12 { 1 } else { 0 },
+                    ffn_down_is_q4k: if t(&tensor_types, layer_idx, "ffn_down.weight") == 12 { 1 } else { 0 },
                 };
                 let lqt_down = t(&tensor_types, layer_idx, "ffn_down.weight");
                 // bits 24-31: attn_output.weight type — used by main_attn_proj and main_ffn_proj.
@@ -348,6 +352,9 @@ impl BindlessMetadata {
             attn_q_bias: self.tensor_offsets.get(&format!("blk.{}.attn_q.bias", layer_idx)).copied().unwrap_or(0) as u32,
             attn_k_bias: self.tensor_offsets.get(&format!("blk.{}.attn_k.bias", layer_idx)).copied().unwrap_or(0) as u32,
             attn_v_bias: self.tensor_offsets.get(&format!("blk.{}.attn_v.bias", layer_idx)).copied().unwrap_or(0) as u32,
+            // For Q4_K_M mixed quantization: determine if V and ffn_down are Q4_K or Q6_K
+            v_is_q4k: self.tensor_types.get(&format!("blk.{}.attn_v.weight", layer_idx)).map(|&t| if t == 12 { 1 } else { 0 }).unwrap_or(0),
+            ffn_down_is_q4k: self.tensor_types.get(&format!("blk.{}.ffn_down.weight", layer_idx)).map(|&t| if t == 12 { 1 } else { 0 }).unwrap_or(0),
         })
     }
 }

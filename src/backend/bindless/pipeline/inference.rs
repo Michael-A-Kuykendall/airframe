@@ -166,6 +166,9 @@ impl BindlessPipeline {
             .unwrap_or(weight_quant_type);
         let packed_quant_type =
             weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
+        
+        // Q4_K uses different shader pipelines (type 12)
+        let use_q4k_pipeline = weight_quant_type == 12;
         let _ = packed_quant_type; // per-layer quant is computed in the loop below
 
         // 1. Buffers
@@ -604,6 +607,7 @@ impl BindlessPipeline {
         let kv_len = params_base.head_count_kv * params_base.head_dim;
         let total_qkv = q_len + kv_len * 2;
         let wg_qkv = (total_qkv + 255) / 256;
+        let wg_qknorm = (params_base.head_dim + 255) / 256;
         let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
@@ -625,13 +629,46 @@ impl BindlessPipeline {
             // Each kernel in its own compute pass to guarantee memory barriers
             // (matches layer.rs ordering). PostAttnNorm and PostFfwNorm are no-ops
             // when params.post_norm_enabled == 0 (non-Gemma models).
+            // Select pipeline based on quantization type (Q4_K vs Q4_0/F16)
+            // Note: Q4_K shader only has qkv, attn_out, attn_proj, post_attn_norm, ffn_proj, ffn_down, post_ffn_norm
+            //       It does NOT have: attn_norm, qk_norm, ffn_norm, post_ffw_norm - use V1 for those
+            let (pipe_attn_norm, pipe_qkv, pipe_qk_norm, pipe_attn_out, pipe_attn_proj, 
+                 pipe_post_attn_norm, pipe_ffn_norm, pipe_ffn_proj, 
+                 pipe_ffn_down, pipe_post_ffw_norm) = if use_q4k_pipeline {
+                (
+                    &self.layer_pipeline_attn_norm, // Q4K: Use V1 (no main_attn_norm in Q4K shader)
+                    &self.layer_pipeline_q4k_qkv,
+                    &self.layer_pipeline_qk_norm,   // Q4K: Use V1 (no main_qk_norm in Q4K shader)
+                    &self.layer_pipeline_q4k_attn_out,
+                    &self.layer_pipeline_q4k_attn_proj,
+                    &self.layer_pipeline_q4k_post_attn_norm,
+                    &self.layer_pipeline_ffn_norm,  // Q4K: Use V1 (no main_ffn_norm in Q4K shader)
+                    &self.layer_pipeline_q4k_ffn_proj,
+                    &self.layer_pipeline_q4k_ffn_down,
+                    &self.layer_pipeline_post_ffw_norm, // Q4K: Use V1 (no main_post_ffw_norm in Q4K shader)
+                )
+            } else {
+                (
+                    &self.layer_pipeline_attn_norm,
+                    &self.layer_pipeline_qkv,
+                    &self.layer_pipeline_qk_norm,
+                    &self.layer_pipeline_attn_out,
+                    &self.layer_pipeline_attn_proj,
+                    &self.layer_pipeline_post_attn_norm,
+                    &self.layer_pipeline_ffn_norm,
+                    &self.layer_pipeline_ffn_proj,
+                    &self.layer_pipeline_ffn_down,
+                    &self.layer_pipeline_post_ffw_norm,
+                )
+            };
+            
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - AttnNorm", i)),
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_attn_norm);
+                cpass.set_pipeline(pipe_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             {
@@ -640,8 +677,17 @@ impl BindlessPipeline {
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_qkv);
+                cpass.set_pipeline(pipe_qkv);
                 cpass.dispatch_workgroups(wg_qkv, batch_size, 1);
+            }
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(&format!("Loop Layer {} - QKNorm", i)),
+                    timestamp_writes: None,
+                });
+                cpass.set_bind_group(0, bg, &[]);
+                cpass.set_pipeline(pipe_qk_norm);
+                cpass.dispatch_workgroups(wg_qknorm, batch_size, 1);
             }
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -649,7 +695,7 @@ impl BindlessPipeline {
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_attn_out);
+                cpass.set_pipeline(pipe_attn_out);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             {
@@ -658,7 +704,7 @@ impl BindlessPipeline {
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_attn_proj);
+                cpass.set_pipeline(pipe_attn_proj);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             {
@@ -668,7 +714,7 @@ impl BindlessPipeline {
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_post_attn_norm);
+                cpass.set_pipeline(pipe_post_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             {
@@ -677,7 +723,7 @@ impl BindlessPipeline {
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_ffn_norm);
+                cpass.set_pipeline(pipe_ffn_norm);
                 // One workgroup per token: cooperative reduction inside the workgroup.
                 // X=1 because all 256 threads share one token via local_invocation_id.
                 cpass.dispatch_workgroups(1, batch_size, 1);
@@ -688,7 +734,7 @@ impl BindlessPipeline {
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_ffn_proj);
+                cpass.set_pipeline(pipe_ffn_proj);
                 cpass.dispatch_workgroups(wg_ffn, batch_size, 1);
             }
             {
@@ -697,7 +743,7 @@ impl BindlessPipeline {
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_ffn_down);
+                cpass.set_pipeline(pipe_ffn_down);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             {
@@ -707,7 +753,7 @@ impl BindlessPipeline {
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_post_ffw_norm);
+                cpass.set_pipeline(pipe_post_ffw_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
 

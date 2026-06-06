@@ -126,6 +126,17 @@ fn u8_to_i8(v: u32) -> i32 {
 }
 
 // -------------------------------------------------------------------------
+// Kernel 0: Attention RMSNorm Provider (stub - uses V1 shader at runtime)
+// -------------------------------------------------------------------------
+// This is a placeholder since Q4_K uses V1's attn_norm at runtime.
+// Required for pipeline compilation to succeed.
+@compute @workgroup_size(256, 1, 1)
+fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    // No-op: actual attn_norm is handled by V1 pipeline
+    // This function exists only to satisfy pipeline compilation
+}
+
+// -------------------------------------------------------------------------
 // Kernel 1: QKV Generation + Cache Update  (Q4_K for Q/K, Q6_K for V)
 // -------------------------------------------------------------------------
 @compute @workgroup_size(256, 1, 1)
@@ -326,6 +337,14 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 
 // -------------------------------------------------------------------------
+// Kernel 1.5: QK Norm (stub - uses V1 shader at runtime)
+// -------------------------------------------------------------------------
+@compute @workgroup_size(256, 1, 1)
+fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    // No-op: actual qk_norm is handled by V1 pipeline
+}
+
+// -------------------------------------------------------------------------
 // Kernel 2: Attention (unchanged — no weight access, pure KV-cache arithmetic)
 // -------------------------------------------------------------------------
 @compute @workgroup_size(256, 1, 1)
@@ -491,6 +510,17 @@ fn main_post_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let norm_w   = get_f32_at(offsets.post_attn_norm + idx * 4u);
         activation_in[act_base + idx] = residual + attn_out * rms_inv * norm_w;
     }
+}
+
+// -------------------------------------------------------------------------
+// Kernel 2.5: FFN Norm (stub - uses V1 shader at runtime)
+// -------------------------------------------------------------------------
+@compute @workgroup_size(256, 1, 1)
+fn main_ffn_norm(
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(global_invocation_id) gid: vec3<u32>,
+) {
+    // No-op: actual ffn_norm is handled by V1 pipeline
 }
 
 // -------------------------------------------------------------------------

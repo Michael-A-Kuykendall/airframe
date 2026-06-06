@@ -106,6 +106,7 @@ async fn test_f8_gpu_ffn_verification() -> Result<(), Box<dyn std::error::Error>
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
         head_dim: (spec.n_embd / spec.n_head) as u32,
+        rope_dim: spec.rope_dim as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: 5632,
         temp_stride: 16384,
@@ -113,6 +114,9 @@ async fn test_f8_gpu_ffn_verification() -> Result<(), Box<dyn std::error::Error>
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
+        layer_norm_enabled: 0,
+        ffn_kind_policy: 0,
+        qkv_layout_policy: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);

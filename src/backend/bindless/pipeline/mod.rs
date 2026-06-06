@@ -68,6 +68,8 @@ pub struct LayerOffsets {
     pub attn_q_bias: u32,      // byte offset of Q bias (F32) in GGUF blob (0 = disabled; Qwen2)
     pub attn_k_bias: u32,      // byte offset of K bias (F32) in GGUF blob (0 = disabled; Qwen2)
     pub attn_v_bias: u32,      // byte offset of V bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    pub v_is_q4k: u32,         // 1 if attn_v uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
+    pub ffn_down_is_q4k: u32,  // 1 if ffn_down uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
 }
 
 #[repr(C)]
@@ -162,6 +164,18 @@ pub struct BindlessPipeline {
     pub layer_pipeline_post_attn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_post_ffw_norm: wgpu::ComputePipeline,
     pub layer_layout: wgpu::BindGroupLayout,
+
+    // Q4_K Layer Pipelines (for Q4_K quantized weights - StarCoder2, phi-2, Qwen3-0.6B)
+    pub layer_layout_q4k: wgpu::BindGroupLayout,
+    pub layer_pipeline_q4k_attn_norm: wgpu::ComputePipeline,
+    pub layer_pipeline_q4k_qkv: wgpu::ComputePipeline,
+    pub layer_pipeline_q4k_attn_out: wgpu::ComputePipeline,
+    pub layer_pipeline_q4k_attn_proj: wgpu::ComputePipeline,
+    pub layer_pipeline_q4k_post_attn_norm: wgpu::ComputePipeline,
+    pub layer_pipeline_q4k_ffn_norm: wgpu::ComputePipeline,
+    pub layer_pipeline_q4k_ffn_proj: wgpu::ComputePipeline,
+    pub layer_pipeline_q4k_ffn_down: wgpu::ComputePipeline,
+    pub layer_pipeline_q4k_post_ffw_norm: wgpu::ComputePipeline,
 
     // Blob-based LM head pipeline (quantized matmul, reads directly from GGUF blob)
     pub lm_head_blob_pipeline: wgpu::ComputePipeline,
@@ -732,6 +746,63 @@ impl BindlessPipeline {
         let layer_pipeline_post_attn_norm = mk_pipeline("main_post_attn_norm");
         let layer_pipeline_post_ffw_norm = mk_pipeline("main_post_ffw_norm");
 
+        // --- Q4_K Layer Pipelines ---
+        // For models with Q4_K quantized weights (StarCoder2, phi-2, Qwen3-0.6B)
+        // Q4_K has different dequantization logic than Q4_0 in the layer kernels.
+        // NOTE: Layout must match V1 layer_layout for bind group compatibility
+        let layer_layout_q4k = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Layer Q4_K Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 6, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 7, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 8, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 9, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 10, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 11, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            ],
+        });
+
+        let q4k_layer_src = include_str!("../sh_layer_q4k.wgsl");
+        let q4k_layer_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Layer Q4_K Shader"),
+            source: wgpu::ShaderSource::Wgsl(q4k_layer_src.into()),
+        });
+
+        let q4k_layer_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Layer Q4_K Pipeline Layout"),
+            bind_group_layouts: &[&layer_layout_q4k],
+            push_constant_ranges: &[],
+        });
+
+        let mk_q4k_pipeline = |entry: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(&format!("Layer Q4_K Pipeline ({})", entry)),
+                layout: Some(&q4k_layer_pipeline_layout),
+                module: &q4k_layer_shader,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        // Note: Q4_K shader doesn't have main_attn_norm - we use V1 attn_norm instead
+        let _layer_pipeline_q4k_attn_norm = mk_q4k_pipeline("main_attn_norm"); // placeholder, not used
+        let layer_pipeline_q4k_qkv = mk_q4k_pipeline("main_qkv");
+        let layer_pipeline_q4k_attn_out = mk_q4k_pipeline("main_attn_out");
+        let layer_pipeline_q4k_attn_proj = mk_q4k_pipeline("main_attn_proj");
+        let layer_pipeline_q4k_post_attn_norm = mk_q4k_pipeline("main_post_attn_norm");
+        let layer_pipeline_q4k_ffn_norm = mk_q4k_pipeline("main_ffn_norm");
+        let layer_pipeline_q4k_ffn_proj = mk_q4k_pipeline("main_ffn_proj");
+        let layer_pipeline_q4k_ffn_down = mk_q4k_pipeline("main_ffn_down");
+        // NOTE: Q4_K shader does NOT have main_post_ffw_norm (it has main_post_ffn_norm but that's different).
+        // Q4_K models use V1's post_ffw_norm pipeline at runtime (see inference.rs dispatch).
+
         // --- LM Head (blob-based quantized matmul) ---
         // Layout: binding 0 = blob_0, 1 = act_in (read), 2 = logits (write), 3 = params,
         //         10 = blob_1, 11 = blob_2
@@ -963,8 +1034,19 @@ impl BindlessPipeline {
             layer_pipeline_ffn_proj,
             layer_pipeline_ffn_down,
             layer_pipeline_post_attn_norm,
-            layer_pipeline_post_ffw_norm,
+            layer_pipeline_post_ffw_norm: layer_pipeline_post_ffw_norm.clone(),
             layer_layout,
+            // Q4_K pipelines
+            layer_layout_q4k,
+            layer_pipeline_q4k_attn_norm: _layer_pipeline_q4k_attn_norm, // placeholder, V1 used instead
+            layer_pipeline_q4k_qkv,
+            layer_pipeline_q4k_attn_out,
+            layer_pipeline_q4k_attn_proj,
+            layer_pipeline_q4k_post_attn_norm,
+            layer_pipeline_q4k_ffn_norm,
+            layer_pipeline_q4k_ffn_proj,
+            layer_pipeline_q4k_ffn_down,
+            layer_pipeline_q4k_post_ffw_norm: layer_pipeline_post_ffw_norm.clone(),
             lm_head_blob_pipeline,
             lm_head_blob_layout,
             layer_layout_int4,
