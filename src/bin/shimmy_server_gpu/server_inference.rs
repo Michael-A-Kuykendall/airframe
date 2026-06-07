@@ -176,7 +176,7 @@ impl TraceConfig {
             max_steps: req
                 .debug_trace_max_steps
                 .or_else(|| env_usize("SHIMMY_INFERENCE_TRACE_MAX_STEPS"))
-                .or_else(|| {
+                .or({
                     if trace_light_mode {
                         Some(4)
                     } else if profile_active {
@@ -185,7 +185,7 @@ impl TraceConfig {
                         None
                     }
                 }),
-            top_k: env_usize("SHIMMY_INFERENCE_TRACE_TOPK").unwrap_or_else(|| {
+            top_k: env_usize("SHIMMY_INFERENCE_TRACE_TOPK").unwrap_or({
                 if trace_light_mode {
                     8
                 } else if profile_active {
@@ -206,13 +206,13 @@ impl TraceConfig {
         if step_index < self.start_step {
             return false;
         }
-        self.max_steps.map_or(true, |limit| {
+        self.max_steps.is_none_or(|limit| {
             step_index.saturating_sub(self.start_step) < limit
         })
     }
 
     fn should_capture_layer(&self, layer_idx: usize) -> bool {
-        self.focus_layer.map_or(true, |focus| focus == layer_idx)
+        self.focus_layer.is_none_or(|focus| focus == layer_idx)
     }
 }
 
@@ -489,7 +489,7 @@ fn run_inference_completion(
         prompt_tokens = prior_tokens
             .iter()
             .copied()
-            .chain(prompt_tokens.into_iter())
+            .chain(prompt_tokens)
             .collect();
     }
 
@@ -574,7 +574,7 @@ fn run_inference_completion(
 
     // Guard: reject requests that would overflow the KV cache.
     // prompt_tokens must leave at least 1 slot for decode; n_ctx is the hard limit.
-    if prompt_tokens.len() >= spec.n_ctx as usize {
+    if prompt_tokens.len() >= spec.n_ctx {
         return Err(format!(
             "prompt too long: {} tokens >= max context {} \
              (reduce prompt or increase SHIMMY_MAX_CTX)",
@@ -819,7 +819,7 @@ fn run_inference_completion(
 
                 let (cache_len_after, window_base_after) = {
                     let mut cache = kv_cache.lock().unwrap();
-                    cache.increment().map_err(|e| e)?;
+                    cache.increment()?;
                     (cache.get_seq_len(), cache.get_window_base())
                 };
 
@@ -879,7 +879,7 @@ fn run_inference_completion(
             {
                 let mut cache = kv_cache.lock().unwrap();
                 for _ in 0..kv_advance_a {
-                    cache.increment().map_err(|e| e)?;
+                    cache.increment()?;
                 }
                 if cache.is_int4() {
                     pipeline.requantize_all_kv_int4(
@@ -922,7 +922,7 @@ fn run_inference_completion(
         {
             let mut cache = kv_cache.lock().unwrap();
             for _ in 0..kv_advance_b {
-                cache.increment().map_err(|e| e)?;
+                cache.increment()?;
             }
             if cache.is_int4() {
                 pipeline.requantize_all_kv_int4(
@@ -1225,7 +1225,7 @@ fn run_inference_completion(
 
         {
             let mut cache = kv_cache.lock().unwrap();
-            cache.increment().map_err(|e| e)?;
+            cache.increment()?;
         }
 
         let normed_output = if disable_output_norm {

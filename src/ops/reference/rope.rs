@@ -127,7 +127,7 @@ pub fn apply_rope_scaled_f32(
 /// Apply RoPE to 3D tensor data in-place
 fn apply_rope_3d(
     data: &mut [f32],
-    _seq_len: usize,
+    seq_len: usize,
     n_head: usize,
     head_dim: usize,
     position_ids: &[usize],

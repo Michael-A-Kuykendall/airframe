@@ -141,7 +141,7 @@ impl Monitor {
             println!("Time(s), GPU_Util(%), Mem_Used(MB)");
             while r_clone.load(Ordering::Relaxed) {
                 let output = Command::new("nvidia-smi")
-                    .args(&[
+                    .args([
                         "--query-gpu=utilization.gpu,memory.used",
                         "--format=csv,noheader,nounits",
                     ])
@@ -311,7 +311,7 @@ impl GpuEvalEngine {
 
         let model = BindlessModel::load_from_disk(&device, path, Some(&spec));
         let pipeline = BindlessPipeline::new(&device);
-        let weights_f32 = load_output_head_f32_override(path, &model, &device, &spec)?;;
+        let weights_f32 = load_output_head_f32_override(path, &model, &device, &spec)?;
         let kv_size_per_buffer = spec.kv_cache_size_per_layer as u64;
         let mut kv_cache_k_layers = Vec::with_capacity(spec.n_layer);
         let mut kv_cache_v_layers = Vec::with_capacity(spec.n_layer);
@@ -987,7 +987,7 @@ async fn run_wikitext(
     let mut count = 0;
     let mut total_tokens = 0;
 
-    let benchmark_start = std::time::Instant::now();
+    let _benchmark_start = std::time::Instant::now();
 
     println!("=== PHASE 1: TOKENIZATION ===");
     let tokenization_start = std::time::Instant::now();
@@ -1090,7 +1090,7 @@ async fn run_wikitext(
 
     for (i, chunk) in chunks.iter().enumerate() {
         let chunk_start = std::time::Instant::now();
-        println!("");
+        println!();
         println!(
             ">>> STARTING CHUNK {}/{} ({} tokens)",
             i + 1,
@@ -1200,7 +1200,7 @@ async fn run_wikitext(
                 percent_complete, total_tokens, overall_tokens_per_sec, total_elapsed);
     }
 
-    println!("");
+    println!();
 
     if count == 0 {
         println!("No predictions were generated; skipping perplexity calculation.");
@@ -1980,7 +1980,7 @@ async fn run_hellaswag(
         }
 
         let context_text = format!("{} {}", sample.ctx_a, sample.ctx_b);
-        let context_tokens_u32 = tokenizer.encode(&context_text, true).unwrap_or(vec![]);
+        let context_tokens_u32 = tokenizer.encode(&context_text, true).unwrap_or_default();
         let context_tokens: Vec<usize> = context_tokens_u32.iter().map(|&t| t as usize).collect();
 
         let mut best_ending_idx = 0;
@@ -1991,7 +1991,7 @@ async fn run_hellaswag(
             let ending_with_space = format!(" {}", ending_text);
             let ending_tokens_u32 = tokenizer
                 .encode(&ending_with_space, false)
-                .unwrap_or(vec![]);
+                .unwrap_or_default();
             let ending_tokens: Vec<usize> = ending_tokens_u32.iter().map(|&t| t as usize).collect();
 
             if ending_tokens.is_empty() {
@@ -2169,7 +2169,7 @@ async fn run_arc(args: &Args, tokenizer: &Tokenizer, engine: &mut dyn EvalEngine
 
         // lm-eval-harness format: "Question: {question}\nAnswer:" (no choices listed)
         let question_prompt = format!("{}Question: {}\nAnswer:", few_shot_prefix, sample.question);
-        let prompt_tokens_u32 = tokenizer.encode(&question_prompt, true).unwrap_or(vec![]);
+        let prompt_tokens_u32 = tokenizer.encode(&question_prompt, true).unwrap_or_default();
         let prompt_tokens: Vec<usize> = prompt_tokens_u32.iter().map(|&t| t as usize).collect();
 
         // Score each choice by log-probability of its answer text
@@ -2179,7 +2179,7 @@ async fn run_arc(args: &Args, tokenizer: &Tokenizer, engine: &mut dyn EvalEngine
         for (i, choice_text) in sample.choices.text.iter().enumerate() {
             // Format answer as " A. <full text>" to match natural continuation
             let answer_text = format!(" {}", choice_text);
-            let answer_tokens_u32 = tokenizer.encode(&answer_text, false).unwrap_or(vec![]);
+            let answer_tokens_u32 = tokenizer.encode(&answer_text, false).unwrap_or_default();
             let answer_tokens: Vec<usize> = answer_tokens_u32.iter().map(|&t| t as usize).collect();
 
             if answer_tokens.is_empty() {

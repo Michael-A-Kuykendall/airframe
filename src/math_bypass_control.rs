@@ -88,8 +88,11 @@ impl InferenceControl for MathBypassControl {
 pub fn detect_and_compute(prompt: &str) -> Option<i64> {
     let lower = prompt.to_lowercase();
 
-    // (operator text, evaluator) — ordered so longer phrases match before substrings
-    let ops: &[(&str, fn(i64, i64) -> Option<i64>)] = &[
+    // Operation descriptor: (operator text, evaluator function)
+    type OpEntry<'a> = (&'a str, fn(i64, i64) -> Option<i64>);
+
+    // Ordered so longer phrases match before substrings
+    let ops: &[OpEntry] = &[
         ("multiplied by", |a, b| a.checked_mul(b)),
         ("divided by",    |a, b| if b == 0 { None } else { Some(a / b) }),
         ("added to",      |a, b| a.checked_add(b)),

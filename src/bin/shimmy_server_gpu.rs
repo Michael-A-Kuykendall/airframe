@@ -13,7 +13,6 @@ use std::sync::OnceLock;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
-use shimmyjinja;
 use std::fs;
 use std::io::Write;
 use std::net::TcpStream;
@@ -42,7 +41,6 @@ struct RouteCheckReport {
 }
 
 /// Xorshift64* PRNG — fast, deterministic, no external dep
-
 #[path = "shimmy_server_gpu/server_inference.rs"]
 mod server_inference;
 fn env_flag(name: &str) -> bool {
@@ -930,14 +928,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         let task_type = job.req.task.clone().unwrap_or_else(|| "story".to_string());
         let result = if task_type == "wikitext2" || task_type == "lambada" {
             eprintln!("[GPU Worker] Running eval task: {}", task_type);
-            let _target_bin = if task_type == "wikitext2" {
-                "shimmy_eval"
-            } else {
-                "shimmy_eval"
-            }; // adjust later if they differ
+            let _target_bin = "shimmy_eval";
             let cmd = format!("source ~/.cargo/env && cargo run -p shimmy_eval --bin shimmy_eval --release -- --model /opt/repro-arena/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -t {} --limit 3000", task_type);
             let output = std::process::Command::new("bash")
-                .args(&["-c", &cmd])
+                .args(["-c", &cmd])
                 .current_dir("/opt/repro-arena/libshimmy")
                 .output();
 
@@ -1652,6 +1646,24 @@ fn send_error(mut stream: TcpStream, msg: &str) {
     let _ = stream.write_all(resp.as_bytes());
 }
 
+#[allow(dead_code)]
+/// Removes empty think blocks from prompts
+/// This strips text between 
+fn strip_empty_think_block(prompt: &str) -> String {
+    let mut result = prompt.to_string();
+    // Remove empty think blocks
+    while let Some(start) = result.find("think") {
+        if let Some(end) = result[start..].find("</think>") {
+            let remove_len = end + 3; // 3 for "</think>"
+            result.replace_range(start..(start + remove_len), "");
+        } else {
+            break;
+        }
+    }
+    result
+}
+
+#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1704,16 +1716,14 @@ mod tests {
     fn v1_models_response_is_valid_json() {
         // Build the same JSON body the /v1/models handler builds and verify
         // it can be parsed back.
-        let inventory = vec![
-            (
+        let inventory = [(
                 "TinyLlama-1.1B-Chat-v1.0.Q4_0".to_string(),
                 "/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string(),
             ),
             (
                 "Llama-3.2-1B-Instruct-Q4_K_M".to_string(),
                 "/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf".to_string(),
-            ),
-        ];
+            )];
         let mut items = String::from("[");
         for (i, (name, _)) in inventory.iter().enumerate() {
             if i > 0 {

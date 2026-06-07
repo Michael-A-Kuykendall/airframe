@@ -303,7 +303,7 @@ impl GpuRuntime {
         {
             let mut cache = self.kv_cache.lock().unwrap();
             for _ in 0..prompt_tokens.len() {
-                cache.increment().map_err(|e| e)?;
+                cache.increment()?;
             }
         }
 
@@ -437,7 +437,7 @@ impl GpuRuntime {
             // Increment KV cache
             {
                 let mut cache = self.kv_cache.lock().unwrap();
-                cache.increment().map_err(|e| e)?;
+                cache.increment()?;
             }
 
             // Final RMSNorm + output head projection
@@ -496,7 +496,7 @@ impl GpuRuntime {
 
         let tensor_info = GgufTensorInfo {
             name: "output.weight".to_string(),
-            dimensions: vec![spec.n_vocab as usize, spec.n_embd as usize],
+            dimensions: vec![spec.n_vocab, spec.n_embd],
             ggml_type: 14,
             offset: 0,
         };

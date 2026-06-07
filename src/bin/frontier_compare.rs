@@ -227,9 +227,9 @@ async fn async_main() -> Result<()> {
                 Some((gpu_kv.get_k_buffers(), gpu_kv.get_v_buffers())),
                 &spec,
                 args.chunk_tokens,
-            ).map_err(|e| eprintln!("[GPU prefill] device error: {e}"));
+            );
             for _ in 0..prefix_tokens.len() {
-                gpu_kv.increment();
+                let _ = gpu_kv.increment();
             }
             eprintln!("[GPU prefill] done");
         }
@@ -321,7 +321,7 @@ async fn async_main() -> Result<()> {
         gpu_hidden = gpu_output;
     }
     eprintln!("[GPU vs CPU] done");
-    gpu_kv.increment();
+    let _ = gpu_kv.increment();
 
     let output_norm = weights
         .get(&WeightId::OutputNorm)
@@ -567,7 +567,7 @@ fn cpu_debug_target_token(
             layer_idx,
             kv_cache,
             None, // no QK norm for non-Qwen3
-        )?;;
+        )?;
         let post_attn = ops.add(&hidden, &attn_output)?;
         let ffn_input = ops.rmsnorm(&post_attn, ffn_norm, spec.rms_eps)?;
         let ffn_output = ops.ffn_swiglu(&ffn_input, gate, up, down)?;
