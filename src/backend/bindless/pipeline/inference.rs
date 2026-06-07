@@ -57,6 +57,7 @@ impl BindlessPipeline {
         .2
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_full_model_prefill_chunked_with_cache_state(
         &self,
         device: &wgpu::Device,
@@ -135,6 +136,7 @@ impl BindlessPipeline {
         last_result.ok_or_else(|| "chunked prefill produced no chunks".to_string())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_full_model_with_cache_state(
         &self,
         device: &wgpu::Device,

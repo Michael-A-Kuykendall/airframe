@@ -125,6 +125,7 @@ pub fn apply_rope_scaled_f32(
 }
 
 /// Apply RoPE to 3D tensor data in-place
+#[allow(clippy::too_many_arguments)]
 fn apply_rope_3d(
     data: &mut [f32],
     _seq_len: usize,

@@ -257,6 +257,7 @@ impl GpuRuntime {
     ///
     /// `on_token` is called for each generated token (for streaming).
     /// Returns the full generated text.
+    #[allow(clippy::type_complexity)]
     pub fn generate(
         &self,
         prompt: &str,

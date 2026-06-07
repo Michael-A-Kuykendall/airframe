@@ -520,6 +520,7 @@ impl BindlessPipeline {
     ///
     /// # Returns
     /// Output activation vector (dim elements)
+    #[allow(clippy::too_many_arguments)]
     pub fn run_layer_with_cache(
         &self,
         device: &wgpu::Device,
@@ -802,6 +803,7 @@ impl BindlessPipeline {
     ///   3. main_attn_out_int4 reads from INT4 packed+scale buffers (bindings 10-13).
     ///
     /// The kv_cache must have been created with KVCache::new_int4().
+    #[allow(clippy::too_many_arguments)]
     pub fn run_layer_with_cache_int4(
         &self,
         device: &wgpu::Device,
@@ -971,6 +973,7 @@ impl BindlessPipeline {
     /// the decode loop (`run_layer_with_cache_int4`) can read them correctly.
     ///
     /// Dispatch: (n_head_kv, seq_len, 1) — each invocation handles one (head, position) pair.
+    #[allow(clippy::too_many_arguments)]
     pub fn requantize_all_kv_int4(
         &self,
         device: &wgpu::Device,
@@ -1028,6 +1031,7 @@ impl BindlessPipeline {
     }
 
     /// Debug version that extracts Q/K/V tensors for verification
+    #[allow(clippy::too_many_arguments)]
     pub fn run_layer_with_cache_debug(
         &self,
         device: &wgpu::Device,

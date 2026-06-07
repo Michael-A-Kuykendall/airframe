@@ -1023,6 +1023,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_http_connection(
     mut stream: tokio::net::TcpStream,
     tx: tokio::sync::mpsc::Sender<JobRequest>,

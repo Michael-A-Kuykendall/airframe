@@ -421,6 +421,7 @@ fn token_embedding(weights: &HashMap<WeightId, Tensor>, token_id: usize, dim: us
     Ok(token_embed.data[start..end].to_vec())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dequantize_embeddings(
     pipeline: &BindlessPipeline,
     device: &wgpu::Device,

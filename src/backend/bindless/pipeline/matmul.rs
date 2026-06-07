@@ -217,6 +217,7 @@ impl BindlessPipeline {
     /// Uploads `input` to a transient GPU buffer, dispatches `main_lm_head`,
     /// reads back the logits.  No F32 dequant buffer required — weights are
     /// read directly from the GGUF blob.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_lm_head_blob(
         &self,
         device: &wgpu::Device,

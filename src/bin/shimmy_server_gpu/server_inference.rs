@@ -216,6 +216,7 @@ impl TraceConfig {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_layer_trace(
     layer_idx: usize,
     current_pos: u32,
@@ -1342,7 +1343,8 @@ fn run_inference_completion(
     Ok((resp, templated_prompt))
 }
 
-pub(super) async fn process_inference_job(
+#[allow(clippy::too_many_arguments)]
+    pub(super) async fn process_inference_job(
     job_id: String,
     states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JobState>>>,
     session_states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, SessionState>>>,
