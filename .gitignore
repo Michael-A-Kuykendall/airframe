@@ -54,3 +54,9 @@ crates/libfse/docs/NAMING_CONVENTION_MILITARY.md
 crates/libfse/docs/COMMERCIAL_VALUE_PROP.md
 crates/libfse/docs/patent_materials/
 fused_semantic_execution_full_markdown_reconstruction.md
+# Development hygiene
+artifacts/
+docs/chat*.md
+.github/copilot-instructions.md
+.github/instructions/
+crates/libfse/docs/
