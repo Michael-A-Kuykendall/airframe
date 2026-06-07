@@ -368,9 +368,10 @@ impl EvalEngine for GpuEvalEngine {
 
         // Stop at context limit
         if self.current_pos + tokens.len() > self.spec.n_ctx {
-            return Err(airframe::core::error::LibshimmyError::Unsupported(
-                format!("context limit {} exceeded", self.spec.n_ctx),
-            ));
+            return Err(airframe::core::error::LibshimmyError::Unsupported(format!(
+                "context limit {} exceeded",
+                self.spec.n_ctx
+            )));
         }
 
         // Batch Prefill: Collect embeddings for entire prompt
@@ -395,17 +396,20 @@ impl EvalEngine for GpuEvalEngine {
 
         // println!("[GPU] Processing batch of {} tokens. Pos: {} -> {}", batch_size, self.current_pos, seq_len);
 
-        let (_pre_norm, _l21, logits) = self.pipeline.run_full_model_with_cache_state(
-            &self.device,
-            &self.queue,
-            &self.model,
-            &batched_embd,
-            self.weights_f32.as_ref(),
-            self.current_pos as u32,
-            seq_len,
-            Some((&self.kv_cache_k_layers, &self.kv_cache_v_layers)),
-            &self.spec,
-        ).expect("GPU forward pass failed");
+        let (_pre_norm, _l21, logits) = self
+            .pipeline
+            .run_full_model_with_cache_state(
+                &self.device,
+                &self.queue,
+                &self.model,
+                &batched_embd,
+                self.weights_f32.as_ref(),
+                self.current_pos as u32,
+                seq_len,
+                Some((&self.kv_cache_k_layers, &self.kv_cache_v_layers)),
+                &self.spec,
+            )
+            .expect("GPU forward pass failed");
 
         self.current_pos += batch_size;
 
@@ -1649,17 +1653,19 @@ async fn run_l0probe(args: &Args) -> Result<()> {
 
     let (_gpu_l20_f32_head, _gpu_l21_f32_head, gpu_l22_f32_head) =
         if let Some(ref f32_head) = output_head_f32 {
-            pipeline.run_full_model_with_cache_state(
-                &device,
-                &queue,
-                &model,
-                input,
-                Some(f32_head),
-                0,
-                1,
-                None,
-                &spec,
-            ).expect("GPU forward pass failed (f32 head)")
+            pipeline
+                .run_full_model_with_cache_state(
+                    &device,
+                    &queue,
+                    &model,
+                    input,
+                    Some(f32_head),
+                    0,
+                    1,
+                    None,
+                    &spec,
+                )
+                .expect("GPU forward pass failed (f32 head)")
         } else {
             (Vec::new(), Vec::new(), Vec::new())
         };

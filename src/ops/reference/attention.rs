@@ -192,20 +192,10 @@ pub fn attention_with_cache_f32(
     };
 
     // 3. Apply RoPE to Q and K (using position_ids for absolute positions)
-    let q_rope = rope::apply_rope_scaled_f32(
-        &q_heads,
-        position_ids,
-        rope_base,
-        rope_dim,
-        rope_scale,
-    )?;
-    let k_rope = rope::apply_rope_scaled_f32(
-        &k_heads,
-        position_ids,
-        rope_base,
-        rope_dim,
-        rope_scale,
-    )?;
+    let q_rope =
+        rope::apply_rope_scaled_f32(&q_heads, position_ids, rope_base, rope_dim, rope_scale)?;
+    let k_rope =
+        rope::apply_rope_scaled_f32(&k_heads, position_ids, rope_base, rope_dim, rope_scale)?;
 
     // 4. Store new K, V in cache (before retrieving full cache)
     // Note: We store AFTER RoPE for K, but V is unmodified
@@ -417,20 +407,10 @@ fn attention_2d(
     let v_heads = reshape_to_heads(&v, seq_len, n_head_kv, head_dim)?; // [seq_len, n_head_kv, head_dim]
 
     // 3. Apply RoPE to Q and K
-    let q_rope = rope::apply_rope_scaled_f32(
-        &q_heads,
-        position_ids,
-        rope_base,
-        rope_dim,
-        rope_scale,
-    )?;
-    let k_rope = rope::apply_rope_scaled_f32(
-        &k_heads,
-        position_ids,
-        rope_base,
-        rope_dim,
-        rope_scale,
-    )?;
+    let q_rope =
+        rope::apply_rope_scaled_f32(&q_heads, position_ids, rope_base, rope_dim, rope_scale)?;
+    let k_rope =
+        rope::apply_rope_scaled_f32(&k_heads, position_ids, rope_base, rope_dim, rope_scale)?;
 
     // DIAGNOSTIC: Check if tracing is enabled
     let trace_attention = std::env::var("LIBSHIMMY_TRACE_ATTENTION").is_ok();
@@ -940,10 +920,7 @@ mod tests {
 
         // Identity projections so Q/K/V = input directly
         let eye4: Vec<f32> = vec![
-            1.,0.,0.,0.,
-            0.,1.,0.,0.,
-            0.,0.,1.,0.,
-            0.,0.,0.,1.,
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
         ];
         let q_w = Tensor::new(eye4.clone(), vec![hidden, n_head * head_dim]).unwrap();
         let k_w = Tensor::new(eye4.clone(), vec![hidden, n_head_kv * head_dim]).unwrap();
@@ -951,36 +928,40 @@ mod tests {
         let o_w = Tensor::new(eye4.clone(), vec![n_head * head_dim, hidden]).unwrap();
 
         // Input where token-3 has a distinctive value
-        let input_a = Tensor::new(vec![
-            1., 0., 0., 0.,   // tok 0
-            0., 1., 0., 0.,   // tok 1
-            0., 0., 1., 0.,   // tok 2
-            0., 0., 0., 9.,   // tok 3 — large distinctive value
-        ], vec![seq_len, hidden]).unwrap();
+        let input_a = Tensor::new(
+            vec![
+                1., 0., 0., 0., // tok 0
+                0., 1., 0., 0., // tok 1
+                0., 0., 1., 0., // tok 2
+                0., 0., 0., 9., // tok 3 — large distinctive value
+            ],
+            vec![seq_len, hidden],
+        )
+        .unwrap();
 
         // Same but token-3 is zeroed
-        let input_b = Tensor::new(vec![
-            1., 0., 0., 0.,
-            0., 1., 0., 0.,
-            0., 0., 1., 0.,
-            0., 0., 0., 0.,   // tok 3 now zero
-        ], vec![seq_len, hidden]).unwrap();
+        let input_b = Tensor::new(
+            vec![
+                1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0.,
+                0., // tok 3 now zero
+            ],
+            vec![seq_len, hidden],
+        )
+        .unwrap();
 
         let pos_ids: Vec<usize> = (0..seq_len).collect();
 
         let out_a = attention_f32(
-            &input_a, &q_w, &k_w, &v_w, &o_w,
-            n_head, n_head_kv, head_dim,
-            &pos_ids, 10000.0, head_dim, 1.0,
-            false, // bidirectional
-        ).unwrap();
+            &input_a, &q_w, &k_w, &v_w, &o_w, n_head, n_head_kv, head_dim, &pos_ids, 10000.0,
+            head_dim, 1.0, false, // bidirectional
+        )
+        .unwrap();
 
         let out_b = attention_f32(
-            &input_b, &q_w, &k_w, &v_w, &o_w,
-            n_head, n_head_kv, head_dim,
-            &pos_ids, 10000.0, head_dim, 1.0,
-            false,
-        ).unwrap();
+            &input_b, &q_w, &k_w, &v_w, &o_w, n_head, n_head_kv, head_dim, &pos_ids, 10000.0,
+            head_dim, 1.0, false,
+        )
+        .unwrap();
 
         // Token-0's output must differ between input_a and input_b because
         // token-0 can attend to token-3 (bidirectional).

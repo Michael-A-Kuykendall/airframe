@@ -157,7 +157,12 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn info_q6k(dims: Vec<usize>) -> GgufTensorInfo {
-        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 14, offset: 0 }
+        GgufTensorInfo {
+            name: "t".to_string(),
+            dimensions: dims,
+            ggml_type: 14,
+            offset: 0,
+        }
     }
 
     #[test]

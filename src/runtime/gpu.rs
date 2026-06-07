@@ -6,9 +6,7 @@
 use crate::backend::bindless::kv_cache::KVCache;
 use crate::backend::bindless::loader::BindlessModel;
 use crate::backend::bindless::metadata::BindlessMetadata;
-use crate::backend::bindless::pipeline::{
-    BindlessPipeline, LayerParams, RMSNormParams,
-};
+use crate::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
 use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use crate::core::dequant::dequantize_q6_k;
 use crate::core::model::GgufTensorInfo;
@@ -108,9 +106,7 @@ impl GpuRuntime {
         // Pre-flight: check that the model file fits within the GPU's storage buffer binding
         // limit before uploading. Older GPUs (e.g. GTX 1050 Ti on some drivers) may report
         // a lower limit than the model requires, causing a deferred wgpu validation panic.
-        let model_file_size = std::fs::metadata(model_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let model_file_size = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
         let max_binding = adapter_limits.max_storage_buffer_binding_size as u64;
         if model_file_size > max_binding {
             return Err(format!(
@@ -118,7 +114,8 @@ impl GpuRuntime {
                  ({:.0} MB). Try a more quantized model or update your GPU drivers.",
                 model_file_size as f64 / 1_048_576.0,
                 max_binding as f64 / 1_048_576.0,
-            ).into());
+            )
+            .into());
         }
 
         let mut limits = wgpu::Limits::downlevel_defaults();
@@ -127,7 +124,8 @@ impl GpuRuntime {
         // On older GPUs these can differ, and capping max_buffer_size to the binding size
         // causes validation errors when creating large model buffers.
         limits.max_buffer_size = adapter_limits.max_buffer_size;
-        limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
+        limits.max_storage_buffers_per_shader_stage =
+            adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
         limits.max_compute_invocations_per_workgroup = 256;
 
         let (device, queue) = adapter
@@ -152,11 +150,20 @@ impl GpuRuntime {
         drop(header_file);
         let mut spec = header_meta.to_model_spec();
         // Respect SHIMMY_MAX_CTX for extended context (YaRN RoPE)
-        if let Some(max_ctx) = std::env::var("SHIMMY_MAX_CTX").ok().and_then(|s| s.parse::<usize>().ok()) {
+        if let Some(max_ctx) = std::env::var("SHIMMY_MAX_CTX")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+        {
             let rope_scale = std::env::var("SHIMMY_ROPE_SCALE")
                 .ok()
                 .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or_else(|| if max_ctx > spec.n_ctx { spec.n_ctx as f32 / max_ctx as f32 } else { 1.0 });
+                .unwrap_or_else(|| {
+                    if max_ctx > spec.n_ctx {
+                        spec.n_ctx as f32 / max_ctx as f32
+                    } else {
+                        1.0
+                    }
+                });
             spec.n_ctx = max_ctx;
             spec.rope_scale = rope_scale;
         }
@@ -165,7 +172,8 @@ impl GpuRuntime {
         let shift_pipeline = RopeShiftPipeline::new(&device);
 
         // Dequantize output head (Q6_K → F32)
-        let output_head_f32 = Self::load_output_head_f32(&model_path_str, &gpu_model, &device, &spec)?;
+        let output_head_f32 =
+            Self::load_output_head_f32(&model_path_str, &gpu_model, &device, &spec)?;
 
         // KV cache
         let max_ctx = spec.n_ctx as u32;
@@ -209,11 +217,15 @@ impl GpuRuntime {
             temp_stride: spec.temp_buffer_size as u32,
             quant_type: packed_quant_type,
             attn_logit_softcap: spec.attn_logit_softcap,
-            post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
+            post_norm_enabled: if spec.arch_string().contains("gemma") {
+                1
+            } else {
+                0
+            },
             qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
             layer_norm_enabled: 0,
-                ffn_kind_policy: 0,
-                qkv_layout_policy: 0,
+            ffn_kind_policy: 0,
+            qkv_layout_policy: 0,
         };
 
         let norm_weight_offset = gpu_model
@@ -229,10 +241,13 @@ impl GpuRuntime {
         };
 
         let eos_token = tokenizer.eos_token();
-        let im_end_token: Option<u32> = tokenizer
-            .encode("<|im_end|>", false)
-            .ok()
-            .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None });
+        let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
+            if v.len() == 1 {
+                Some(v[0])
+            } else {
+                None
+            }
+        });
 
         Ok(Self {
             device,
@@ -279,7 +294,11 @@ impl GpuRuntime {
         for &token_id in &prompt_tokens {
             let row_offset = self.embd_weight_offset + (token_id as u64 * self.row_bytes);
             let embd = self.pipeline.run_dequant_request(
-                &self.device, &self.queue, &self.model, row_offset as u32, dim,
+                &self.device,
+                &self.queue,
+                &self.model,
+                row_offset as u32,
+                dim,
             );
             batched_embd.extend_from_slice(&embd);
         }
@@ -287,17 +306,18 @@ impl GpuRuntime {
         // Run prefill through all layers
         let (_final_act, _l21, prefill_logits) = {
             let cache_guard = self.kv_cache.lock().unwrap();
-            self.pipeline.run_full_model_prefill_chunked_with_cache_state(
-                &self.device,
-                &self.queue,
-                &self.model,
-                &batched_embd,
-                Some(&self.output_head_f32),
-                0,
-                Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
-                &self.spec,
-                128,
-            )?
+            self.pipeline
+                .run_full_model_prefill_chunked_with_cache_state(
+                    &self.device,
+                    &self.queue,
+                    &self.model,
+                    &batched_embd,
+                    Some(&self.output_head_f32),
+                    0,
+                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                    &self.spec,
+                    128,
+                )?
         };
 
         // Advance KV cache position
@@ -318,10 +338,13 @@ impl GpuRuntime {
             .extra_stop_tokens
             .iter()
             .filter_map(|s| {
-                self.tokenizer
-                    .encode(s, false)
-                    .ok()
-                    .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None })
+                self.tokenizer.encode(s, false).ok().and_then(|v| {
+                    if v.len() == 1 {
+                        Some(v[0])
+                    } else {
+                        None
+                    }
+                })
             })
             .collect();
 
@@ -413,11 +436,16 @@ impl GpuRuntime {
             // Compute next logits
             let row_offset = self.embd_weight_offset + (next_token as u64 * self.row_bytes);
             let mut layer_output = self.pipeline.run_dequant_request(
-                &self.device, &self.queue, &self.model, row_offset as u32, dim,
+                &self.device,
+                &self.queue,
+                &self.model,
+                row_offset as u32,
+                dim,
             );
 
             for layer_idx in 0..self.spec.n_layer {
-                let layer_offsets = self.model
+                let layer_offsets = self
+                    .model
                     .metadata
                     .get_layer_offsets(layer_idx, self.spec.arch_string())
                     .ok_or_else(|| format!("Missing offsets for layer {}", layer_idx))?;
@@ -443,7 +471,11 @@ impl GpuRuntime {
 
             // Final RMSNorm + output head projection
             let normed = self.pipeline.run_rmsnorm_test(
-                &self.device, &self.queue, &self.model, &layer_output, self.norm_params,
+                &self.device,
+                &self.queue,
+                &self.model,
+                &layer_output,
+                self.norm_params,
             );
             logits_vec = self.pipeline.run_matmul_f32(
                 &self.device,
@@ -489,7 +521,8 @@ impl GpuRuntime {
             return Err(format!(
                 "Expected Q6_K (type 14) for output.weight, got type {}",
                 output_weight_type
-            ).into());
+            )
+            .into());
         }
 
         let file = std::fs::File::open(model_path)?;

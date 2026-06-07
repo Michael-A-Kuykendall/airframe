@@ -148,7 +148,10 @@ mod tests {
     #[test]
     fn test_new_is_empty() {
         let c = EvidenceChecklist::new();
-        assert!(c.validate().is_ok(), "empty checklist (no required items) should pass");
+        assert!(
+            c.validate().is_ok(),
+            "empty checklist (no required items) should pass"
+        );
     }
 
     #[test]
@@ -221,7 +224,10 @@ mod tests {
         c.set("Model SHA256", "x".to_string());
         c.set("Model file size", "y".to_string());
         c.set("Prompt fixture identifier", "p1".to_string());
-        c.set("Token count expected vs produced", "16 expected, 16 produced".to_string());
+        c.set(
+            "Token count expected vs produced",
+            "16 expected, 16 produced".to_string(),
+        );
         c.set("Determinism confirmation", "PASS".to_string());
         c.set("Artifact path emitted", "/tmp/foo.json".to_string());
 

@@ -18,7 +18,10 @@ fn main() {
                 let eos_id = tok.eos_token();
                 let bos_str = tok.token_to_piece(bos_id).unwrap_or_else(|_| "?".into());
                 let eos_str = tok.token_to_piece(eos_id).unwrap_or_else(|_| "?".into());
-                println!("{}: bos_id={} bos={:?}  eos_id={} eos={:?}", label, bos_id, bos_str, eos_id, eos_str);
+                println!(
+                    "{}: bos_id={} bos={:?}  eos_id={} eos={:?}",
+                    label, bos_id, bos_str, eos_id, eos_str
+                );
             }
             Err(e) => println!("{}: ERROR {}", label, e),
         }

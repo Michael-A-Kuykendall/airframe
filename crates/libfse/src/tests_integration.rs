@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
     // use super::*; // Unused
-    use crate::{FseMap, Rule, FseOpcode, FseScanner, Violation};
+    use crate::{FseMap, FseOpcode, FseScanner, Rule, Violation};
 
     #[test]
     fn test_basic_match_record() {
@@ -36,9 +36,9 @@ mod tests {
         match result {
             Err(Violation::PolicyReject { rule_id, span, .. }) => {
                 assert_eq!(rule_id, 99);
-                // "DANGER" is 6 bytes. 
+                // "DANGER" is 6 bytes.
                 // Input: "This is safe but DANGER..."
-                // Index:  012345678901234567890123456 
+                // Index:  012345678901234567890123456
                 // "T" is 0. "D" is at 17. "R" is at 22. End is 23.
                 // Let's just check the byte slice matches.
                 assert_eq!(&input[span], b"DANGER");
@@ -64,13 +64,13 @@ mod tests {
         let summary = scanner.scan(input).unwrap();
 
         // "she" matches at "..she.."
-        // "he" matches inside "she" and in "he" of "hers"? 
+        // "he" matches inside "she" and in "he" of "hers"?
         // Aho-Corasick behavior depends on how we iterate.
         // We iterate ALL matches at a state.
-        
+
         // "she": Matches "she". Contains "he".
         // "hers": Matches "hers". Contains "he".
-        
+
         // We expect multiple hits.
         assert!(summary.pattern_hits >= 3);
     }

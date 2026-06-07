@@ -112,29 +112,111 @@ impl RopeShiftPipeline {
             source: wgpu::ShaderSource::Wgsl(int4_shader_src.into()),
         });
 
-        let int4_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("RopeShift INT4 Bind Group Layout"),
-            entries: &[
-                // 0: params
-                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // 1: packed_k_src (read)
-                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // 2: scale_k_src (read)
-                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // 3: packed_v_src (read)
-                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // 4: scale_v_src (read)
-                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // 5: packed_k_dst (read_write)
-                wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // 6: scale_k_dst (read_write)
-                wgpu::BindGroupLayoutEntry { binding: 6, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // 7: packed_v_dst (read_write)
-                wgpu::BindGroupLayoutEntry { binding: 7, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // 8: scale_v_dst (read_write)
-                wgpu::BindGroupLayoutEntry { binding: 8, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-            ],
-        });
+        let int4_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("RopeShift INT4 Bind Group Layout"),
+                entries: &[
+                    // 0: params
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // 1: packed_k_src (read)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // 2: scale_k_src (read)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // 3: packed_v_src (read)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // 4: scale_v_src (read)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // 5: packed_k_dst (read_write)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // 6: scale_k_dst (read_write)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // 7: packed_v_dst (read_write)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // 8: scale_v_dst (read_write)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
 
         let int4_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("RopeShift INT4 Pipeline Layout"),
@@ -297,7 +379,9 @@ impl RopeShiftPipeline {
         max_seq_len: u32,
     ) {
         let elements_to_shift = old_seq_len.saturating_sub(keep_sink + shift_amt);
-        if elements_to_shift == 0 { return; }
+        if elements_to_shift == 0 {
+            return;
+        }
 
         let params = CompactionParams {
             keep_sink,
@@ -364,11 +448,26 @@ impl RopeShiftPipeline {
             label: Some("RopeShiftINT4 F32 BindGroup"),
             layout: &self.bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: scratch_k.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: scratch_v.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: k_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: v_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: scratch_k.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: scratch_v.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: k_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: v_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: params_buffer.as_entire_binding(),
+                },
             ],
         });
 
@@ -376,34 +475,61 @@ impl RopeShiftPipeline {
             label: Some("RopeShiftINT4 Packed BindGroup"),
             layout: &self.int4_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: scratch_pk.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: scratch_sk.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: scratch_pv.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: scratch_sv.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: packed_k_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: scale_k_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 7, resource: packed_v_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 8, resource: scale_v_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: scratch_pk.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: scratch_sk.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: scratch_pv.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: scratch_sv.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: packed_k_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: scale_k_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: packed_v_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: scale_v_buffer.as_entire_binding(),
+                },
             ],
         });
 
-        let dim_x_f32   = head_dim.div_ceil(64);
-        let dim_x_int4  = (head_dim / 8).div_ceil(64);
-        let dim_y       = n_head_kv.div_ceil(4);
-        let dim_z       = elements_to_shift;
+        let dim_x_f32 = head_dim.div_ceil(64);
+        let dim_x_int4 = (head_dim / 8).div_ceil(64);
+        let dim_y = n_head_kv.div_ceil(4);
+        let dim_z = elements_to_shift;
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("RopeShiftINT4 Encoder"),
         });
 
         // Freeze all live buffers into scratch (eliminates overlap hazard)
-        encoder.copy_buffer_to_buffer(k_buffer,        0, &scratch_k,  0, f32_buf_size);
-        encoder.copy_buffer_to_buffer(v_buffer,        0, &scratch_v,  0, f32_buf_size);
+        encoder.copy_buffer_to_buffer(k_buffer, 0, &scratch_k, 0, f32_buf_size);
+        encoder.copy_buffer_to_buffer(v_buffer, 0, &scratch_v, 0, f32_buf_size);
         encoder.copy_buffer_to_buffer(packed_k_buffer, 0, &scratch_pk, 0, packed_size);
         encoder.copy_buffer_to_buffer(packed_v_buffer, 0, &scratch_pv, 0, packed_size);
-        encoder.copy_buffer_to_buffer(scale_k_buffer,  0, &scratch_sk, 0, scale_size);
-        encoder.copy_buffer_to_buffer(scale_v_buffer,  0, &scratch_sv, 0, scale_size);
+        encoder.copy_buffer_to_buffer(scale_k_buffer, 0, &scratch_sk, 0, scale_size);
+        encoder.copy_buffer_to_buffer(scale_v_buffer, 0, &scratch_sv, 0, scale_size);
 
         // Dispatch F32 shift
         {

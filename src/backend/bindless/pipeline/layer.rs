@@ -1,8 +1,8 @@
 //! Single-layer test and cache-enabled layer dispatch methods for `BindlessPipeline`.
 // TODO: extract run_layer_with_cache_debug into a conditional-compile debug module once the debug path is stabilised.
-use super::*;
-use super::super::loader::BindlessModel;
 use super::super::kv_cache::KVCache;
+use super::super::loader::BindlessModel;
+use super::*;
 use wgpu::util::DeviceExt;
 
 /// Debug return type with 6 activation vectors
@@ -787,8 +787,6 @@ impl BindlessPipeline {
         encoder.copy_buffer_to_buffer(&activation_buffer, 0, &staging_buffer, 0, dim * 4);
         queue.submit(Some(encoder.finish()));
 
-        
-
         // NOTE: Cache increment happens ONCE per token (after all layers), not per layer
         // Caller must call kv_cache.increment() after processing all 22 layers
 
@@ -851,7 +849,9 @@ impl BindlessPipeline {
             max_seq_len: kv_cache.max_len(),
             batch_size: 1,
             logical_pos_base: kv_cache.get_window_base(),
-            pad1: 0, pad2: 0, pad3: 0,
+            pad1: 0,
+            pad2: 0,
+            pad3: 0,
         };
         let cache_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cache Params INT4"),
@@ -865,20 +865,72 @@ impl BindlessPipeline {
             label: Some(&format!("Layer {} INT4 BindGroup", layer_idx)),
             layout: &self.layer_layout_int4,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0,  resource: model.gpu_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1,  resource: activation_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2,  resource: temp_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3,  resource: offsets_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4,  resource: params_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5,  resource: model.preflight.as_ref().unwrap().norm_bank_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6,  resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 7,  resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 8,  resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 9,  resource: cache_params_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 10, resource: kv_cache.get_k_packed_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 11, resource: kv_cache.get_k_scale_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 12, resource: kv_cache.get_v_packed_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 13, resource: kv_cache.get_v_scale_buffer(layer_idx).as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model.gpu_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: activation_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: temp_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: offsets_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: model
+                        .preflight
+                        .as_ref()
+                        .unwrap()
+                        .norm_bank_buffer
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: model
+                        .preflight
+                        .as_ref()
+                        .unwrap()
+                        .rope_cache_buffer
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: cache_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: kv_cache.get_k_packed_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: kv_cache.get_k_scale_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: kv_cache.get_v_packed_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: kv_cache.get_v_scale_buffer(layer_idx).as_entire_binding(),
+                },
             ],
         });
 
@@ -887,25 +939,65 @@ impl BindlessPipeline {
             label: Some(&format!("Layer {} INT4 F32BG", layer_idx)),
             layout: &self.layer_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: model.gpu_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: activation_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: temp_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: offsets_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: params_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: model.preflight.as_ref().unwrap().norm_bank_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 7, resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 8, resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 9, resource: cache_params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model.gpu_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: activation_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: temp_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: offsets_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: model
+                        .preflight
+                        .as_ref()
+                        .unwrap()
+                        .norm_bank_buffer
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: model
+                        .preflight
+                        .as_ref()
+                        .unwrap()
+                        .rope_cache_buffer
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: cache_params_buffer.as_entire_binding(),
+                },
             ],
         });
 
         // quantize_kv bind group (7 bindings: f32_k, f32_v, packed_k, packed_v, scale_k, scale_v, params)
         let qkv_params = QuantizeKvParams {
-            n_head_kv:  params.head_count_kv,
-            head_dim:   params.head_dim,
+            n_head_kv: params.head_count_kv,
+            head_dim: params.head_dim,
             pos_offset: current_pos,
-            _pad:       0,
+            _pad: 0,
         };
         let qkv_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("QuantizeKvParams"),
@@ -916,22 +1008,43 @@ impl BindlessPipeline {
             label: Some(&format!("Layer {} QuantizeKV BindGroup", layer_idx)),
             layout: &self.quantize_kv_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: kv_cache.get_k_packed_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: kv_cache.get_v_packed_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: kv_cache.get_k_scale_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: kv_cache.get_v_scale_buffer(layer_idx).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: qkv_params_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: kv_cache.get_k_packed_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: kv_cache.get_v_packed_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: kv_cache.get_k_scale_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: kv_cache.get_v_scale_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: qkv_params_buf.as_entire_binding(),
+                },
             ],
         });
 
-        let wg_dim  = params.dim.div_ceil(256);
-        let q_len   = params.head_count * params.head_dim;
-        let kv_len  = params.head_count_kv * params.head_dim;
+        let wg_dim = params.dim.div_ceil(256);
+        let q_len = params.head_count * params.head_dim;
+        let kv_len = params.head_count_kv * params.head_dim;
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv  = total_qkv.div_ceil(256);
-        let wg_ffn  = (params.ffn_dim * 2).div_ceil(256);
+        let wg_qkv = total_qkv.div_ceil(256);
+        let wg_ffn = (params.ffn_dim * 2).div_ceil(256);
         let wg_qknorm = (q_len + kv_len).div_ceil(256);
 
         // --- Fused single encoder: all INT4 kernels in order, one submit ---
@@ -948,16 +1061,96 @@ impl BindlessPipeline {
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some(&format!("Layer {} INT4", layer_idx)),
             });
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_attn_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QKV"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_qkv); cp.dispatch_workgroups(wg_qkv, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QKNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_qk_norm); cp.dispatch_workgroups(wg_qknorm, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("QuantizeKV"), timestamp_writes: None }); cp.set_bind_group(0, &quant_bg, &[]); cp.set_pipeline(&self.quantize_kv_pipeline); cp.dispatch_workgroups(params.head_count_kv, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnOutINT4"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg_int4, &[]); cp.set_pipeline(&self.layer_pipeline_attn_out_int4); cp.dispatch_workgroups(wg_dim, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("AttnProj"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_attn_proj); cp.dispatch_workgroups(wg_dim, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("PostAttnNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_post_attn_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("FFNProj"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_ffn_proj); cp.dispatch_workgroups(wg_ffn, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("FFNDown"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_ffn_down); cp.dispatch_workgroups(wg_dim, 1, 1); }
-            { let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("PostFfwNorm"), timestamp_writes: None }); cp.set_bind_group(0, &layer_bg, &[]); cp.set_pipeline(&self.layer_pipeline_post_ffw_norm); cp.dispatch_workgroups(wg_dim, 1, 1); }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("AttnNorm"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg, &[]);
+                cp.set_pipeline(&self.layer_pipeline_attn_norm);
+                cp.dispatch_workgroups(wg_dim, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("QKV"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg, &[]);
+                cp.set_pipeline(&self.layer_pipeline_qkv);
+                cp.dispatch_workgroups(wg_qkv, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("QKNorm"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg, &[]);
+                cp.set_pipeline(&self.layer_pipeline_qk_norm);
+                cp.dispatch_workgroups(wg_qknorm, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("QuantizeKV"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &quant_bg, &[]);
+                cp.set_pipeline(&self.quantize_kv_pipeline);
+                cp.dispatch_workgroups(params.head_count_kv, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("AttnOutINT4"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg_int4, &[]);
+                cp.set_pipeline(&self.layer_pipeline_attn_out_int4);
+                cp.dispatch_workgroups(wg_dim, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("AttnProj"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg, &[]);
+                cp.set_pipeline(&self.layer_pipeline_attn_proj);
+                cp.dispatch_workgroups(wg_dim, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("PostAttnNorm"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg, &[]);
+                cp.set_pipeline(&self.layer_pipeline_post_attn_norm);
+                cp.dispatch_workgroups(wg_dim, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FFNProj"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg, &[]);
+                cp.set_pipeline(&self.layer_pipeline_ffn_proj);
+                cp.dispatch_workgroups(wg_ffn, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FFNDown"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg, &[]);
+                cp.set_pipeline(&self.layer_pipeline_ffn_down);
+                cp.dispatch_workgroups(wg_dim, 1, 1);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("PostFfwNorm"),
+                    timestamp_writes: None,
+                });
+                cp.set_bind_group(0, &layer_bg, &[]);
+                cp.set_pipeline(&self.layer_pipeline_post_ffw_norm);
+                cp.dispatch_workgroups(wg_dim, 1, 1);
+            }
             enc.copy_buffer_to_buffer(&activation_buffer, 0, &staging_buffer, 0, dim * 4);
             queue.submit(Some(enc.finish()));
         }
@@ -984,7 +1177,9 @@ impl BindlessPipeline {
         seq_len: u32,
         n_layers: usize,
     ) {
-        if seq_len == 0 { return; }
+        if seq_len == 0 {
+            return;
+        }
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("RequantizeAllKV"),
@@ -1007,13 +1202,34 @@ impl BindlessPipeline {
                 label: Some(&format!("RequantKV L{}", layer_idx)),
                 layout: &self.quantize_kv_layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: kv_cache.get_k_packed_buffer(layer_idx).as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: kv_cache.get_v_packed_buffer(layer_idx).as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 4, resource: kv_cache.get_k_scale_buffer(layer_idx).as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 5, resource: kv_cache.get_v_scale_buffer(layer_idx).as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 6, resource: qkv_params_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: kv_cache.get_k_buffer(layer_idx).as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: kv_cache.get_v_buffer(layer_idx).as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: kv_cache.get_k_packed_buffer(layer_idx).as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: kv_cache.get_v_packed_buffer(layer_idx).as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: kv_cache.get_k_scale_buffer(layer_idx).as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: kv_cache.get_v_scale_buffer(layer_idx).as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: qkv_params_buf.as_entire_binding(),
+                    },
                 ],
             });
 
@@ -1379,7 +1595,6 @@ impl BindlessPipeline {
             v_vals,
         )
     }
-
 }
 
 #[cfg(test)]

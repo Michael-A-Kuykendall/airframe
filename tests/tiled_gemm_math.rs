@@ -15,7 +15,7 @@ const BYTES_PER_BLOCK: usize = 144;
 fn f16_bits_to_f32(bits: u16) -> f32 {
     // Bit-exact IEEE 754 half→single conversion (same as src/core/f16.rs)
     let sign = ((bits >> 15) as u32) << 31;
-    let exp  = (bits >> 10) & 0x1F;
+    let exp = (bits >> 10) & 0x1F;
     let mant = (bits & 0x3FF) as u32;
     if exp == 0 {
         // subnormal → flush to zero for our purposes
@@ -31,10 +31,14 @@ fn f32_to_f16_bits(v: f32) -> u16 {
     // Lossy, sufficient for test fixture construction
     let bits = v.to_bits();
     let sign = ((bits >> 31) & 1) as u16;
-    let exp  = ((bits >> 23) & 0xFF) as i32 - 127 + 15;
+    let exp = ((bits >> 23) & 0xFF) as i32 - 127 + 15;
     let mant = (bits >> 13) & 0x3FF;
-    if exp <= 0 { return sign << 15; }
-    if exp >= 31 { return (sign << 15) | 0x7C00; }
+    if exp <= 0 {
+        return sign << 15;
+    }
+    if exp >= 31 {
+        return (sign << 15) | 0x7C00;
+    }
     (sign << 15) | ((exp as u16) << 10) | (mant as u16)
 }
 
@@ -52,10 +56,10 @@ fn get_scale_min_k4(j: usize, q: &[u8]) -> (u8, u8) {
 /// Dequantize all 256 elements of a single Q4_K superblock.
 /// Exact port of dequantize_q4_k_block in src/core/dequant/q4_k.rs.
 fn dequantize_block(block: &[u8; BYTES_PER_BLOCK]) -> [f32; QK_K] {
-    let d    = f16_bits_to_f32(u16::from_le_bytes([block[0], block[1]]));
+    let d = f16_bits_to_f32(u16::from_le_bytes([block[0], block[1]]));
     let dmin = f16_bits_to_f32(u16::from_le_bytes([block[2], block[3]]));
     let scales = &block[4..16];
-    let qs     = &block[16..144];
+    let qs = &block[16..144];
 
     let mut out = [0.0f32; QK_K];
     let mut out_idx = 0usize;
@@ -63,11 +67,11 @@ fn dequantize_block(block: &[u8; BYTES_PER_BLOCK]) -> [f32; QK_K] {
     let mut q_off = 0usize;
 
     for _j in (0..QK_K).step_by(64) {
-        let (sc0, m0) = get_scale_min_k4(is,     scales);
+        let (sc0, m0) = get_scale_min_k4(is, scales);
         let (sc1, m1) = get_scale_min_k4(is + 1, scales);
-        let d1 = d    * sc0 as f32;
+        let d1 = d * sc0 as f32;
         let m1f = dmin * m0 as f32;
-        let d2 = d    * sc1 as f32;
+        let d2 = d * sc1 as f32;
         let m2 = dmin * m1 as f32;
 
         for k in 0..32 {
@@ -94,7 +98,7 @@ fn make_test_block() -> [u8; BYTES_PER_BLOCK] {
     let mut buf = [0u8; BYTES_PER_BLOCK];
 
     // d=2.0, dmin=0.5 as f16 little-endian
-    let d_bits    = f32_to_f16_bits(2.0_f32);
+    let d_bits = f32_to_f16_bits(2.0_f32);
     let dmin_bits = f32_to_f16_bits(0.5_f32);
     buf[0..2].copy_from_slice(&d_bits.to_le_bytes());
     buf[2..4].copy_from_slice(&dmin_bits.to_le_bytes());
@@ -102,7 +106,7 @@ fn make_test_block() -> [u8; BYTES_PER_BLOCK] {
     // Sub-block scales: sc=4, m=2 for all 8 sub-blocks.
     // j=0..3 path: buf[4+j]=sc&63, buf[4+j+4]=m&63
     for j in 0..4usize {
-        buf[4 + j]     = 4 & 0x3F;
+        buf[4 + j] = 4 & 0x3F;
         buf[4 + j + 4] = 2 & 0x3F;
     }
     // j=4..7 path: sc = (buf[j+4+4]&0x0F)|((buf[j-4+4]>>6)&3)<<4 = 4 ✓ if buf[j+4+4]=0x42
@@ -110,7 +114,7 @@ fn make_test_block() -> [u8; BYTES_PER_BLOCK] {
     // buf[j+4+4] at j=4..7 means buf[12..15]: low nibble=sc=4, high nibble=m=2 → 0x24
     // But upper bits of buf[4+j] (j=4..7) must be 0 for m to work — already 0.
     for j in 4..8usize {
-        buf[4 + j + 4] = (2 << 4) | 4;  // high nibble=m=2, low nibble=sc=4
+        buf[4 + j + 4] = (2 << 4) | 4; // high nibble=m=2, low nibble=sc=4
     }
 
     // Nibble pattern: element i → nibble = i % 16
@@ -139,9 +143,9 @@ fn make_test_block() -> [u8; BYTES_PER_BLOCK] {
 #[test]
 fn q4k_f16_roundtrip() {
     let block = make_test_block();
-    let d    = f16_bits_to_f32(u16::from_le_bytes([block[0], block[1]]));
+    let d = f16_bits_to_f32(u16::from_le_bytes([block[0], block[1]]));
     let dmin = f16_bits_to_f32(u16::from_le_bytes([block[2], block[3]]));
-    assert!((d - 2.0).abs() < 1e-4,    "d={d}, expected 2.0");
+    assert!((d - 2.0).abs() < 1e-4, "d={d}, expected 2.0");
     assert!((dmin - 0.5).abs() < 1e-4, "dmin={dmin}, expected 0.5");
 }
 
@@ -158,16 +162,16 @@ fn q4k_dequant_spot_check_analytic() {
 
     // elem[i] = 8.0 * (i%16) - 1.0
     let cases: &[(usize, f32)] = &[
-        (0,   8.0 * 0.0  - 1.0),   // nibble=0  → -1.0
-        (1,   8.0 * 1.0  - 1.0),   // nibble=1  →  7.0
-        (15,  8.0 * 15.0 - 1.0),   // nibble=15 → 119.0
-        (32,  8.0 * 0.0  - 1.0),   // nibble=0  → -1.0  (hi-nibble group 0)
-        (63,  8.0 * 15.0 - 1.0),   // nibble=15 → 119.0
-        (64,  8.0 * 0.0  - 1.0),   // group 1
+        (0, 8.0 * 0.0 - 1.0),   // nibble=0  → -1.0
+        (1, 8.0 * 1.0 - 1.0),   // nibble=1  →  7.0
+        (15, 8.0 * 15.0 - 1.0), // nibble=15 → 119.0
+        (32, 8.0 * 0.0 - 1.0),  // nibble=0  → -1.0  (hi-nibble group 0)
+        (63, 8.0 * 15.0 - 1.0), // nibble=15 → 119.0
+        (64, 8.0 * 0.0 - 1.0),  // group 1
         (127, 8.0 * 15.0 - 1.0),
-        (128, 8.0 * 0.0  - 1.0),   // group 2
+        (128, 8.0 * 0.0 - 1.0), // group 2
         (191, 8.0 * 15.0 - 1.0),
-        (192, 8.0 * 0.0  - 1.0),   // group 3
+        (192, 8.0 * 0.0 - 1.0), // group 3
         (255, 8.0 * 15.0 - 1.0),
     ];
 
@@ -233,7 +237,9 @@ fn tiled_matmul_matches_scalar_4_rows() {
         assert!(
             diff < 1e-2,
             "row {row}: scalar={:.6} tiled={:.6} diff={:.2e}",
-            scalar_out[row], tiled_out[row], diff
+            scalar_out[row],
+            tiled_out[row],
+            diff
         );
     }
 
@@ -296,12 +302,15 @@ fn tiled_activation_read_count_advantage() {
     const N_ROWS: usize = 8;
     const TILE_K: usize = 256;
 
-    let scalar_reads = N_ROWS * TILE_K;  // 2048 — each thread reads independently
-    let tiled_reads  = TILE_K;           // 256  — one cooperative load, shared
+    let scalar_reads = N_ROWS * TILE_K; // 2048 — each thread reads independently
+    let tiled_reads = TILE_K; // 256  — one cooperative load, shared
 
     let reduction_factor = scalar_reads / tiled_reads;
-    assert_eq!(reduction_factor, N_ROWS,
-        "tiled should reduce activation reads by exactly N_ROWS={}x", N_ROWS);
+    assert_eq!(
+        reduction_factor, N_ROWS,
+        "tiled should reduce activation reads by exactly N_ROWS={}x",
+        N_ROWS
+    );
 }
 
 /// Verify the Q4_K scale broadcast advantage.
@@ -318,13 +327,19 @@ fn q4k_scale_broadcast_read_count_advantage() {
     const METADATA_PER_SUPERBLOCK: usize = 2 + N_SUBBLOCKS * 2; // d, dmin, 8*(sc,m)
 
     let scalar_reads = N_ROWS * METADATA_PER_SUPERBLOCK; // 144
-    let tiled_reads  = METADATA_PER_SUPERBLOCK;           // 18
+    let tiled_reads = METADATA_PER_SUPERBLOCK; // 18
 
     let reduction = scalar_reads / tiled_reads;
-    assert_eq!(reduction, N_ROWS,
-        "Q4K scale broadcast should reduce metadata reads by N_ROWS={}x", N_ROWS);
+    assert_eq!(
+        reduction, N_ROWS,
+        "Q4K scale broadcast should reduce metadata reads by N_ROWS={}x",
+        N_ROWS
+    );
 
     // Combined with activation: total read reduction is bounded below by N_ROWS
-    assert!(reduction >= N_ROWS,
-        "Q4K+activation tiled reads should be at least {}x fewer", N_ROWS);
+    assert!(
+        reduction >= N_ROWS,
+        "Q4K+activation tiled reads should be at least {}x fewer",
+        N_ROWS
+    );
 }

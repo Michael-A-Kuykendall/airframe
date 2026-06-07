@@ -135,7 +135,8 @@ impl ModelRoutePlan {
         if arch == "qwen3"
             && (!has_tensor("blk.0.attn_q_norm.weight") || !has_tensor("blk.0.attn_k_norm.weight"))
         {
-            warnings.push("qwen3 route expects attn_q_norm.weight and attn_k_norm.weight".to_string());
+            warnings
+                .push("qwen3 route expects attn_q_norm.weight and attn_k_norm.weight".to_string());
         }
 
         if arch == "phi" && qkv_layout != QkvLayout::Fused {

@@ -3,7 +3,6 @@
 //! This test writes a simple shader that reads uniforms and writes them to output.
 //! If this fails, the uniform binding is broken at the WGPU level.
 
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct TestUniforms {

@@ -11,11 +11,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── 1. Define your policy rules ────────────────────────────────────────
     let rules = vec![
         // Hard block: any input containing "DROP TABLE" is rejected immediately.
-        Rule { pattern: b"DROP TABLE".to_vec(), opcode: FseOpcode::Reject(0) },
+        Rule {
+            pattern: b"DROP TABLE".to_vec(),
+            opcode: FseOpcode::Reject(0),
+        },
         // Audit: record when a SELECT * is seen (rule ID 1).
-        Rule { pattern: b"SELECT *".to_vec(),   opcode: FseOpcode::Record(1) },
+        Rule {
+            pattern: b"SELECT *".to_vec(),
+            opcode: FseOpcode::Record(1),
+        },
         // Suppress: SQL comments are noise — ignore them.
-        Rule { pattern: b"--".to_vec(),          opcode: FseOpcode::Ignore },
+        Rule {
+            pattern: b"--".to_vec(),
+            opcode: FseOpcode::Ignore,
+        },
     ];
 
     // ── 2. Compile once — reuse across threads via Arc<FseMap> ─────────────
@@ -32,10 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── 4. Safe input: SELECT * should record, -- should be ignored ─────────
     println!("Scanning: 'SELECT * FROM users -- safe query'");
-    let summary = map.scan_with_cursor(
-        &mut cursor,
-        b"SELECT * FROM users -- safe query",
-    )?;
+    let summary = map.scan_with_cursor(&mut cursor, b"SELECT * FROM users -- safe query")?;
     println!(
         "  → ok | match states: {} | rules fired: {} | distinct rules: {}",
         summary.match_states_seen, summary.pattern_hits, summary.rules_recorded

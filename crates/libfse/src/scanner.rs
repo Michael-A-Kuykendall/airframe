@@ -29,7 +29,9 @@ impl ScanCursor {
     /// Reset the rule-tracking bits (Record flags/counters). DFA state is kept.
     #[inline]
     pub fn reset_rule_state(&mut self) {
-        for w in self.rule_bits.iter_mut() { *w = 0; }
+        for w in self.rule_bits.iter_mut() {
+            *w = 0;
+        }
         self.rules_recorded = 0;
     }
 }
@@ -54,7 +56,9 @@ pub enum Violation {
 impl std::fmt::Display for Violation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Violation::PolicyReject { rule_id, .. } => write!(f, "Policy Violation: Rule {}", rule_id),
+            Violation::PolicyReject { rule_id, .. } => {
+                write!(f, "Policy Violation: Rule {}", rule_id)
+            }
             Violation::IntegrityError { details, .. } => write!(f, "Integrity Error: {}", details),
         }
     }
@@ -64,7 +68,6 @@ impl std::error::Error for Violation {}
 
 impl Violation {
     pub fn rejected_rule_id(&self) -> Option<RuleId> {
-
         match self {
             Violation::PolicyReject { rule_id, .. } => Some(*rule_id),
             _ => None,
@@ -169,10 +172,10 @@ impl<'m> FseScanner<'m> {
                     PackedAction::Record { word_idx, bit_mask } => {
                         pattern_hits += 1;
                         if let Some(word) = self.rule_bits.get_mut(word_idx as usize) {
-                             if (*word & bit_mask) == 0 {
+                            if (*word & bit_mask) == 0 {
                                 *word |= bit_mask;
                                 self.rules_recorded = self.rules_recorded.saturating_add(1);
-                             }
+                            }
                         } else {
                             // This branch should be practically unreachable given MAX_ALLOWED_RULE_ID,
                             // but fail-closed demands it just in case.
@@ -183,7 +186,11 @@ impl<'m> FseScanner<'m> {
                             });
                         }
                     }
-                    PackedAction::Reject { rule_id, pattern_index, pattern_len } => {
+                    PackedAction::Reject {
+                        rule_id,
+                        pattern_index,
+                        pattern_len,
+                    } => {
                         let start = end.saturating_sub(pattern_len as usize);
                         self.sid = sid;
                         return Err(Violation::PolicyReject {
@@ -195,11 +202,11 @@ impl<'m> FseScanner<'m> {
                     PackedAction::ControlResetRuleState => {
                         pattern_hits += 1;
                         self.reset_rule_state()
-                    },
+                    }
                     PackedAction::IntegrityError { pattern_index } => {
                         self.sid = sid;
-                         return Err(Violation::IntegrityError { 
-                            pattern_index: pattern_index as usize, 
+                        return Err(Violation::IntegrityError {
+                            pattern_index: pattern_index as usize,
                             details: "Precomputed integrity error in compiled map",
                         });
                     }

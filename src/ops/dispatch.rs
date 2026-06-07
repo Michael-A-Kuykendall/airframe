@@ -196,7 +196,6 @@ impl OpDispatcher {
     pub fn gelu(&self, input: &Tensor) -> Result<Tensor> {
         activations::gelu_f32(input)
     }
-
 }
 
 impl Default for OpDispatcher {
@@ -209,7 +208,6 @@ impl Default for OpDispatcher {
 mod tests {
     use super::*;
     use crate::core::tensor::Tensor;
-    
 
     fn t(data: Vec<f32>, shape: Vec<usize>) -> Tensor {
         Tensor::new(data, shape).unwrap()
@@ -327,7 +325,7 @@ mod tests {
             &[1.0, 2.0, 3.0],
             &[-10.0, 0.0, 10.0],
             &[100.0, 100.0, 100.0],
-            &[0.5],               // single element: result is exactly 1.0, which is in (0,1]
+            &[0.5], // single element: result is exactly 1.0, which is in (0,1]
             &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         ];
         for vals in cases {
@@ -336,7 +334,11 @@ mod tests {
             let out = ops.softmax(&input, false).unwrap();
             for &v in &out.data {
                 // softmax values are strictly positive and at most 1.0
-                assert!(v > 0.0 && v <= 1.0, "softmax value {v} not in (0,1] for input {:?}", vals);
+                assert!(
+                    v > 0.0 && v <= 1.0,
+                    "softmax value {v} not in (0,1] for input {:?}",
+                    vals
+                );
             }
         }
     }
@@ -357,19 +359,22 @@ mod tests {
             let sum: f32 = out.data.iter().sum();
             assert!(
                 (sum - 1.0).abs() < 1e-4,
-                "sum={sum} != 1.0 for input {:?}", vals
+                "sum={sum} != 1.0 for input {:?}",
+                vals
             );
         }
     }
-
-
 
     #[test]
     fn test_silu_at_zero_is_zero() {
         let ops = OpDispatcher::new();
         let input = t(vec![0.0], vec![1]);
         let out = ops.silu(&input).unwrap();
-        assert!((out.data[0]).abs() < 1e-5, "silu(0) should be ~0, got {}", out.data[0]);
+        assert!(
+            (out.data[0]).abs() < 1e-5,
+            "silu(0) should be ~0, got {}",
+            out.data[0]
+        );
     }
 
     #[test]
@@ -378,7 +383,11 @@ mod tests {
         // silu(1) = 1 * sigmoid(1) ≈ 0.7311
         let input = t(vec![1.0], vec![1]);
         let out = ops.silu(&input).unwrap();
-        assert!((out.data[0] - 0.7311).abs() < 0.001, "silu(1) ≈ 0.7311, got {}", out.data[0]);
+        assert!(
+            (out.data[0] - 0.7311).abs() < 0.001,
+            "silu(1) ≈ 0.7311, got {}",
+            out.data[0]
+        );
     }
 
     // ── multiply ─────────────────────────────────────────────────────────────
@@ -428,7 +437,7 @@ mod tests {
         // input: [1, 2], gate_weight: [dim, ff_dim] = [2, 3]
         let input = t(vec![1.0, 2.0], vec![1, 2]);
         let gate = t(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0], vec![2, 3]);
-        let up   = t(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0], vec![2, 3]);
+        let up = t(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0], vec![2, 3]);
         let down = t(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![3, 2]);
         let out = ops.ffn_swiglu(&input, &gate, &up, &down).unwrap();
         assert_eq!(out.data.len(), 2, "FFN output dim should match input dim");

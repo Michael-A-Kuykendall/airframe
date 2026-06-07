@@ -10,20 +10,42 @@ pub enum WeightId {
     TokenEmbed,
 
     // Per-layer weights (layer index included)
-    AttnQ { layer: usize },
-    AttnK { layer: usize },
-    AttnV { layer: usize },
-    AttnO { layer: usize },
-    AttnNorm { layer: usize },
+    AttnQ {
+        layer: usize,
+    },
+    AttnK {
+        layer: usize,
+    },
+    AttnV {
+        layer: usize,
+    },
+    AttnO {
+        layer: usize,
+    },
+    AttnNorm {
+        layer: usize,
+    },
     /// Per-head Q RMSNorm weight (Qwen3). Shape: [head_dim]. GGUF: blk.N.attn_q_norm.weight
-    AttnQNorm { layer: usize },
+    AttnQNorm {
+        layer: usize,
+    },
     /// Per-head K RMSNorm weight (Qwen3). Shape: [head_dim]. GGUF: blk.N.attn_k_norm.weight
-    AttnKNorm { layer: usize },
+    AttnKNorm {
+        layer: usize,
+    },
 
-    FfnGate { layer: usize },
-    FfnUp { layer: usize },
-    FfnDown { layer: usize },
-    FfnNorm { layer: usize },
+    FfnGate {
+        layer: usize,
+    },
+    FfnUp {
+        layer: usize,
+    },
+    FfnDown {
+        layer: usize,
+    },
+    FfnNorm {
+        layer: usize,
+    },
 
     // Final layer
     OutputNorm, // GGUF: output_norm.weight
@@ -32,13 +54,13 @@ pub enum WeightId {
     // ── Vision encoder (SigLIP ViT) ──────────────────────────────────────────
     // GGUF prefix: "v."
     // Patch embedding
-    VisionPatchEmbedWeight,     // v.patch_embd.weight   [1152, 3, 14, 14] F16
-    VisionPatchEmbedBias,       // v.patch_embd.bias     [1152]            F32
+    VisionPatchEmbedWeight, // v.patch_embd.weight   [1152, 3, 14, 14] F16
+    VisionPatchEmbedBias,   // v.patch_embd.bias     [1152]            F32
     // Positional embedding (shared across all input sizes via slicing)
-    VisionPosEmbedWeight,       // v.position_embd.weight [4900, 1152]     F16
+    VisionPosEmbedWeight, // v.position_embd.weight [4900, 1152]     F16
     // Post-encoder LayerNorm (no pre-LN in this GGUF)
-    VisionPostNormWeight,       // v.post_ln.weight      [1152]            F32
-    VisionPostNormBias,         // v.post_ln.bias        [1152]            F32
+    VisionPostNormWeight, // v.post_ln.weight      [1152]            F32
+    VisionPostNormBias,   // v.post_ln.bias        [1152]            F32
 
     // Per ViT block  (layer index = 0..26)
     VisionBlkAttnQWeight(usize), // v.blk.N.attn_q.weight   [1152, 1152]  F16
@@ -47,7 +69,7 @@ pub enum WeightId {
     VisionBlkAttnKBias(usize),   // v.blk.N.attn_k.bias     [1152]        F32
     VisionBlkAttnVWeight(usize), // v.blk.N.attn_v.weight   [1152, 1152]  F16
     VisionBlkAttnVBias(usize),   // v.blk.N.attn_v.bias     [1152]        F32
-    VisionBlkAttnOutWeight(usize),// v.blk.N.attn_out.weight [1152, 1152] F16
+    VisionBlkAttnOutWeight(usize), // v.blk.N.attn_out.weight [1152, 1152] F16
     VisionBlkAttnOutBias(usize), // v.blk.N.attn_out.bias   [1152]        F32
     VisionBlkLn1Weight(usize),   // v.blk.N.ln1.weight      [1152]        F32
     VisionBlkLn1Bias(usize),     // v.blk.N.ln1.bias        [1152]        F32
@@ -55,29 +77,29 @@ pub enum WeightId {
     VisionBlkLn2Bias(usize),     // v.blk.N.ln2.bias        [1152]        F32
     VisionBlkFfnUpWeight(usize), // v.blk.N.ffn_up.weight   [1152, 4304]  F16
     VisionBlkFfnUpBias(usize),   // v.blk.N.ffn_up.bias     [4304]        F32
-    VisionBlkFfnDownWeight(usize),// v.blk.N.ffn_down.weight [4304, 1152] F16
+    VisionBlkFfnDownWeight(usize), // v.blk.N.ffn_down.weight [4304, 1152] F16
     VisionBlkFfnDownBias(usize), // v.blk.N.ffn_down.bias   [1152]        F32
 
     // ── Perceiver Resampler ───────────────────────────────────────────────────
     // GGUF prefix: "resampler."
-    ResamplerQuery,           // resampler.query          [64, 3584]      F32
-    ResamplerKvWeight,        // resampler.kv.weight      [1152, 3584]    F16  (ViT→LLM space)
-    ResamplerLnQWeight,       // resampler.ln_q.weight    [3584]          F32
-    ResamplerLnQBias,         // resampler.ln_q.bias      [3584]          F32
-    ResamplerLnKvWeight,      // resampler.ln_kv.weight   [3584]          F32  (post kv-proj)
-    ResamplerLnKvBias,        // resampler.ln_kv.bias     [3584]          F32
-    ResamplerAttnQWeight,     // resampler.attn.q.weight  [3584, 3584]    F16
-    ResamplerAttnQBias,       // resampler.attn.q.bias    [3584]          F32
-    ResamplerAttnKWeight,     // resampler.attn.k.weight  [3584, 3584]    F16
-    ResamplerAttnKBias,       // resampler.attn.k.bias    [3584]          F32
-    ResamplerAttnVWeight,     // resampler.attn.v.weight  [3584, 3584]    F16
-    ResamplerAttnVBias,       // resampler.attn.v.bias    [3584]          F32
-    ResamplerAttnOutWeight,   // resampler.attn.out.weight [3584, 3584]   F16
-    ResamplerAttnOutBias,     // resampler.attn.out.bias  [3584]          F32
-    ResamplerPosEmbedK,       // resampler.pos_embed_k    [4900, 3584]    F32  (positional embed for K)
-    ResamplerLnPostWeight,    // resampler.ln_post.weight [3584]          F32
-    ResamplerLnPostBias,      // resampler.ln_post.bias   [3584]          F32
-    ResamplerProjWeight,      // resampler.proj.weight    [3584, 3584]    F16
+    ResamplerQuery,         // resampler.query          [64, 3584]      F32
+    ResamplerKvWeight,      // resampler.kv.weight      [1152, 3584]    F16  (ViT→LLM space)
+    ResamplerLnQWeight,     // resampler.ln_q.weight    [3584]          F32
+    ResamplerLnQBias,       // resampler.ln_q.bias      [3584]          F32
+    ResamplerLnKvWeight,    // resampler.ln_kv.weight   [3584]          F32  (post kv-proj)
+    ResamplerLnKvBias,      // resampler.ln_kv.bias     [3584]          F32
+    ResamplerAttnQWeight,   // resampler.attn.q.weight  [3584, 3584]    F16
+    ResamplerAttnQBias,     // resampler.attn.q.bias    [3584]          F32
+    ResamplerAttnKWeight,   // resampler.attn.k.weight  [3584, 3584]    F16
+    ResamplerAttnKBias,     // resampler.attn.k.bias    [3584]          F32
+    ResamplerAttnVWeight,   // resampler.attn.v.weight  [3584, 3584]    F16
+    ResamplerAttnVBias,     // resampler.attn.v.bias    [3584]          F32
+    ResamplerAttnOutWeight, // resampler.attn.out.weight [3584, 3584]   F16
+    ResamplerAttnOutBias,   // resampler.attn.out.bias  [3584]          F32
+    ResamplerPosEmbedK, // resampler.pos_embed_k    [4900, 3584]    F32  (positional embed for K)
+    ResamplerLnPostWeight, // resampler.ln_post.weight [3584]          F32
+    ResamplerLnPostBias, // resampler.ln_post.bias   [3584]          F32
+    ResamplerProjWeight, // resampler.proj.weight    [3584, 3584]    F16
 }
 
 impl WeightId {

@@ -74,7 +74,11 @@ impl PreflightResources {
         let n_pairs = dim / 2;
         let max_dist = spec.n_ctx;
 
-        let l_train = if scale < 1.0 { (max_dist as f32 * scale).round() as usize } else { max_dist };
+        let l_train = if scale < 1.0 {
+            (max_dist as f32 * scale).round() as usize
+        } else {
+            max_dist
+        };
         let alpha = spec.yarn_alpha;
         let beta = spec.yarn_beta;
         let use_yarn = scale < 1.0 && alpha > 0.0 && beta > alpha;
@@ -87,9 +91,9 @@ impl PreflightResources {
                     return theta * scale; // plain linear or native
                 }
                 let lambda = std::f32::consts::TAU / theta; // wavelength = 2*pi / theta
-                // ramp: 1.0 at short wavelengths, 0.0 at long wavelengths.
-                // Per YaRN: high-freq dims skip scaling; low-freq dims get full linear scaling.
-                // Lerp: ramp drives theta toward 1.0 for high-freq, toward scale for low-freq.
+                                                            // ramp: 1.0 at short wavelengths, 0.0 at long wavelengths.
+                                                            // Per YaRN: high-freq dims skip scaling; low-freq dims get full linear scaling.
+                                                            // Lerp: ramp drives theta toward 1.0 for high-freq, toward scale for low-freq.
                 let ramp = ((l_train as f32 / lambda - alpha) / (beta - alpha)).clamp(0.0, 1.0);
                 theta * ((1.0 - ramp) * scale + ramp)
             })
@@ -107,12 +111,23 @@ impl PreflightResources {
         table
     }
 
-    fn upload_rope_table(device: &wgpu::Device, rope_floats: &[f32], scale: f32, spec: &ModelSpec) -> wgpu::Buffer {
+    fn upload_rope_table(
+        device: &wgpu::Device,
+        rope_floats: &[f32],
+        scale: f32,
+        spec: &ModelSpec,
+    ) -> wgpu::Buffer {
         let n_pairs = spec.rope_dim / 2;
         let max_dist = spec.n_ctx;
         let table_len = max_dist * n_pairs * 2;
         let use_yarn = scale < 1.0 && spec.yarn_alpha > 0.0 && spec.yarn_beta > spec.yarn_alpha;
-        let scaling_mode = if scale >= 1.0 { "native" } else if use_yarn { "YaRN" } else { "linear" };
+        let scaling_mode = if scale >= 1.0 {
+            "native"
+        } else if use_yarn {
+            "YaRN"
+        } else {
+            "linear"
+        };
         println!(
             "[Preflight] RoPE Lookup Table: {}×{} = {} entries ({:.1} KB, Base={}, Dim={}, Scale={}, Mode={})",
             max_dist, n_pairs, table_len,
@@ -211,7 +226,7 @@ impl PreflightResources {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::spec::{ModelArch, GgufFileType};
+    use crate::core::spec::{GgufFileType, ModelArch};
 
     /// Minimal spec for RoPE math tests — no GPU required.
     fn tiny_spec(rope_scale: f32, yarn_alpha: f32, yarn_beta: f32) -> ModelSpec {

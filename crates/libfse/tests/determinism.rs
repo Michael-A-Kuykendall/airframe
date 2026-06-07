@@ -12,7 +12,7 @@ mod tests {
         let rules = vec![
             Rule::new("apple", FseOpcode::Record(1)),
             Rule::new("banana", FseOpcode::Record(2)),
-            Rule::new("cherry", FseOpcode::Ignore), 
+            Rule::new("cherry", FseOpcode::Ignore),
         ];
 
         let map = FseMap::compile(rules).unwrap();
@@ -22,7 +22,7 @@ mod tests {
 
         // Run 1: Cold Start
         let r1 = scanner.scan(input).unwrap();
-        
+
         // Assert Baseline properties
         assert_eq!(r1.rules_recorded, 2, "Should record apple(1) and banana(2)");
 
@@ -34,13 +34,16 @@ mod tests {
             let ri = scanner.scan(input).unwrap();
 
             // Strict Equality Check
-            assert_eq!(ri.rules_recorded, r1.rules_recorded, 
-                "Divergence at iteration {}: Expected {} recorded rules, got {}", 
+            assert_eq!(
+                ri.rules_recorded, r1.rules_recorded,
+                "Divergence at iteration {}: Expected {} recorded rules, got {}",
                 i, r1.rules_recorded, ri.rules_recorded
             );
-            
-            assert_eq!(ri.match_states_seen, r1.match_states_seen,
-                "Divergence at iteration {}: Match states count differed", i
+
+            assert_eq!(
+                ri.match_states_seen, r1.match_states_seen,
+                "Divergence at iteration {}: Match states count differed",
+                i
             );
         }
     }

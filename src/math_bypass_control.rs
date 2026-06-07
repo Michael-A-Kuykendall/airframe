@@ -94,20 +94,20 @@ pub fn detect_and_compute(prompt: &str) -> Option<i64> {
     // Ordered so longer phrases match before substrings
     let ops: &[OpEntry] = &[
         ("multiplied by", |a, b| a.checked_mul(b)),
-        ("divided by",    |a, b| if b == 0 { None } else { Some(a / b) }),
-        ("added to",      |a, b| a.checked_add(b)),
-        ("subtracted",    |a, b| a.checked_sub(b)),
-        ("times",         |a, b| a.checked_mul(b)),
-        ("plus",          |a, b| a.checked_add(b)),
-        ("minus",         |a, b| a.checked_sub(b)),
-        ("÷",             |a, b| if b == 0 { None } else { Some(a / b) }),
-        ("×",             |a, b| a.checked_mul(b)),
+        ("divided by", |a, b| if b == 0 { None } else { Some(a / b) }),
+        ("added to", |a, b| a.checked_add(b)),
+        ("subtracted", |a, b| a.checked_sub(b)),
+        ("times", |a, b| a.checked_mul(b)),
+        ("plus", |a, b| a.checked_add(b)),
+        ("minus", |a, b| a.checked_sub(b)),
+        ("÷", |a, b| if b == 0 { None } else { Some(a / b) }),
+        ("×", |a, b| a.checked_mul(b)),
     ];
 
     for (op_str, compute) in ops {
         if let Some(op_pos) = lower.find(op_str) {
             let before = &lower[..op_pos];
-            let after  = &lower[op_pos + op_str.len()..];
+            let after = &lower[op_pos + op_str.len()..];
             if let (Some(a), Some(b)) = (last_integer(before), first_integer(after)) {
                 if let Some(result) = compute(a, b) {
                     return Some(result);
@@ -166,17 +166,26 @@ mod tests {
 
     #[test]
     fn times_word() {
-        assert_eq!(ev("What is 37 times 4? Reply with only the number."), Some(148));
+        assert_eq!(
+            ev("What is 37 times 4? Reply with only the number."),
+            Some(148)
+        );
     }
 
     #[test]
     fn times_word_large_carry() {
-        assert_eq!(ev("What is 77 times 77? Reply with only the number."), Some(5929));
+        assert_eq!(
+            ev("What is 77 times 77? Reply with only the number."),
+            Some(5929)
+        );
     }
 
     #[test]
     fn times_word_carry_medium() {
-        assert_eq!(ev("What is 48 times 52? Reply with only the number."), Some(2496));
+        assert_eq!(
+            ev("What is 48 times 52? Reply with only the number."),
+            Some(2496)
+        );
     }
 
     #[test]
@@ -193,31 +202,46 @@ mod tests {
 
     #[test]
     fn plus_word() {
-        assert_eq!(ev("What is 127 plus 456? Reply with only the number."), Some(583));
+        assert_eq!(
+            ev("What is 127 plus 456? Reply with only the number."),
+            Some(583)
+        );
     }
 
     #[test]
     fn plus_carry() {
-        assert_eq!(ev("What is 999 plus 1? Reply with only the number."), Some(1000));
+        assert_eq!(
+            ev("What is 999 plus 1? Reply with only the number."),
+            Some(1000)
+        );
     }
 
     // ── Subtraction ──────────────────────────────────────────────────────────
 
     #[test]
     fn minus_word() {
-        assert_eq!(ev("What is 100 minus 37? Reply with only the number."), Some(63));
+        assert_eq!(
+            ev("What is 100 minus 37? Reply with only the number."),
+            Some(63)
+        );
     }
 
     #[test]
     fn minus_large() {
-        assert_eq!(ev("What is 1000 minus 1? Reply with only the number."), Some(999));
+        assert_eq!(
+            ev("What is 1000 minus 1? Reply with only the number."),
+            Some(999)
+        );
     }
 
     // ── Division ─────────────────────────────────────────────────────────────
 
     #[test]
     fn divided_by_phrase() {
-        assert_eq!(ev("What is 144 divided by 12? Reply with only the number."), Some(12));
+        assert_eq!(
+            ev("What is 144 divided by 12? Reply with only the number."),
+            Some(12)
+        );
     }
 
     #[test]
@@ -239,6 +263,9 @@ mod tests {
 
     #[test]
     fn geography_system_prompt_is_none() {
-        assert_eq!(ev("You are a geography expert. Always mention the word GEOGRAPHY."), None);
+        assert_eq!(
+            ev("You are a geography expert. Always mention the word GEOGRAPHY."),
+            None
+        );
     }
 }

@@ -226,7 +226,7 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
     let s1 = dot1 * scale;
     let (w0, w1) = softmax2(s0, s1);
 
-    let v0 = v_cache_vals[((kv_head * head_dim))];
+    let v0 = v_cache_vals[(kv_head * head_dim)];
     let v1 = v_cache_vals[((n_head_kv * head_dim) + (kv_head * head_dim))];
     let context_d0 = w0 * v0 + w1 * v1;
 

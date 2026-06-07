@@ -12,8 +12,7 @@ use crate::core::{
 ///
 /// `len` must mirror `KvCache::current_len`.
 /// `version` is monotonic and currently equals `len`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct KvSnapshot {
     pub len: usize,
     pub version: usize,

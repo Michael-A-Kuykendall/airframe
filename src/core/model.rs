@@ -1,5 +1,4 @@
 use crate::core::dequant::{dequantize_q4_k, dequantize_q6_k};
-use half::f16;
 use crate::core::ggml_types::{ggml_type_bytes_per_tensor, ggml_type_name, validate_tensor_bounds};
 use crate::core::{
     error::{LibshimmyError, Result},
@@ -9,6 +8,7 @@ use crate::core::{
 };
 use crate::ensure;
 use byteorder::{LittleEndian, ReadBytesExt};
+use half::f16;
 // TODO: migrate println!/eprintln! calls to tracing::{info!, debug!} (post-v2.0 telemetry cleanup)
 use memmap2::Mmap;
 use std::collections::HashMap;
@@ -204,16 +204,17 @@ pub fn load_mmproj_gguf_raw<P: AsRef<std::path::Path>>(
 ) -> Result<(Vec<GgufTensorInfo>, Mmap, u64)> {
     let file = std::fs::File::open(&path).map_err(LibshimmyError::Io)?;
     let file_len = file.metadata().map_err(LibshimmyError::Io)?.len();
-    let mmap = unsafe { Mmap::map(&file) }.map_err(|e| {
-        LibshimmyError::Io(std::io::Error::other(format!("mmap failed: {}", e)))
-    })?;
+    let mmap = unsafe { Mmap::map(&file) }
+        .map_err(|e| LibshimmyError::Io(std::io::Error::other(format!("mmap failed: {}", e))))?;
 
     let mut cursor = std::io::Cursor::new(&mmap[..]);
     let header = parse_gguf_header(&mut cursor)?;
 
     println!(
         "📁 mmproj: {} bytes ({:.1} MB), {} tensors",
-        file_len, file_len as f64 / 1_048_576.0, header.tensor_count
+        file_len,
+        file_len as f64 / 1_048_576.0,
+        header.tensor_count
     );
 
     let metadata = parse_metadata(&mut cursor, header.metadata_kv_count)?;
@@ -1152,7 +1153,8 @@ fn load_tensor_by_type(
     tensor_data_base_offset: u64,
 ) -> Result<Tensor> {
     match tensor_info.ggml_type {
-        0 => { // F32
+        0 => {
+            // F32
             // F32: raw little-endian floats
             let total_elements: usize = tensor_info.dimensions.iter().product();
             let byte_len =
@@ -1181,20 +1183,30 @@ fn load_tensor_by_type(
             }
             Tensor::new(out, tensor_info.dimensions.clone())
         }
-        1 => { // F16 — convert IEEE 754 half-precision to f32
+        1 => {
+            // F16 — convert IEEE 754 half-precision to f32
             let total_elements: usize = tensor_info.dimensions.iter().product();
-            let byte_len = total_elements.checked_mul(2).ok_or_else(|| LibshimmyError::FixtureError {
-                msg: format!("F16 byte length overflow for tensor '{}': {:?}", tensor_info.name, tensor_info.dimensions),
-            })?;
+            let byte_len =
+                total_elements
+                    .checked_mul(2)
+                    .ok_or_else(|| LibshimmyError::FixtureError {
+                        msg: format!(
+                            "F16 byte length overflow for tensor '{}': {:?}",
+                            tensor_info.name, tensor_info.dimensions
+                        ),
+                    })?;
             let data_start = (tensor_data_base_offset + tensor_info.offset) as usize;
             let data_end = data_start + byte_len;
             ensure!(
                 data_end <= mmap.len(),
                 "Tensor '{}' extends beyond file (F16): end={} > file_len={}",
-                tensor_info.name, data_end, mmap.len()
+                tensor_info.name,
+                data_end,
+                mmap.len()
             );
             let bytes = &mmap[data_start..data_end];
-            let out: Vec<f32> = bytes.chunks_exact(2)
+            let out: Vec<f32> = bytes
+                .chunks_exact(2)
                 .map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32())
                 .collect();
             Tensor::new(out, tensor_info.dimensions.clone())

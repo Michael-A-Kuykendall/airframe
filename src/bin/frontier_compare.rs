@@ -117,10 +117,13 @@ async fn async_main() -> Result<()> {
     let tokenizer = Tokenizer::from_gguf_file(&args.model).map_err(|err| {
         LibshimmyError::Unsupported(format!("failed to load tokenizer from GGUF: {err}"))
     })?;
-    let prompt_tokens_u32 = tokenizer.encode(&prompt, true).map_err(|err| {
-        LibshimmyError::Unsupported(format!("failed to tokenize prompt: {err}"))
-    })?;
-    let prompt_tokens: Vec<usize> = prompt_tokens_u32.iter().map(|&token| token as usize).collect();
+    let prompt_tokens_u32 = tokenizer
+        .encode(&prompt, true)
+        .map_err(|err| LibshimmyError::Unsupported(format!("failed to tokenize prompt: {err}")))?;
+    let prompt_tokens: Vec<usize> = prompt_tokens_u32
+        .iter()
+        .map(|&token| token as usize)
+        .collect();
     if prompt_tokens.is_empty() {
         return Err(LibshimmyError::Unsupported(
             "prompt must contain at least one token".to_string(),
@@ -172,7 +175,8 @@ async fn async_main() -> Result<()> {
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
     limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
-    limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage;
+    limits.max_storage_buffers_per_shader_stage =
+        adapter_limits.max_storage_buffers_per_shader_stage;
     limits.max_compute_invocations_per_workgroup = 256;
 
     let (device, queue) = adapter
@@ -182,11 +186,14 @@ async fn async_main() -> Result<()> {
             ..Default::default()
         })
         .await
-        .map_err(|err| LibshimmyError::Unsupported(format!("failed to create GPU device: {err}")))?;
+        .map_err(|err| {
+            LibshimmyError::Unsupported(format!("failed to create GPU device: {err}"))
+        })?;
 
     let gpu_model = BindlessModel::load_from_disk(&device, &args.model, Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
-    let output_head_f32 = load_output_head_f32(&args.model, &gpu_model, &device, &spec)?;    let gpu_cache_max_len = spec.n_ctx as u32;
+    let output_head_f32 = load_output_head_f32(&args.model, &gpu_model, &device, &spec)?;
+    let gpu_cache_max_len = spec.n_ctx as u32;
     let mut gpu_kv = GpuKvCache::new(
         &device,
         spec.n_layer,
@@ -206,7 +213,11 @@ async fn async_main() -> Result<()> {
 
     if !prefix_tokens.is_empty() {
         {
-            eprintln!("[GPU prefill] {} tokens in chunks of {} ...", prefix_tokens.len(), args.chunk_tokens);
+            eprintln!(
+                "[GPU prefill] {} tokens in chunks of {} ...",
+                prefix_tokens.len(),
+                args.chunk_tokens
+            );
             let prefix_embd = dequantize_embeddings(
                 &pipeline,
                 &device,
@@ -252,7 +263,10 @@ async fn async_main() -> Result<()> {
             eprintln!("[CPU prefill] done");
         }
 
-        eprintln!("[CPU decode] running target token through all {} layers ...", spec.n_layer);
+        eprintln!(
+            "[CPU decode] running target token through all {} layers ...",
+            spec.n_layer
+        );
         let cpu_layers = cpu_debug_target_token(&weights, &ops, &spec, &mut cpu_kv, &target_input)?;
         eprintln!("[CPU decode] done");
         cpu_kv.complete_decode()?;
@@ -294,8 +308,8 @@ async fn async_main() -> Result<()> {
                 name: format!("layer_offsets_{layer_idx}"),
             })?;
 
-        let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) =
-            pipeline.run_layer_with_cache_debug(
+        let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = pipeline
+            .run_layer_with_cache_debug(
                 &device,
                 &queue,
                 &gpu_model,
@@ -316,8 +330,10 @@ async fn async_main() -> Result<()> {
             ffn_out: summarize_pair(&cpu_layer.ffn_out, &gpu_ffn_out),
             output: summarize_pair(&cpu_layer.output, &gpu_output),
         };
-        eprintln!("  layer {:2}: output MAE={:.6}  post_attn MAE={:.6}",
-            layer_idx, cmp.output.mean_abs_err, cmp.post_attn.mean_abs_err);
+        eprintln!(
+            "  layer {:2}: output MAE={:.6}  post_attn MAE={:.6}",
+            layer_idx, cmp.output.mean_abs_err, cmp.post_attn.mean_abs_err
+        );
         layer_comparisons.push(cmp);
 
         gpu_hidden = gpu_output;
@@ -325,18 +341,23 @@ async fn async_main() -> Result<()> {
     eprintln!("[GPU vs CPU] done");
     let _ = gpu_kv.increment();
 
-    let output_norm = weights
-        .get(&WeightId::OutputNorm)
-        .ok_or_else(|| LibshimmyError::MissingTensor {
-            name: "output_norm.weight".to_string(),
-        })?;
-    let output_proj = weights
-        .get(&WeightId::OutputProj)
-        .ok_or_else(|| LibshimmyError::MissingTensor {
-            name: "output.weight".to_string(),
-        })?;
+    let output_norm =
+        weights
+            .get(&WeightId::OutputNorm)
+            .ok_or_else(|| LibshimmyError::MissingTensor {
+                name: "output_norm.weight".to_string(),
+            })?;
+    let output_proj =
+        weights
+            .get(&WeightId::OutputProj)
+            .ok_or_else(|| LibshimmyError::MissingTensor {
+                name: "output.weight".to_string(),
+            })?;
 
-    let cpu_hidden_tensor = Tensor::new(gpu_to_row(cpu_hidden_vec, spec.n_embd), vec![1, spec.n_embd])?;
+    let cpu_hidden_tensor = Tensor::new(
+        gpu_to_row(cpu_hidden_vec, spec.n_embd),
+        vec![1, spec.n_embd],
+    )?;
     let cpu_norm = ops.rmsnorm(&cpu_hidden_tensor, output_norm, spec.rms_eps)?;
     let cpu_logits = ops.matmul(&cpu_norm, output_proj)?.data;
 
@@ -381,7 +402,10 @@ async fn async_main() -> Result<()> {
         LibshimmyError::Unsupported(format!("failed to serialize probe output: {err}"))
     })?;
     fs::write(&args.output, json).map_err(|err| {
-        LibshimmyError::Unsupported(format!("failed to write output {}: {err}", args.output.display()))
+        LibshimmyError::Unsupported(format!(
+            "failed to write output {}: {err}",
+            args.output.display()
+        ))
     })?;
 
     eprintln!("[done] wrote {}", args.output.display());
@@ -393,7 +417,10 @@ fn load_prompt(args: &Args) -> Result<String> {
     match (&args.prompt, &args.prompt_file) {
         (Some(prompt), None) => Ok(prompt.clone()),
         (None, Some(path)) => fs::read_to_string(path).map_err(|err| {
-            LibshimmyError::Unsupported(format!("failed to read prompt file {}: {err}", path.display()))
+            LibshimmyError::Unsupported(format!(
+                "failed to read prompt file {}: {err}",
+                path.display()
+            ))
         }),
         (Some(_), Some(_)) => Err(LibshimmyError::Unsupported(
             "pass either --prompt or --prompt-file, not both".to_string(),
@@ -404,12 +431,17 @@ fn load_prompt(args: &Args) -> Result<String> {
     }
 }
 
-fn token_embedding(weights: &HashMap<WeightId, Tensor>, token_id: usize, dim: usize) -> Result<Vec<f32>> {
-    let token_embed = weights
-        .get(&WeightId::TokenEmbed)
-        .ok_or_else(|| LibshimmyError::MissingTensor {
-            name: "token_embd.weight".to_string(),
-        })?;
+fn token_embedding(
+    weights: &HashMap<WeightId, Tensor>,
+    token_id: usize,
+    dim: usize,
+) -> Result<Vec<f32>> {
+    let token_embed =
+        weights
+            .get(&WeightId::TokenEmbed)
+            .ok_or_else(|| LibshimmyError::MissingTensor {
+                name: "token_embd.weight".to_string(),
+            })?;
     let start = token_id * dim;
     let end = start + dim;
     if end > token_embed.data.len() {
@@ -484,11 +516,13 @@ fn load_output_head_f32(
     let tensor_f32 = dequantize_q6_k(&tensor_info, &mmap, gpu_model.metadata.data_start_offset)?;
 
     use wgpu::util::DeviceExt;
-    Ok(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Frontier Output Head F32"),
-        contents: bytemuck::cast_slice(&tensor_f32.data),
-        usage: wgpu::BufferUsages::STORAGE,
-    }))
+    Ok(
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Frontier Output Head F32"),
+            contents: bytemuck::cast_slice(&tensor_f32.data),
+            usage: wgpu::BufferUsages::STORAGE,
+        }),
+    )
 }
 
 fn cpu_debug_target_token(
@@ -499,56 +533,59 @@ fn cpu_debug_target_token(
     target_input: &[f32],
 ) -> Result<Vec<CpuLayerDebug>> {
     let model = LlamaModel::from_spec(spec.clone());
-    let mut hidden = Tensor::new(gpu_to_row(target_input.to_vec(), spec.n_embd), vec![1, spec.n_embd])?;
+    let mut hidden = Tensor::new(
+        gpu_to_row(target_input.to_vec(), spec.n_embd),
+        vec![1, spec.n_embd],
+    )?;
     let mut out = Vec::with_capacity(spec.n_layer);
     let position_ids = vec![kv_cache.len()];
 
     for layer_idx in 0..spec.n_layer {
-        let attn_norm = weights.get(&WeightId::AttnNorm { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+        let attn_norm = weights
+            .get(&WeightId::AttnNorm { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.attn_norm.weight"),
-            }
-        })?;
-        let q_weight = weights.get(&WeightId::AttnQ { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+            })?;
+        let q_weight = weights
+            .get(&WeightId::AttnQ { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.attn_q.weight"),
-            }
-        })?;
-        let k_weight = weights.get(&WeightId::AttnK { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+            })?;
+        let k_weight = weights
+            .get(&WeightId::AttnK { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.attn_k.weight"),
-            }
-        })?;
-        let v_weight = weights.get(&WeightId::AttnV { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+            })?;
+        let v_weight = weights
+            .get(&WeightId::AttnV { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.attn_v.weight"),
-            }
-        })?;
-        let o_weight = weights.get(&WeightId::AttnO { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+            })?;
+        let o_weight = weights
+            .get(&WeightId::AttnO { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.attn_output.weight"),
-            }
-        })?;
-        let ffn_norm = weights.get(&WeightId::FfnNorm { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+            })?;
+        let ffn_norm = weights
+            .get(&WeightId::FfnNorm { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.ffn_norm.weight"),
-            }
-        })?;
-        let gate = weights.get(&WeightId::FfnGate { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+            })?;
+        let gate = weights
+            .get(&WeightId::FfnGate { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.ffn_gate.weight"),
-            }
-        })?;
-        let up = weights.get(&WeightId::FfnUp { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+            })?;
+        let up = weights
+            .get(&WeightId::FfnUp { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.ffn_up.weight"),
-            }
-        })?;
-        let down = weights.get(&WeightId::FfnDown { layer: layer_idx }).ok_or_else(|| {
-            LibshimmyError::MissingTensor {
+            })?;
+        let down = weights
+            .get(&WeightId::FfnDown { layer: layer_idx })
+            .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: format!("blk.{layer_idx}.ffn_down.weight"),
-            }
-        })?;
+            })?;
 
         let attn_input = ops.rmsnorm(&hidden, attn_norm, spec.rms_eps)?;
         let q = ops.matmul(&attn_input, q_weight)?.data;
@@ -606,7 +643,11 @@ fn summarize_pair(cpu: &[f32], gpu: &[f32]) -> SummaryStats {
 
     SummaryStats {
         max_abs_err,
-        mean_abs_err: if cpu.is_empty() { 0.0 } else { sum_abs_err / cpu.len() as f32 },
+        mean_abs_err: if cpu.is_empty() {
+            0.0
+        } else {
+            sum_abs_err / cpu.len() as f32
+        },
         cpu_absmax: absmax(cpu),
         gpu_absmax: absmax(gpu),
         cpu_rms: rms(cpu),
@@ -644,4 +685,3 @@ fn gpu_to_row(values: Vec<f32>, dim: usize) -> Vec<f32> {
     assert_eq!(values.len(), dim, "expected one token row");
     values
 }
-

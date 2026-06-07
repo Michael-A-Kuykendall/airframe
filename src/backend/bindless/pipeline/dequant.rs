@@ -1,6 +1,6 @@
 //! Dequantisation and probe dispatch methods for `BindlessPipeline`.
-use super::*;
 use super::super::loader::BindlessModel;
+use super::*;
 use wgpu::util::DeviceExt;
 
 impl BindlessPipeline {
@@ -70,7 +70,9 @@ impl BindlessPipeline {
 
         // Loop poll until mapped
         loop {
-            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            device
+                .poll(wgpu::PollType::Poll)
+                .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
@@ -159,7 +161,9 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
         loop {
-            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            device
+                .poll(wgpu::PollType::Poll)
+                .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
@@ -253,7 +257,9 @@ impl BindlessPipeline {
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
         loop {
-            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            device
+                .poll(wgpu::PollType::Poll)
+                .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.unwrap();
                 break;
@@ -402,7 +408,9 @@ impl BindlessPipeline {
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
         loop {
-            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            device
+                .poll(wgpu::PollType::Poll)
+                .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.unwrap();
                 break;

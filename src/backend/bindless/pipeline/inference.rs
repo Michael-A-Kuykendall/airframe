@@ -1,7 +1,7 @@
 //! Full-model inference dispatch methods for `BindlessPipeline`.
 // TODO: break run_full_model_prefill_chunked_with_cache_state into a separate chunking helper once prefill chunking is the default path.
-use super::*;
 use super::super::loader::BindlessModel;
+use super::*;
 use crate::core::routing::ModelRoutePlan;
 use wgpu::util::DeviceExt;
 
@@ -72,7 +72,10 @@ impl BindlessPipeline {
     ) -> InferenceResult {
         let dim = spec.n_embd;
         assert!(dim > 0, "spec.n_embd must be > 0");
-        assert!(input_embd.len() % dim == 0, "input_embd must align to token rows");
+        assert!(
+            input_embd.len() % dim == 0,
+            "input_embd must align to token rows"
+        );
         assert!(chunk_tokens > 0, "chunk_tokens must be > 0");
 
         let trace_chunks = std::env::var("AIRFRAME_TRACE_PREFILL_CHUNKS")
@@ -107,10 +110,7 @@ impl BindlessPipeline {
             if trace_chunks {
                 eprintln!(
                     "[PREFILL] chunk={} tokens={} current_pos={} seq_len={}",
-                    chunk_idx,
-                    chunk_token_count,
-                    chunk_current_pos,
-                    chunk_seq_len
+                    chunk_idx, chunk_token_count, chunk_current_pos, chunk_seq_len
                 );
             }
 
@@ -168,9 +168,8 @@ impl BindlessPipeline {
             .metadata
             .get_tensor_type("blk.0.ffn_down.weight")
             .unwrap_or(weight_quant_type);
-        let packed_quant_type =
-            weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
-        
+        let packed_quant_type = weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
+
         // Q4_K uses different shader pipelines (type 12)
         let use_q4k_pipeline = weight_quant_type == 12;
         let _ = packed_quant_type; // per-layer quant is computed in the loop below
@@ -231,11 +230,7 @@ impl BindlessPipeline {
             attn_logit_softcap: spec.attn_logit_softcap,
             post_norm_enabled: if spec.arch_string() == "gemma2" { 1 } else { 0 },
             qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
-            layer_norm_enabled: if spec.uses_layer_norm() {
-                1
-            } else {
-                0
-            },
+            layer_norm_enabled: if spec.uses_layer_norm() { 1 } else { 0 },
             ffn_kind_policy,
             qkv_layout_policy,
         };
@@ -495,8 +490,15 @@ impl BindlessPipeline {
         } else {
             "token_embd.weight"
         };
-        let head_weight_off = (model.metadata.get_tensor_offset(head_tensor_name).unwrap_or(0) / 4) as u32;
-        let head_quant_type = model.metadata.get_tensor_type(head_tensor_name).unwrap_or(2);
+        let head_weight_off = (model
+            .metadata
+            .get_tensor_offset(head_tensor_name)
+            .unwrap_or(0)
+            / 4) as u32;
+        let head_quant_type = model
+            .metadata
+            .get_tensor_type(head_tensor_name)
+            .unwrap_or(2);
 
         enum HeadBg {
             F32(wgpu::BindGroup),
@@ -619,15 +621,12 @@ impl BindlessPipeline {
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
-// Loop Layers
+        // Loop Layers
         for (i, bg) in layer_bind_groups.iter().enumerate() {
             if trace_prefill_layers {
                 eprintln!(
                     "[PREFILL-LAYER] start layer={} batch_size={} current_pos={} seq_len={}",
-                    i,
-                    batch_size,
-                    current_pos,
-                    seq_len
+                    i, batch_size, current_pos, seq_len
                 );
             }
             // Each kernel in its own compute pass to guarantee memory barriers
@@ -636,17 +635,26 @@ impl BindlessPipeline {
             // Select pipeline based on quantization type (Q4_K vs Q4_0/F16)
             // Note: Q4_K shader only has qkv, attn_out, attn_proj, post_attn_norm, ffn_proj, ffn_down, post_ffn_norm
             //       It does NOT have: attn_norm, qk_norm, ffn_norm, post_ffw_norm - use V1 for those
-            let (pipe_attn_norm, pipe_qkv, pipe_qk_norm, pipe_attn_out, pipe_attn_proj, 
-                 pipe_post_attn_norm, pipe_ffn_norm, pipe_ffn_proj, 
-                 pipe_ffn_down, pipe_post_ffw_norm) = if use_q4k_pipeline {
+            let (
+                pipe_attn_norm,
+                pipe_qkv,
+                pipe_qk_norm,
+                pipe_attn_out,
+                pipe_attn_proj,
+                pipe_post_attn_norm,
+                pipe_ffn_norm,
+                pipe_ffn_proj,
+                pipe_ffn_down,
+                pipe_post_ffw_norm,
+            ) = if use_q4k_pipeline {
                 (
                     &self.layer_pipeline_attn_norm, // Q4K: Use V1 (no main_attn_norm in Q4K shader)
                     &self.layer_pipeline_q4k_qkv,
-                    &self.layer_pipeline_qk_norm,   // Q4K: Use V1 (no main_qk_norm in Q4K shader)
+                    &self.layer_pipeline_qk_norm, // Q4K: Use V1 (no main_qk_norm in Q4K shader)
                     &self.layer_pipeline_q4k_attn_out,
                     &self.layer_pipeline_q4k_attn_proj,
                     &self.layer_pipeline_q4k_post_attn_norm,
-                    &self.layer_pipeline_ffn_norm,  // Q4K: Use V1 (no main_ffn_norm in Q4K shader)
+                    &self.layer_pipeline_ffn_norm, // Q4K: Use V1 (no main_ffn_norm in Q4K shader)
                     &self.layer_pipeline_q4k_ffn_proj,
                     &self.layer_pipeline_q4k_ffn_down,
                     &self.layer_pipeline_post_ffw_norm, // Q4K: Use V1 (no main_post_ffw_norm in Q4K shader)
@@ -665,7 +673,7 @@ impl BindlessPipeline {
                     &self.layer_pipeline_post_ffw_norm,
                 )
             };
-            
+
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - AttnNorm", i)),
@@ -766,13 +774,15 @@ impl BindlessPipeline {
             // the driver may pipeline commands in a way that produces NaN in the residual
             // stream (observed on RTX 3060 with phi-2 and other non-LLaMA architectures).
             queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::PollType::wait_indefinitely())
+            device
+                .poll(wgpu::PollType::wait_indefinitely())
                 .map_err(|_| "GPU device lost or TDR timeout during per-layer wait".to_string())?;
 
             if trace_prefill_layers {
-                let mut trace_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some(&format!("Layer {} Trace Readback", i)),
-                });
+                let mut trace_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(&format!("Layer {} Trace Readback", i)),
+                    });
                 trace_encoder.copy_buffer_to_buffer(
                     &activation_buffer,
                     last_token_offset,
@@ -781,14 +791,18 @@ impl BindlessPipeline {
                     (dim as u64) * 4,
                 );
                 queue.submit(Some(trace_encoder.finish()));
-                device.poll(wgpu::PollType::wait_indefinitely())
-                    .map_err(|_| "GPU device lost or TDR timeout during layer trace readback".to_string())?;
+                device
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .map_err(|_| {
+                        "GPU device lost or TDR timeout during layer trace readback".to_string()
+                    })?;
 
                 let trace_slice = pre_norm_buffer.slice(..);
                 let (tx_trace, rx_trace) = std::sync::mpsc::channel();
                 trace_slice.map_async(wgpu::MapMode::Read, move |res| tx_trace.send(res).unwrap());
                 loop {
-                    device.poll(wgpu::PollType::Poll)
+                    device
+                        .poll(wgpu::PollType::Poll)
                         .map_err(|_| "GPU device lost during layer trace poll".to_string())?;
                     if let Ok(res) = rx_trace.try_recv() {
                         res.map_err(|_| "Layer trace buffer map failed".to_string())?;
@@ -799,8 +813,13 @@ impl BindlessPipeline {
                 let trace_vals: &[f32] = bytemuck::cast_slice(&mapped);
                 let nan_count = trace_vals.iter().filter(|&&x| x.is_nan()).count();
                 let first5: Vec<f32> = trace_vals.iter().take(5).copied().collect();
-                eprintln!("[PREFILL-LAYER-TRACE] layer={} nan={}/{} first5={:?}",
-                    i, nan_count, trace_vals.len(), first5);
+                eprintln!(
+                    "[PREFILL-LAYER-TRACE] layer={} nan={}/{} first5={:?}",
+                    i,
+                    nan_count,
+                    trace_vals.len(),
+                    first5
+                );
                 drop(mapped);
                 pre_norm_buffer.unmap();
             }
@@ -828,7 +847,13 @@ impl BindlessPipeline {
         // LM Head pass reads from temp_buffer (same region that norm writes).
         if disable_output_norm {
             // Diagnostic mode: feed LM head directly from the last-token activation.
-            encoder.copy_buffer_to_buffer(&activation_buffer, last_token_offset, &temp_buffer, 0, (dim as u64) * 4u64);
+            encoder.copy_buffer_to_buffer(
+                &activation_buffer,
+                last_token_offset,
+                &temp_buffer,
+                0,
+                (dim as u64) * 4u64,
+            );
         } else {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Final Norm"),
@@ -888,18 +913,23 @@ impl BindlessPipeline {
         let mut main_done = false;
 
         loop {
-            device.poll(wgpu::PollType::Poll)
+            device
+                .poll(wgpu::PollType::Poll)
                 .map_err(|_| "GPU device lost during readback poll".to_string())?;
-            
+
             if !pre_done {
                 if let Ok(res) = rx_pre.try_recv() {
-                    res.map_err(|_| "Pre-norm buffer map failed. Device lost or TDR timeout.".to_string())?;
+                    res.map_err(|_| {
+                        "Pre-norm buffer map failed. Device lost or TDR timeout.".to_string()
+                    })?;
                     pre_done = true;
                 }
             }
             if !l21_done {
                 if let Ok(res) = rx_l21.try_recv() {
-                    res.map_err(|_| "L21 buffer map failed. Device lost or TDR timeout.".to_string())?;
+                    res.map_err(|_| {
+                        "L21 buffer map failed. Device lost or TDR timeout.".to_string()
+                    })?;
                     l21_done = true;
                 }
             }
@@ -909,7 +939,7 @@ impl BindlessPipeline {
                     main_done = true;
                 }
             }
-            
+
             if pre_done && l21_done && main_done {
                 break;
             }

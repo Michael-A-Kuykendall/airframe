@@ -46,7 +46,8 @@ mod tests {
         let mut limits = wgpu::Limits::downlevel_defaults();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size; // Use what the card has
         limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
-        limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage; // INT4 bind group uses 14 bindings; use adapter max
+        limits.max_storage_buffers_per_shader_stage =
+            adapter_limits.max_storage_buffers_per_shader_stage; // INT4 bind group uses 14 bindings; use adapter max
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -356,7 +357,7 @@ mod tests {
             count: 4,
             weights_offset: 0, // Weights st start of buffer
             bias_offset: 0,
-            eps: 0.0,          // Simplify math
+            eps: 0.0, // Simplify math
             norm_type: 0,
         };
 

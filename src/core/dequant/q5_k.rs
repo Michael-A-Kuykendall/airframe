@@ -115,7 +115,7 @@ fn dequantize_q5_k_block(block: &[u8]) -> std::result::Result<[f32; QK_K], Strin
         let d2 = d * (sc1 as f32);
         let m2 = dmin * (m1u as f32);
 
-        let bit0 = (group * 2) as u32;     // bit position for sub 0
+        let bit0 = (group * 2) as u32; // bit position for sub 0
         let bit1 = (group * 2 + 1) as u32; // bit position for sub 1
 
         // Sub-block 0: elements [group*64 .. group*64+32)
@@ -178,7 +178,12 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn info_q5k(dims: Vec<usize>) -> GgufTensorInfo {
-        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 13, offset: 0 }
+        GgufTensorInfo {
+            name: "t".to_string(),
+            dimensions: dims,
+            ggml_type: 13,
+            offset: 0,
+        }
     }
 
     #[test]
@@ -230,15 +235,15 @@ mod tests {
         // element 64: qh[0] bit 2
         // element 255: qh[31] bit 7
         let mut qh = [0u8; 32];
-        qh[0] = 0b10101010;   // bits 1,3,5,7 set  → elements 32,96,160,224 get high_bit=1
-        qh[31] = 0b00000001;  // bit 0 set          → element 31 gets high_bit=1
+        qh[0] = 0b10101010; // bits 1,3,5,7 set  → elements 32,96,160,224 get high_bit=1
+        qh[31] = 0b00000001; // bit 0 set          → element 31 gets high_bit=1
 
         let check = |i: usize| -> u8 { (qh[i % 32] >> (i / 32)) & 1 };
-        assert_eq!(check(0), 0);   // qh[0] bit 0 = 0
-        assert_eq!(check(32), 1);  // qh[0] bit 1 = 1
-        assert_eq!(check(64), 0);  // qh[0] bit 2 = 0
-        assert_eq!(check(96), 1);  // qh[0] bit 3 = 1
-        assert_eq!(check(31), 1);  // qh[31] bit 0 = 1
+        assert_eq!(check(0), 0); // qh[0] bit 0 = 0
+        assert_eq!(check(32), 1); // qh[0] bit 1 = 1
+        assert_eq!(check(64), 0); // qh[0] bit 2 = 0
+        assert_eq!(check(96), 1); // qh[0] bit 3 = 1
+        assert_eq!(check(31), 1); // qh[31] bit 0 = 1
         assert_eq!(check(255), 0); // qh[31] bit 7 = 0
     }
 }

@@ -26,7 +26,8 @@ mod parity_tests {
         let mut limits = wgpu::Limits::downlevel_defaults();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
         limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
-        limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage; // INT4 bind group uses 14 bindings; use adapter max
+        limits.max_storage_buffers_per_shader_stage =
+            adapter_limits.max_storage_buffers_per_shader_stage; // INT4 bind group uses 14 bindings; use adapter max
         limits.max_compute_invocations_per_workgroup = 256;
 
         let (device, queue) = adapter
@@ -120,7 +121,8 @@ mod parity_tests {
                     "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
                     "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
                 ];
-                candidates.iter()
+                candidates
+                    .iter()
                     .find(|p| PathBuf::from(p).exists())
                     .map(PathBuf::from)
                     .ok_or("Model not found")

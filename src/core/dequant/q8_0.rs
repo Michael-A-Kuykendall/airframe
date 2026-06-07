@@ -97,7 +97,12 @@ mod tests {
     }
 
     fn info(dims: Vec<usize>) -> GgufTensorInfo {
-        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 8, offset: 0 }
+        GgufTensorInfo {
+            name: "t".to_string(),
+            dimensions: dims,
+            ggml_type: 8,
+            offset: 0,
+        }
     }
 
     #[test]
@@ -133,7 +138,11 @@ mod tests {
         qs[0] = 7;
         let (_f, mmap) = make_q8_0_mmap(&[(scale, qs)]);
         let tensor = dequantize_q8_0(&info(vec![32]), &mmap, 0).unwrap();
-        assert!((tensor.data[0] - 14.0).abs() < 0.01, "expected 14.0, got {}", tensor.data[0]);
+        assert!(
+            (tensor.data[0] - 14.0).abs() < 0.01,
+            "expected 14.0, got {}",
+            tensor.data[0]
+        );
     }
 
     #[test]

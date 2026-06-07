@@ -13,15 +13,14 @@
 // (MIT License, Andrew Gallant). The Execution Kernel and Policy Fusion logic
 // are original works subject to the patent notice above.
 
+pub mod metrics;
 pub mod scanner;
 pub mod store;
-pub mod metrics;
 
 #[cfg(test)]
 mod tests_integration;
 
-
-pub use scanner::{FseScanner, ScanSummary, ScanCursor, Violation};
+pub use scanner::{FseScanner, ScanCursor, ScanSummary, Violation};
 pub use store::FseMap;
 // pub mod automaton; // Deprecated by scanner/store
 // pub mod compiler;  // Deprecated by scanner/store

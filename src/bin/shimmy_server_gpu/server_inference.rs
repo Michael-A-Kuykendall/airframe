@@ -7,8 +7,8 @@ use super::*;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
-use airframe::core::routing::ModelRoutePlan;
 use airframe::control::{ControlDecision, InferenceControl, InferenceEvent};
+use airframe::core::routing::ModelRoutePlan;
 use airframe::core::spec::ModelSpec;
 use airframe::debug_trace::{
     topk_from_logits, InferenceTracePackage, LayerTrace, TensorTrace, TokenTrace,
@@ -145,7 +145,10 @@ impl TraceConfig {
             .or_else(|| std::env::var("SHIMMY_INFERENCE_TRACE_PATH").ok())
             .or_else(|| profile.as_deref().and_then(default_trace_path_for_profile))?;
 
-        let profile_active = profile.as_deref().map(|v| !v.trim().is_empty()).unwrap_or(false);
+        let profile_active = profile
+            .as_deref()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false);
         let trace_light_mode = env_flag("SHIMMY_TRACE_LIGHT_MODE");
         let focus_step = env_usize("SHIMMY_TRACE_FOCUS_STEP");
         let focus_layer = env_usize("SHIMMY_TRACE_FOCUS_LAYER");
@@ -206,9 +209,8 @@ impl TraceConfig {
         if step_index < self.start_step {
             return false;
         }
-        self.max_steps.is_none_or(|limit| {
-            step_index.saturating_sub(self.start_step) < limit
-        })
+        self.max_steps
+            .is_none_or(|limit| step_index.saturating_sub(self.start_step) < limit)
     }
 
     fn should_capture_layer(&self, layer_idx: usize) -> bool {
@@ -244,7 +246,10 @@ fn build_layer_trace(
     }
 }
 
-fn write_trace_package(path: &str, trace: &InferenceTracePackage) -> Result<(), Box<dyn std::error::Error>> {
+fn write_trace_package(
+    path: &str,
+    trace: &InferenceTracePackage,
+) -> Result<(), Box<dyn std::error::Error>> {
     let json = serde_json::to_string_pretty(trace)?;
     fs::write(path, json)?;
     Ok(())
@@ -403,7 +408,7 @@ fn build_prefill_embeddings(
     emb_scale: f32,
     dim: usize,
     visual_tokens: Option<&[f32]>, // flat [N_tiles × 64 × dim] f32
-    visual_seq_len: usize,          // N_tiles × 64 (number of visual positions)
+    visual_seq_len: usize,         // N_tiles × 64 (number of visual positions)
 ) -> (Vec<f32>, usize) {
     let mut out: Vec<f32> = Vec::with_capacity(prompt_tokens.len() * dim);
     let mut kv_advance = 0usize;
@@ -422,7 +427,11 @@ fn build_prefill_embeddings(
             }
         }
         let emb_start = token_id as usize * dim;
-        out.extend(embd_table_cpu[emb_start..emb_start + dim].iter().map(|x| x * emb_scale));
+        out.extend(
+            embd_table_cpu[emb_start..emb_start + dim]
+                .iter()
+                .map(|x| x * emb_scale),
+        );
         kv_advance += 1;
     }
     (out, kv_advance)
@@ -487,11 +496,7 @@ fn run_inference_completion(
         );
     }
     if !prior_tokens.is_empty() {
-        prompt_tokens = prior_tokens
-            .iter()
-            .copied()
-            .chain(prompt_tokens)
-            .collect();
+        prompt_tokens = prior_tokens.iter().copied().chain(prompt_tokens).collect();
     }
 
     let (visual_embedding_flat, visual_seq_len): (Option<Vec<f32>>, usize) = (None, 0);
@@ -534,7 +539,10 @@ fn run_inference_completion(
     });
     // Gemma-2 chat stop token (<end_of_turn> = token 107)
     let end_of_turn_token: Option<u32> = tokenizer
-        .encode_with_options("<end_of_turn>", &EncodeOptions::with_parse_special(false, true))
+        .encode_with_options(
+            "<end_of_turn>",
+            &EncodeOptions::with_parse_special(false, true),
+        )
         .ok()
         .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None });
 
@@ -558,7 +566,11 @@ fn run_inference_completion(
     let vocab_texts: Option<Vec<String>> = if grammar_state.is_some() {
         Some(
             (0..spec.n_vocab)
-                .map(|tid| tokenizer.decode_single(tid as u32, true).unwrap_or_default())
+                .map(|tid| {
+                    tokenizer
+                        .decode_single(tid as u32, true)
+                        .unwrap_or_default()
+                })
                 .collect(),
         )
     } else {
@@ -631,7 +643,11 @@ fn run_inference_completion(
         temp_stride: spec.temp_buffer_size as u32,
         quant_type: packed_quant_type,
         attn_logit_softcap: spec.attn_logit_softcap,
-        post_norm_enabled: if spec.arch_string().contains("gemma") { 1 } else { 0 },
+        post_norm_enabled: if spec.arch_string().contains("gemma") {
+            1
+        } else {
+            0
+        },
         qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
         layer_norm_enabled: layer_norm_mode,
         ffn_kind_policy: 0,
@@ -708,7 +724,11 @@ fn run_inference_completion(
             } else {
                 (&preflight.rope_data_ext, "extended")
             };
-            queue.write_buffer(&preflight.rope_cache_buffer, 0, bytemuck::cast_slice(rope_data));
+            queue.write_buffer(
+                &preflight.rope_cache_buffer,
+                0,
+                bytemuck::cast_slice(rope_data),
+            );
             eprintln!(
                 "[GPU Server] RoPE: {} (seq_needed={}, l_train={})",
                 mode_label, total_seq, l_train
@@ -752,94 +772,131 @@ fn run_inference_completion(
                 } else {
                     None
                 };
-                let n_positions: usize = if visual_slice.is_some() { visual_seq_len } else { 1 };
+                let n_positions: usize = if visual_slice.is_some() {
+                    visual_seq_len
+                } else {
+                    1
+                };
 
                 for vis_pos in 0..n_positions {
                     let layer_output_init: Vec<f32> = if let Some(vt) = visual_slice {
                         let start = (visual_offset + vis_pos) * visual_token_dim;
-                        vt[start..start + visual_token_dim].iter().map(|x| x * emb_scale).collect()
+                        vt[start..start + visual_token_dim]
+                            .iter()
+                            .map(|x| x * emb_scale)
+                            .collect()
                     } else {
                         let emb_start = token_id as usize * dim as usize;
-                        embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale).collect()
+                        embd_table_cpu[emb_start..emb_start + dim as usize]
+                            .iter()
+                            .map(|x| x * emb_scale)
+                            .collect()
                     };
-                let mut layer_output = layer_output_init;
-                let (cache_len_before, window_base_before) = {
-                    let cache = kv_cache.lock().unwrap();
-                    (cache.get_seq_len(), cache.get_window_base())
-                };
-                let mut layer_traces = Vec::new();
+                    let mut layer_output = layer_output_init;
+                    let (cache_len_before, window_base_before) = {
+                        let cache = kv_cache.lock().unwrap();
+                        (cache.get_seq_len(), cache.get_window_base())
+                    };
+                    let mut layer_traces = Vec::new();
 
-                for layer_idx in 0..spec.n_layer {
-                    let compiled = &model.metadata.compiled_layers[layer_idx];
-                    let layer_params_l = LayerParams { quant_type: compiled.quant_type_packed, ..layer_params };
+                    for layer_idx in 0..spec.n_layer {
+                        let compiled = &model.metadata.compiled_layers[layer_idx];
+                        let layer_params_l = LayerParams {
+                            quant_type: compiled.quant_type_packed,
+                            ..layer_params
+                        };
 
-                    let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = {
-                        let mut cache = kv_cache.lock().unwrap();
-                        pipeline.run_layer_with_cache_debug(
+                        let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = {
+                            let mut cache = kv_cache.lock().unwrap();
+                            pipeline.run_layer_with_cache_debug(
+                                device,
+                                queue,
+                                model,
+                                &mut cache,
+                                layer_idx,
+                                &layer_output,
+                                compiled.offsets,
+                                layer_params_l,
+                            )
+                        };
+
+                        if cfg.should_capture_step(prefill_step)
+                            && cfg.should_capture_layer(layer_idx)
+                        {
+                            layer_traces.push(build_layer_trace(
+                                layer_idx,
+                                cache_len_before,
+                                cache_len_before + 1,
+                                window_base_before,
+                                cfg.include_values,
+                                &gpu_q,
+                                &gpu_k,
+                                &gpu_v,
+                                &gpu_post_attn,
+                                &gpu_ffn_out,
+                                &gpu_output,
+                            ));
+                        }
+
+                        layer_output = gpu_output;
+                    }
+
+                    let normed_output = if disable_output_norm {
+                        layer_output.clone()
+                    } else {
+                        pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params)
+                    };
+                    {
+                        let head_tensor =
+                            if model.metadata.get_tensor_type("output.weight").is_some() {
+                                "output.weight"
+                            } else {
+                                "token_embd.weight"
+                            };
+                        let head_off =
+                            (model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) / 4) as u32;
+                        let head_qt = model.metadata.get_tensor_type(head_tensor).unwrap_or(2);
+                        last_logits = pipeline.run_lm_head_blob(
                             device,
                             queue,
                             model,
-                            &mut cache,
-                            layer_idx,
-                            &layer_output,
-                            compiled.offsets,
-                            layer_params_l,
-                        )
+                            &normed_output,
+                            spec.n_vocab as u32,
+                            dim,
+                            head_off,
+                            head_qt,
+                            spec.final_logit_softcap,
+                        );
+                    }
+
+                    let (cache_len_after, window_base_after) = {
+                        let mut cache = kv_cache.lock().unwrap();
+                        cache.increment()?;
+                        (cache.get_seq_len(), cache.get_window_base())
                     };
 
-                    if cfg.should_capture_step(prefill_step) && cfg.should_capture_layer(layer_idx) {
-                        layer_traces.push(build_layer_trace(
-                            layer_idx,
-                            cache_len_before,
-                            cache_len_before + 1,
-                            window_base_before,
-                            cfg.include_values,
-                            &gpu_q,
-                            &gpu_k,
-                            &gpu_v,
-                            &gpu_post_attn,
-                            &gpu_ffn_out,
-                            &gpu_output,
-                        ));
+                    if cfg.should_capture_step(prefill_step) {
+                        if let Some(trace) = trace_package.as_mut() {
+                            trace.prefill_steps.push(TokenTrace {
+                                phase: "prefill".to_string(),
+                                step_index: prefill_step,
+                                token_id,
+                                token_text: tokenizer
+                                    .decode_single(token_id, true)
+                                    .unwrap_or_default(),
+                                cache_len_before,
+                                cache_len_after,
+                                window_base_before,
+                                window_base_after,
+                                logits_topk: topk_from_logits(
+                                    &last_logits,
+                                    cfg.top_k,
+                                    Some(tokenizer),
+                                ),
+                                layers: layer_traces,
+                            });
+                        }
                     }
-
-                    layer_output = gpu_output;
-                }
-
-                let normed_output = if disable_output_norm {
-                    layer_output.clone()
-                } else {
-                    pipeline.run_rmsnorm_test(device, queue, model, &layer_output, norm_params)
-                };
-                {
-                    let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() { "output.weight" } else { "token_embd.weight" };
-                    let head_off = (model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) / 4) as u32;
-                    let head_qt  = model.metadata.get_tensor_type(head_tensor).unwrap_or(2);
-                    last_logits = pipeline.run_lm_head_blob(device, queue, model, &normed_output, spec.n_vocab as u32, dim, head_off, head_qt, spec.final_logit_softcap);
-                }
-
-                let (cache_len_after, window_base_after) = {
-                    let mut cache = kv_cache.lock().unwrap();
-                    cache.increment()?;
-                    (cache.get_seq_len(), cache.get_window_base())
-                };
-
-                if cfg.should_capture_step(prefill_step) {
-                    if let Some(trace) = trace_package.as_mut() {
-                        trace.prefill_steps.push(TokenTrace {
-                            phase: "prefill".to_string(),
-                            step_index: prefill_step,
-                            token_id,
-                            token_text: tokenizer.decode_single(token_id, true).unwrap_or_default(),
-                            cache_len_before,
-                            cache_len_after,
-                            window_base_before,
-                            window_base_after,
-                            logits_topk: topk_from_logits(&last_logits, cfg.top_k, Some(tokenizer)),
-                            layers: layer_traces,
-                        });
-                    }
-                }
                 } // end vis_pos loop
                 if visual_slice.is_some() {
                     visual_offset += visual_seq_len;
@@ -884,11 +941,17 @@ fn run_inference_completion(
                 }
                 if cache.is_int4() {
                     pipeline.requantize_all_kv_int4(
-                        device, queue, &cache,
-                        spec.n_head_kv as u32, spec.head_dim as u32,
-                        prompt_tokens.len() as u32, spec.n_layer,
+                        device,
+                        queue,
+                        &cache,
+                        spec.n_head_kv as u32,
+                        spec.head_dim as u32,
+                        prompt_tokens.len() as u32,
+                        spec.n_layer,
                     );
-                    device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during requantize poll (A)");
+                    device
+                        .poll(wgpu::PollType::wait_indefinitely())
+                        .expect("GPU device lost during requantize poll (A)");
                 }
             }
             logits_a
@@ -927,17 +990,21 @@ fn run_inference_completion(
             }
             if cache.is_int4() {
                 pipeline.requantize_all_kv_int4(
-                    device, queue, &cache,
-                    spec.n_head_kv as u32, spec.head_dim as u32,
-                    prompt_tokens.len() as u32, spec.n_layer,
+                    device,
+                    queue,
+                    &cache,
+                    spec.n_head_kv as u32,
+                    spec.head_dim as u32,
+                    prompt_tokens.len() as u32,
+                    spec.n_layer,
                 );
-                device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during requantize poll (B)");
+                device
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .expect("GPU device lost during requantize poll (B)");
             }
         }
         logits_b
     };
-
-
 
     let mut logits_vec = prefill_logits_f32;
 
@@ -946,13 +1013,21 @@ fn run_inference_completion(
     // PPL > 500 at step 0 = almost always VRAM pressure (garbage numerics), NOT a template issue.
     // Grep [PREFILL_SANITY] in server output when debugging new model onboarding.
     {
-        let raw: Vec<f32> = logits_vec.iter().filter(|&&x| x > -100.0).copied().collect();
+        let raw: Vec<f32> = logits_vec
+            .iter()
+            .filter(|&&x| x > -100.0)
+            .copied()
+            .collect();
         let entropy = shannon_entropy_from_logits(&raw);
         let norm = logit_l2_norm(&raw);
         let max_p = max_probability_from_logits(&raw);
         let ppl_est = entropy.exp();
-        let kv_mb = (spec.n_ctx as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4
-            * spec.n_layer as u64 * 2)
+        let kv_mb = (spec.n_ctx as u64
+            * spec.n_head_kv as u64
+            * spec.head_dim as u64
+            * 4
+            * spec.n_layer as u64
+            * 2)
             / 1_048_576;
         let status = if ppl_est < 50.0 {
             "OK"
@@ -1001,7 +1076,10 @@ fn run_inference_completion(
         let is_unsafe = perplexity > 500.0 || norm > 1e5;
 
         let sampled_token = if let Some(forced) = math_bypass_queue.pop_front() {
-            eprintln!("[MathBypass] Step {}: forcing token {}", generated_count, forced);
+            eprintln!(
+                "[MathBypass] Step {}: forcing token {}",
+                generated_count, forced
+            );
             forced
         } else if is_unsafe {
             eprintln!(
@@ -1156,8 +1234,10 @@ fn run_inference_completion(
         let step_t0 = std::time::Instant::now();
 
         let emb_start = next_token as usize * dim as usize;
-        let mut layer_output: Vec<f32> =
-            embd_table_cpu[emb_start..emb_start + dim as usize].iter().map(|x| x * emb_scale).collect();
+        let mut layer_output: Vec<f32> = embd_table_cpu[emb_start..emb_start + dim as usize]
+            .iter()
+            .map(|x| x * emb_scale)
+            .collect();
 
         let mut step_layer_traces = Vec::new();
         if capture_trace_step {
@@ -1168,7 +1248,10 @@ fn run_inference_completion(
             };
             for layer_idx in 0..spec.n_layer {
                 let compiled = &model.metadata.compiled_layers[layer_idx];
-                let layer_params_l = LayerParams { quant_type: compiled.quant_type_packed, ..layer_params };
+                let layer_params_l = LayerParams {
+                    quant_type: compiled.quant_type_packed,
+                    ..layer_params
+                };
 
                 let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = {
                     let mut cache = kv_cache.lock().unwrap();
@@ -1205,19 +1288,34 @@ fn run_inference_completion(
         } else {
             for layer_idx in 0..spec.n_layer {
                 let compiled = &model.metadata.compiled_layers[layer_idx];
-                let layer_params_l = LayerParams { quant_type: compiled.quant_type_packed, ..layer_params };
+                let layer_params_l = LayerParams {
+                    quant_type: compiled.quant_type_packed,
+                    ..layer_params
+                };
 
                 {
                     let mut cache = kv_cache.lock().unwrap();
                     if cache.is_int4() {
                         layer_output = pipeline.run_layer_with_cache_int4(
-                            device, queue, model, &mut cache, layer_idx, &layer_output,
-                            compiled.offsets, layer_params_l,
+                            device,
+                            queue,
+                            model,
+                            &mut cache,
+                            layer_idx,
+                            &layer_output,
+                            compiled.offsets,
+                            layer_params_l,
                         );
                     } else {
                         layer_output = pipeline.run_layer_with_cache(
-                            device, queue, model, &mut cache, layer_idx, &layer_output,
-                            compiled.offsets, layer_params_l,
+                            device,
+                            queue,
+                            model,
+                            &mut cache,
+                            layer_idx,
+                            &layer_output,
+                            compiled.offsets,
+                            layer_params_l,
                         );
                     }
                 }
@@ -1236,10 +1334,24 @@ fn run_inference_completion(
         };
 
         {
-            let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() { "output.weight" } else { "token_embd.weight" };
+            let head_tensor = if model.metadata.get_tensor_type("output.weight").is_some() {
+                "output.weight"
+            } else {
+                "token_embd.weight"
+            };
             let head_off = (model.metadata.get_tensor_offset(head_tensor).unwrap_or(0) / 4) as u32;
-            let head_qt  = model.metadata.get_tensor_type(head_tensor).unwrap_or(2);
-            logits_vec = pipeline.run_lm_head_blob(device, queue, model, &normed_output, spec.n_vocab as u32, dim, head_off, head_qt, spec.final_logit_softcap);
+            let head_qt = model.metadata.get_tensor_type(head_tensor).unwrap_or(2);
+            logits_vec = pipeline.run_lm_head_blob(
+                device,
+                queue,
+                model,
+                &normed_output,
+                spec.n_vocab as u32,
+                dim,
+                head_off,
+                head_qt,
+                spec.final_logit_softcap,
+            );
         }
 
         let _step_ms = step_t0.elapsed().as_secs_f64() * 1000.0;
@@ -1344,10 +1456,12 @@ fn run_inference_completion(
 }
 
 #[allow(clippy::too_many_arguments)]
-    pub(super) async fn process_inference_job(
+pub(super) async fn process_inference_job(
     job_id: String,
     states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JobState>>>,
-    session_states: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, SessionState>>>,
+    session_states: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<String, SessionState>>,
+    >,
     stream_tx: Option<tokio::sync::broadcast::Sender<String>>,
     req: InferenceRequest,
     device: &wgpu::Device,
@@ -1357,7 +1471,7 @@ fn run_inference_completion(
     tokenizer: &Tokenizer,
     spec: &ModelSpec,
     kv_cache: Arc<Mutex<KVCache>>,
-    embd_table_cpu: &[f32],         // Pre-dequantized F32 token embeddings (CPU)
+    embd_table_cpu: &[f32], // Pre-dequantized F32 token embeddings (CPU)
 ) -> Result<InferenceResponse, Box<dyn std::error::Error>> {
     let session_window_tokens = spec.n_ctx;
     let disable_session_window = env_flag("SHIMMY_DISABLE_SESSION_WINDOW");
@@ -1430,7 +1544,10 @@ fn run_inference_completion(
                 session.token_window.clone()
             };
 
-            eprintln!("[SESSION] Stored {} tokens in rolling window", new_window.len());
+            eprintln!(
+                "[SESSION] Stored {} tokens in rolling window",
+                new_window.len()
+            );
         }
     }
 
@@ -1557,7 +1674,7 @@ mod tests {
     fn bpe_image_token_with_visual_data() {
         let dim = 4usize;
         let visual_seq_len = 3usize; // pretend 3 visual tokens
-        // visual_flat: 3 × dim values, each row = row_index cast to f32
+                                     // visual_flat: 3 × dim values, each row = row_index cast to f32
         let visual_flat: Vec<f32> = (0..visual_seq_len)
             .flat_map(|i| vec![i as f32; dim])
             .collect();
@@ -1607,8 +1724,8 @@ mod tests {
         // First: expanded (visual) → kv += 1; second: table lookup → kv += 1
         assert_eq!(kv, 1 + 1);
         assert_eq!(emb.len(), 2 * dim);
-        assert_eq!(&emb[..dim], &[7.0f32, 7.0]);       // visual
-        assert_eq!(&emb[dim..], &[55.0f32, 55.0]);     // table fallback
+        assert_eq!(&emb[..dim], &[7.0f32, 7.0]); // visual
+        assert_eq!(&emb[dim..], &[55.0f32, 55.0]); // table fallback
     }
 
     /// emb_scale is applied to every output value.

@@ -147,68 +147,67 @@ impl KVCache {
         // INT4 packed buffers: head_dim elements × 4 bits = head_dim/2 bytes per head-vector.
         // Stored as U32 arrays: head_dim/8 U32s per head-vector.
         // Layout per layer: [max_seq_len, n_head_kv, head_dim/8] U32.
-        let (k_packed_buffers, v_packed_buffers, k_scale_buffers, v_scale_buffers) =
-            if enable_int4 {
-                assert!(
-                    head_dim % 8 == 0,
-                    "head_dim must be divisible by 8 for INT4 packing (got {})",
-                    head_dim
-                );
-                // packed: head_dim nibbles per head-vector = head_dim/8 U32s per head-vector
-                let packed_size =
-                    (max_seq_len * n_head_kv * (head_dim / 8) * 4) as u64;
-                // scale: one F32 per head-vector per position
-                let scale_size = (max_seq_len * n_head_kv * 4) as u64;
+        let (k_packed_buffers, v_packed_buffers, k_scale_buffers, v_scale_buffers) = if enable_int4
+        {
+            assert!(
+                head_dim % 8 == 0,
+                "head_dim must be divisible by 8 for INT4 packing (got {})",
+                head_dim
+            );
+            // packed: head_dim nibbles per head-vector = head_dim/8 U32s per head-vector
+            let packed_size = (max_seq_len * n_head_kv * (head_dim / 8) * 4) as u64;
+            // scale: one F32 per head-vector per position
+            let scale_size = (max_seq_len * n_head_kv * 4) as u64;
 
-                eprintln!(
-                    "  INT4 packed buf/layer: {} bytes ({:.2} MB)",
-                    packed_size,
-                    packed_size as f64 / 1_048_576.0
-                );
-                eprintln!(
-                    "  INT4 scale buf/layer:  {} bytes ({:.2} KB)",
-                    scale_size,
-                    scale_size as f64 / 1024.0
-                );
+            eprintln!(
+                "  INT4 packed buf/layer: {} bytes ({:.2} MB)",
+                packed_size,
+                packed_size as f64 / 1_048_576.0
+            );
+            eprintln!(
+                "  INT4 scale buf/layer:  {} bytes ({:.2} KB)",
+                scale_size,
+                scale_size as f64 / 1024.0
+            );
 
-                let mk_packed = |prefix: &str| -> Vec<wgpu::Buffer> {
-                    (0..n_layers)
-                        .map(|i| {
-                            device.create_buffer(&wgpu::BufferDescriptor {
-                                label: Some(&format!("KV_Cache_{}_Packed_Layer_{}", prefix, i)),
-                                size: packed_size,
-                                usage: wgpu::BufferUsages::STORAGE
-                                    | wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::COPY_SRC,
-                                mapped_at_creation: false,
-                            })
+            let mk_packed = |prefix: &str| -> Vec<wgpu::Buffer> {
+                (0..n_layers)
+                    .map(|i| {
+                        device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some(&format!("KV_Cache_{}_Packed_Layer_{}", prefix, i)),
+                            size: packed_size,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                            mapped_at_creation: false,
                         })
-                        .collect()
-                };
-                let mk_scale = |prefix: &str| -> Vec<wgpu::Buffer> {
-                    (0..n_layers)
-                        .map(|i| {
-                            device.create_buffer(&wgpu::BufferDescriptor {
-                                label: Some(&format!("KV_Cache_{}_Scale_Layer_{}", prefix, i)),
-                                size: scale_size,
-                                usage: wgpu::BufferUsages::STORAGE
-                                    | wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::COPY_SRC,
-                                mapped_at_creation: false,
-                            })
-                        })
-                        .collect()
-                };
-
-                (
-                    Some(mk_packed("K")),
-                    Some(mk_packed("V")),
-                    Some(mk_scale("K")),
-                    Some(mk_scale("V")),
-                )
-            } else {
-                (None, None, None, None)
+                    })
+                    .collect()
             };
+            let mk_scale = |prefix: &str| -> Vec<wgpu::Buffer> {
+                (0..n_layers)
+                    .map(|i| {
+                        device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some(&format!("KV_Cache_{}_Scale_Layer_{}", prefix, i)),
+                            size: scale_size,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                            mapped_at_creation: false,
+                        })
+                    })
+                    .collect()
+            };
+
+            (
+                Some(mk_packed("K")),
+                Some(mk_packed("V")),
+                Some(mk_scale("K")),
+                Some(mk_scale("V")),
+            )
+        } else {
+            (None, None, None, None)
+        };
 
         let total_vram = buffer_size * (n_layers as u64) * 2;
         eprintln!(

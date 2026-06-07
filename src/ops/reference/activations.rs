@@ -171,14 +171,21 @@ pub fn gelu_f32(input: &Tensor) -> Result<Tensor> {
 
 /// Return a view (clone with squeezed shape) with all leading size-1 dims removed.
 fn squeeze_leading_ones(t: &Tensor) -> Tensor {
-    let first_non_one = t.shape.iter().position(|&d| d != 1).unwrap_or(t.shape.len());
+    let first_non_one = t
+        .shape
+        .iter()
+        .position(|&d| d != 1)
+        .unwrap_or(t.shape.len());
     let new_shape = if first_non_one == t.shape.len() {
         // All dims are 1 — keep a single scalar dim
         vec![1]
     } else {
         t.shape[first_non_one..].to_vec()
     };
-    Tensor { data: t.data.clone(), shape: new_shape }
+    Tensor {
+        data: t.data.clone(),
+        shape: new_shape,
+    }
 }
 
 #[cfg(test)]
@@ -324,11 +331,16 @@ mod tests {
 
     #[test]
     fn test_layernorm_2d_with_bias() {
-        let input = Tensor::new(vec![1.0, 3.0,  // row 0: mean=2, var=1
-                                      5.0, 7.0], // row 1: mean=6, var=1
-                                vec![2, 2]).unwrap();
+        let input = Tensor::new(
+            vec![
+                1.0, 3.0, // row 0: mean=2, var=1
+                5.0, 7.0,
+            ], // row 1: mean=6, var=1
+            vec![2, 2],
+        )
+        .unwrap();
         let weight = Tensor::new(vec![2.0, 2.0], vec![2]).unwrap();
-        let bias   = Tensor::new(vec![1.0, 1.0], vec![2]).unwrap();
+        let bias = Tensor::new(vec![1.0, 1.0], vec![2]).unwrap();
         // row 0: normalized=[-1,1], *weight=[−2,2], +bias=[−1,3]
         // row 1: normalized=[-1,1], *weight=[−2,2], +bias=[−1,3]
         let result = layernorm_f32(&input, &weight, Some(&bias), 1e-5).unwrap();
@@ -351,9 +363,21 @@ mod tests {
         let input = Tensor::new(vec![0.0, 1.0, -1.0, 2.0], vec![4]).unwrap();
         let result = gelu_f32(&input).unwrap();
         assert!(result.data[0].abs() < 1e-5, "gelu(0) should be 0");
-        assert!((result.data[1] - 0.8413).abs() < 1e-3, "gelu(1)={}", result.data[1]);
-        assert!((result.data[2] - (-0.1587)).abs() < 1e-3, "gelu(-1)={}", result.data[2]);
-        assert!((result.data[3] - 1.9546).abs() < 1e-3, "gelu(2)={}", result.data[3]);
+        assert!(
+            (result.data[1] - 0.8413).abs() < 1e-3,
+            "gelu(1)={}",
+            result.data[1]
+        );
+        assert!(
+            (result.data[2] - (-0.1587)).abs() < 1e-3,
+            "gelu(-1)={}",
+            result.data[2]
+        );
+        assert!(
+            (result.data[3] - 1.9546).abs() < 1e-3,
+            "gelu(2)={}",
+            result.data[3]
+        );
     }
 
     #[test]

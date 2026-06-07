@@ -16,7 +16,8 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
                 "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
                 "/home/ubuntu/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf",
             ];
-            candidates.iter()
+            candidates
+                .iter()
                 .find(|p| PathBuf::from(p).exists())
                 .map(PathBuf::from)
                 .ok_or("Model not found")

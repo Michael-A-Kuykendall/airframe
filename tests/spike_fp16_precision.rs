@@ -88,8 +88,8 @@ fn spike_fp16_precision_real_values() {
     }
 
     // Assert that FP16 DOES fail (validates our F32 design decision)
-    assert!(max_error >= 1e-6, 
-        "Test expected FP16 to fail parity threshold, but it passed with error {}. Re-evaluate F32 requirement.", 
+    assert!(max_error >= 1e-6,
+        "Test expected FP16 to fail parity threshold, but it passed with error {}. Re-evaluate F32 requirement.",
         max_error);
 }
 
