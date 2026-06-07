@@ -64,7 +64,7 @@ fn generate_22layer_oracle_checkpoints() -> Result<(), Box<dyn std::error::Error
         .map(|i| LlamaBlock::new(i, spec.clone()))
         .collect();
 
-    let ops = OpDispatcher::default();
+    let ops = OpDispatcher;
     let mut kv_cache = KvCache::new(
         spec.n_ctx,                // max_seq_len
         spec.n_layer,              // n_layer

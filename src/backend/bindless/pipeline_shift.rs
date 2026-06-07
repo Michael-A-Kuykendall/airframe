@@ -254,11 +254,7 @@ impl RopeShiftPipeline {
 
             // Pure copy kernel — one thread per element, indexed by dim x kv_head x seq offset.
             // Shader workgroup is 64x4x1; dispatch covers head_dim x n_head_kv x elements_to_shift.
-            let elements_to_shift = if old_seq_len > keep_sink + shift_amt {
-                old_seq_len - (keep_sink + shift_amt)
-            } else {
-                0
-            };
+            let elements_to_shift = old_seq_len.saturating_sub(keep_sink + shift_amt);
 
             if elements_to_shift > 0 {
                 let dim_x = head_dim.div_ceil(64); // head_dim threads, workgroup 64
@@ -299,11 +295,7 @@ impl RopeShiftPipeline {
         head_dim: u32,
         max_seq_len: u32,
     ) {
-        let elements_to_shift = if old_seq_len > keep_sink + shift_amt {
-            old_seq_len - (keep_sink + shift_amt)
-        } else {
-            0
-        };
+        let elements_to_shift = old_seq_len.saturating_sub(keep_sink + shift_amt);
         if elements_to_shift == 0 { return; }
 
         let params = CompactionParams {

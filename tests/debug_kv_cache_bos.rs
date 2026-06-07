@@ -93,7 +93,7 @@ async fn test_kv_cache_after_bos() -> Result<(), Box<dyn std::error::Error>> {
         let layer_offsets = gpu_model
             .metadata
             .get_layer_offsets(layer_idx, "tinyllama")
-            .expect(&format!("Layer {} not found", layer_idx));
+            .unwrap_or_else(|| panic!("Layer {} not found", layer_idx));
         layer_output = pipeline.run_layer_with_cache(
             &device,
             &queue,

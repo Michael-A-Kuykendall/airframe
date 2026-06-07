@@ -261,7 +261,7 @@ fn f16_bits_to_f32(bits: u16) -> f32 {
         }
         // Subnormal
         let leading = mant.leading_zeros() - 22; // leading zeros above 10 bits
-        let f32_exp = (127 - 14 - leading) as u32;
+        let f32_exp = 127 - 14 - leading;
         let f32_mant = (mant << (leading + 1)) & 0x7FFFFF;
         return f32::from_bits(sign | (f32_exp << 23) | f32_mant);
     } else if exp == 31 {
@@ -269,6 +269,6 @@ fn f16_bits_to_f32(bits: u16) -> f32 {
         return f32::from_bits(sign | 0x7F800000 | (mant << 13));
     }
     let f32_exp = ((exp + 127 - 15) as u32) << 23;
-    let f32_mant = (mant as u32) << 13;
+    let f32_mant = mant << 13;
     f32::from_bits(sign | f32_exp | f32_mant)
 }

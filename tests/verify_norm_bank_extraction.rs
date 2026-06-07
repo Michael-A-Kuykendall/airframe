@@ -123,7 +123,7 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect();
 
-    let l1_bank_offset = 1 * 4 * block_size;
+    let l1_bank_offset = 4 * block_size;
     let l1_bank_floats: Vec<f32> = norm_bank[l1_bank_offset..l1_bank_offset + 40]
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))

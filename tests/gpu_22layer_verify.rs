@@ -125,7 +125,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);
 
     // Process tokens: [1 (BOS), 15043 ("Hello")]
-    let tokens = vec![1u32, 15043u32];
+    let tokens = [1u32, 15043u32];
     let embd_weight_offset = gpu_model
         .metadata
         .get_tensor_offset("token_embd.weight")
@@ -147,7 +147,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
         let layer_offsets = gpu_model
             .metadata
             .get_layer_offsets(layer_idx, "tinyllama")
-            .expect(&format!("Layer {} not found", layer_idx));
+            .unwrap_or_else(|| panic!("Layer {} not found", layer_idx));
         layer_output = pipeline.run_layer_with_cache(
             &device,
             &queue,
@@ -184,7 +184,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
         let layer_offsets = gpu_model
             .metadata
             .get_layer_offsets(layer_idx, "tinyllama")
-            .expect(&format!("Layer {} not found", layer_idx));
+            .unwrap_or_else(|| panic!("Layer {} not found", layer_idx));
 
         // DIAGNOSTIC: Print input state for first 2 layers
         if layer_idx <= 1 {
@@ -286,7 +286,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
         // Compare against oracle
         let (oracle_rms, oracle_first20) = oracle
             .get(&layer_idx)
-            .expect(&format!("Oracle for layer {} not found", layer_idx));
+            .unwrap_or_else(|| panic!("Oracle for layer {} not found", layer_idx));
 
         let shimmy_rms = calc_rms(&layer_output);
         let rms_diff = (oracle_rms - shimmy_rms).abs();

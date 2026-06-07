@@ -5,6 +5,9 @@ use super::super::loader::BindlessModel;
 use super::super::kv_cache::KVCache;
 use wgpu::util::DeviceExt;
 
+/// Debug return type with 6 activation vectors
+type LayerDebugOutput = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>);
+
 impl BindlessPipeline {
     pub fn run_qkv_only_test(
         &self,
@@ -130,8 +133,8 @@ impl BindlessPipeline {
         let q_len = params.head_count * params.head_dim;
         let kv_len = params.head_count_kv * params.head_dim;
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv = (total_qkv + 255) / 256;
-        let wg_dim = (params.dim + 255) / 256;
+        let wg_qkv = total_qkv.div_ceil(256);
+        let wg_dim = params.dim.div_ceil(256);
 
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -208,6 +211,7 @@ impl BindlessPipeline {
             .1
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_layer_stepwise_test(
         &self,
         device: &wgpu::Device,
@@ -360,17 +364,17 @@ impl BindlessPipeline {
         // 5. Dispatch Sequence
         // Part 1: QKV + Attn
         let dim = params.dim as u64;
-        let wg_dim = (params.dim + 255) / 256;
+        let wg_dim = params.dim.div_ceil(256);
 
         // QKV Needs more threads: Q + K + V
         let q_len = params.head_count * params.head_dim;
         let kv_len = params.head_count_kv * params.head_dim;
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv = (total_qkv + 255) / 256;
+        let wg_qkv = total_qkv.div_ceil(256);
 
         // FFN needs threads for both Gate and Up: ffn_dim * 2
         let ffn_total = params.ffn_dim * 2; // Gate + Up
-        let wg_ffn = (ffn_total + 255) / 256; // Ceil div by workgroup size
+        let wg_ffn = ffn_total.div_ceil(256); // Ceil div by workgroup size
 
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -399,7 +403,7 @@ impl BindlessPipeline {
 
         // Kernel 2.5: QK Norm (Qwen3; no-op when qk_norm_enabled == 0)
         {
-            let wg_qknorm = (q_len + kv_len + 255) / 256;
+            let wg_qknorm = (q_len + kv_len).div_ceil(256);
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("QKNorm"),
                 timestamp_writes: None,
@@ -645,13 +649,13 @@ impl BindlessPipeline {
         });
 
         // 6. Calculate workgroup counts
-        let wg_dim = (params.dim + 255) / 256;
+        let wg_dim = params.dim.div_ceil(256);
         let q_len = params.head_count * params.head_dim;
         let kv_len = params.head_count_kv * params.head_dim;
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv = (total_qkv + 255) / 256;
+        let wg_qkv = total_qkv.div_ceil(256);
         let ffn_total = params.ffn_dim * 2;
-        let wg_ffn = (ffn_total + 255) / 256;
+        let wg_ffn = ffn_total.div_ceil(256);
 
         // 7. Dispatch compute passes (6 kernels, each in separate pass for synchronization)
         // CRITICAL: Each compute pass ensures GPU work completes before next starts
@@ -683,7 +687,7 @@ impl BindlessPipeline {
 
         // Kernel 2.5: QK Norm (Qwen3; no-op when qk_norm_enabled == 0)
         {
-            let wg_qknorm = (q_len + kv_len + 255) / 256;
+            let wg_qknorm = (q_len + kv_len).div_ceil(256);
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - QKNorm", layer_idx)),
                 timestamp_writes: None,
@@ -782,12 +786,12 @@ impl BindlessPipeline {
         encoder.copy_buffer_to_buffer(&activation_buffer, 0, &staging_buffer, 0, dim * 4);
         queue.submit(Some(encoder.finish()));
 
-        let output = self.readback_helper(device, &staging_buffer);
+        
 
         // NOTE: Cache increment happens ONCE per token (after all layers), not per layer
         // Caller must call kv_cache.increment() after processing all 22 layers
 
-        output
+        self.readback_helper(device, &staging_buffer)
     }
 
     /// INT4 variant of run_layer_with_cache (TurboQuant — feat/turboquant-wgsl).
@@ -920,13 +924,13 @@ impl BindlessPipeline {
             ],
         });
 
-        let wg_dim  = (params.dim + 255) / 256;
+        let wg_dim  = params.dim.div_ceil(256);
         let q_len   = params.head_count * params.head_dim;
         let kv_len  = params.head_count_kv * params.head_dim;
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv  = (total_qkv + 255) / 256;
-        let wg_ffn  = (params.ffn_dim * 2 + 255) / 256;
-        let wg_qknorm = (q_len + kv_len + 255) / 256;
+        let wg_qkv  = total_qkv.div_ceil(256);
+        let wg_ffn  = (params.ffn_dim * 2).div_ceil(256);
+        let wg_qknorm = (q_len + kv_len).div_ceil(256);
 
         // --- Fused single encoder: all INT4 kernels in order, one submit ---
         // wgpu guarantees sequential dispatch execution within a command encoder;
@@ -1034,7 +1038,7 @@ impl BindlessPipeline {
         input: &[f32],
         offsets: LayerOffsets,
         params: LayerParams,
-    ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    ) -> LayerDebugOutput {
         let dim = params.dim as u64;
 
         // 1. Create buffers (same as run_layer_with_cache)
@@ -1148,13 +1152,13 @@ impl BindlessPipeline {
             ],
         });
 
-        let wg_dim = (params.dim + 255) / 256;
+        let wg_dim = params.dim.div_ceil(256);
         let q_len = params.head_count * params.head_dim;
         let kv_len = params.head_count_kv * params.head_dim;
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv = (total_qkv + 255) / 256;
+        let wg_qkv = total_qkv.div_ceil(256);
         let ffn_total = params.ffn_dim * 2;
-        let wg_ffn = (ffn_total + 255) / 256;
+        let wg_ffn = ffn_total.div_ceil(256);
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(&format!("Layer {} Encoder (Debug)", layer_idx)),
@@ -1234,7 +1238,7 @@ impl BindlessPipeline {
         // Continue with remaining kernels (2-5) - same as run_layer_with_cache
         // Kernel 2.5: QK Norm (Qwen3; no-op when qk_norm_enabled == 0)
         {
-            let wg_qknorm = (q_len + kv_len + 255) / 256;
+            let wg_qknorm = (q_len + kv_len).div_ceil(256);
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - QKNorm", layer_idx)),
                 timestamp_writes: None,

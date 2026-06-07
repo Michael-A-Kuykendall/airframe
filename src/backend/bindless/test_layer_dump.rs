@@ -131,7 +131,7 @@ mod layer_dump_tests {
                 let layer_offsets = model
                     .metadata
                     .get_layer_offsets(layer_idx, "tinyllama")
-                    .expect(&format!("Layer {} offsets not found", layer_idx));
+                    .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
 
                 layer_input = pipeline.run_layer_with_cache(
                     &device,
@@ -193,7 +193,7 @@ mod layer_dump_tests {
             let layer_offsets = model
                 .metadata
                 .get_layer_offsets(layer_idx, "tinyllama")
-                .expect(&format!("Layer {} offsets not found", layer_idx));
+                .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
 
             layer_input = pipeline.run_layer_with_cache(
                 &device,

@@ -92,7 +92,7 @@ fn read_tokenizer_info(path: &Path) -> Option<GgufTokenizerInfo> {
     let n_kv = if version >= 2 {
         read_u64(&mut f).ok()?; read_u64(&mut f).ok()?
     } else {
-        read_u32(&mut f).ok()? as u64; read_u32(&mut f).ok()? as u64
+        read_u32(&mut f).ok()?; read_u32(&mut f).ok()? as u64
     };
 
     let mut info = GgufTokenizerInfo {

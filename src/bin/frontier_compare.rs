@@ -284,6 +284,8 @@ async fn async_main() -> Result<()> {
     eprintln!("[GPU vs CPU] comparing {} layers ...", spec.n_layer);
     let mut gpu_hidden = target_input.clone();
     let mut layer_comparisons = Vec::with_capacity(spec.n_layer);
+    // Note: layer_idx is used legitimately as an index for cpu_layers, metadata, and pipeline
+    #[allow(clippy::needless_range_loop)]
     for layer_idx in 0..spec.n_layer {
         let offsets = gpu_model
             .metadata

@@ -109,7 +109,7 @@ impl LogitMaskPipeline {
             // Dispatch enough workgroups to cover all logits
             // Workgroup size is 64 (defined in shader)
             let workgroup_size = 64;
-            let workgroups = (num_logits + workgroup_size - 1) / workgroup_size;
+            let workgroups = num_logits.div_ceil(workgroup_size);
             cpass.dispatch_workgroups(workgroups, 1, 1);
         }
 

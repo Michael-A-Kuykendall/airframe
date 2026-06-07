@@ -882,7 +882,7 @@ fn read_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Result<Gg
                         .seek(SeekFrom::Current(bytes as i64))
                         .map_err(LibshimmyError::Io)?;
                 }
-                4 | 5 | 6 => {
+                4..=6 => {
                     let bytes =
                         len.checked_mul(4)
                             .ok_or_else(|| LibshimmyError::InvariantViolation {
@@ -899,7 +899,7 @@ fn read_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Result<Gg
                         skip_gguf_string(reader)?;
                     }
                 }
-                10 | 11 | 12 => {
+                10..=12 => {
                     let bytes =
                         len.checked_mul(8)
                             .ok_or_else(|| LibshimmyError::InvariantViolation {

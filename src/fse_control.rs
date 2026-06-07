@@ -101,7 +101,7 @@ impl InferenceControl for FseControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::{ControlDecision, InferenceControl, InferenceEvent, NoopControl};
+    use crate::control::{ControlDecision, InferenceControl, InferenceEvent};
     use crate::runtime::kvcache::KvSnapshot;
     use libfse::{FseMap, FseOpcode, Rule};
 

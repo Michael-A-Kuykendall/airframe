@@ -215,8 +215,8 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
     let mut dot1 = 0.0f32;
     for d in 0..head_dim {
         let q = q_vals[q_base + d];
-        let k0 = k_cache_vals[(0 * n_head_kv * head_dim) + (kv_head * head_dim) + d];
-        let k1 = k_cache_vals[(1 * n_head_kv * head_dim) + (kv_head * head_dim) + d];
+        let k0 = k_cache_vals[(kv_head * head_dim) + d];
+        let k1 = k_cache_vals[(n_head_kv * head_dim) + (kv_head * head_dim) + d];
         dot0 += q * k0;
         dot1 += q * k1;
     }
@@ -226,8 +226,8 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
     let s1 = dot1 * scale;
     let (w0, w1) = softmax2(s0, s1);
 
-    let v0 = v_cache_vals[(0 * n_head_kv * head_dim) + (kv_head * head_dim) + 0];
-    let v1 = v_cache_vals[(1 * n_head_kv * head_dim) + (kv_head * head_dim) + 0];
+    let v0 = v_cache_vals[((kv_head * head_dim))];
+    let v1 = v_cache_vals[((n_head_kv * head_dim) + (kv_head * head_dim))];
     let context_d0 = w0 * v0 + w1 * v1;
 
     // GQA sanity: head 0 and head 8 should both map to kv_head 0 (ratio=8)
@@ -238,8 +238,8 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
     let mut dot1_h8 = 0.0f32;
     for d in 0..head_dim {
         let q = q_vals[q8_base + d];
-        let k0 = k_cache_vals[(0 * n_head_kv * head_dim) + (kv_head_8 * head_dim) + d];
-        let k1 = k_cache_vals[(1 * n_head_kv * head_dim) + (kv_head_8 * head_dim) + d];
+        let k0 = k_cache_vals[(kv_head_8 * head_dim) + d];
+        let k1 = k_cache_vals[(n_head_kv * head_dim) + (kv_head_8 * head_dim) + d];
         dot0_h8 += q * k0;
         dot1_h8 += q * k1;
     }

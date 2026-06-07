@@ -834,7 +834,7 @@ fn write_seal(cert_path: &Path, rel_path: &str, sha256: &str, date: &str) -> std
         if !out.is_empty() && !out.ends_with('\n') {
             out.push('\n');
         }
-        out.push_str("\n");
+        out.push('\n');
         out.push_str(&new_seal);
         std::fs::write(cert_path, out)
     }

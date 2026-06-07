@@ -235,5 +235,5 @@ impl std::error::Error for ScanError {}
 
 #[inline]
 fn words_for_bits(bit_count: usize) -> usize {
-    (bit_count + 63) / 64
+    bit_count.div_ceil(64)
 }

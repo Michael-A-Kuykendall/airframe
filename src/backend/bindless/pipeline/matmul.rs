@@ -72,7 +72,7 @@ impl BindlessPipeline {
             });
             cpass.set_pipeline(&self.matmul_pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
-            let workgroups = (params.n + 255) / 256;
+            let workgroups = params.n.div_ceil(256);
             cpass.dispatch_workgroups(workgroups, 1, 1);
         }
 
@@ -179,7 +179,7 @@ impl BindlessPipeline {
             });
             cpass.set_pipeline(&self.matmul_f32_pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
-            let workgroups = (n + 63) / 64;
+            let workgroups = n.div_ceil(64);
             cpass.dispatch_workgroups(workgroups, 1, 1);
         }
 
@@ -279,7 +279,7 @@ impl BindlessPipeline {
             });
             cpass.set_pipeline(&self.lm_head_blob_pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
-            let workgroups = (vocab_size + 63) / 64;
+            let workgroups = vocab_size.div_ceil(64);
             cpass.dispatch_workgroups(workgroups, 1, 1);
         }
 

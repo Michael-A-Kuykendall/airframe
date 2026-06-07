@@ -6,16 +6,16 @@ use half::f16;
 #[test]
 fn spike_fp16_precision_real_values() {
     // Real values from our parity test (L0.21 checkpoint)
-    let test_values = vec![
+    let test_values: [f32; 15] = [
         -0.00479799,
         -0.00655676,
-        0.02155690,
+        0.021_556_9,
         0.05804433,
         0.0,
         1.0,
         -1.0,
-        3.14159,
-        -3.14159,
+        std::f32::consts::PI,
+        -std::f32::consts::PI,
         1e-5,
         -1e-5,
         1e-6,
@@ -27,7 +27,7 @@ fn spike_fp16_precision_real_values() {
     println!("\n=== FP16 PRECISION TEST ===");
     println!("Testing F32→F16→F32 roundtrip on real model outputs");
     println!("Parity threshold: 1e-6 (max allowed error)");
-    println!("");
+    println!();
 
     let mut max_error = 0.0f32;
     let mut max_error_val = 0.0f32;
@@ -137,8 +137,7 @@ fn spike_fp16_precision_accumulation() {
         .map(|(a, b)| {
             let a16 = f16::from_f32(*a);
             let b16 = f16::from_f32(*b);
-            let product = a16.to_f32() * b16.to_f32();
-            product
+            a16.to_f32() * b16.to_f32()
         })
         .sum();
 

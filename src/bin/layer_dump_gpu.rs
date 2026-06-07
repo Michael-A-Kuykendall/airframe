@@ -3,12 +3,9 @@
 
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
-use airframe::core::dequant::dequantize_q6_k;
-use airframe::core::model::GgufTensorInfo;
+use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams};
 use airframe::core::spec::ModelSpec;
-use memmap2::Mmap;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use shimmytok::Tokenizer;
 use std::path::PathBuf;
 
@@ -122,7 +119,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // === Load Model ===
-    let tokenizer = Tokenizer::from_gguf_file(&model_path)?;
+    let tokenizer = Tokenizer::from_gguf_file(model_path)?;
     let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
     let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(model_path), Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
@@ -195,7 +192,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         let layer_offsets = gpu_model
             .metadata
             .get_layer_offsets(layer_idx, "tinyllama")
-            .expect(&format!("Layer {} offsets not found", layer_idx));
+            .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
 
         layer_output = pipeline.run_layer_with_cache(
             &device,

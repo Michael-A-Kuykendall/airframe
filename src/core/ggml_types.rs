@@ -375,6 +375,6 @@ mod tests {
         // validate_tensor_bounds with an unknown type_id should return an error
         let err = validate_tensor_bounds("my_tensor", 99, 10000, 999999, 100).unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("my_tensor") || msg.len() > 0, "error message should be non-empty");
+        assert!(msg.contains("my_tensor") || !msg.is_empty(), "error message should be non-empty");
     }
 }

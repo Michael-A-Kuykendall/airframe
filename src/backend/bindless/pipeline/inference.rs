@@ -5,6 +5,9 @@ use super::super::loader::BindlessModel;
 use crate::core::routing::ModelRoutePlan;
 use wgpu::util::DeviceExt;
 
+/// Result type for model inference returning three activation vectors
+type InferenceResult = Result<(Vec<f32>, Vec<f32>, Vec<f32>), String>;
+
 impl BindlessPipeline {
     pub fn run_full_model(
         &self,
@@ -27,6 +30,7 @@ impl BindlessPipeline {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_full_model_with_cache(
         &self,
         device: &wgpu::Device,
@@ -64,7 +68,7 @@ impl BindlessPipeline {
         kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
         spec: &ModelSpec,
         chunk_tokens: u32,
-    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+    ) -> InferenceResult {
         let dim = spec.n_embd;
         assert!(dim > 0, "spec.n_embd must be > 0");
         assert!(input_embd.len() % dim == 0, "input_embd must align to token rows");
@@ -92,10 +96,9 @@ impl BindlessPipeline {
 
         let chunk_rows = chunk_tokens as usize;
         let mut processed_tokens = 0u32;
-        let mut chunk_idx = 0usize;
         let mut last_result = None;
 
-        for chunk in input_embd.chunks(chunk_rows * dim) {
+        for (chunk_idx, chunk) in input_embd.chunks(chunk_rows * dim).enumerate() {
             let chunk_token_count = (chunk.len() / dim) as u32;
             let chunk_current_pos = current_pos + processed_tokens;
             let chunk_seq_len = chunk_current_pos + chunk_token_count;
@@ -127,7 +130,6 @@ impl BindlessPipeline {
             }
 
             processed_tokens += chunk_token_count;
-            chunk_idx += 1;
         }
 
         last_result.ok_or_else(|| "chunked prefill produced no chunks".to_string())
@@ -144,7 +146,7 @@ impl BindlessPipeline {
         seq_len: u32,
         kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
         spec: &ModelSpec,
-    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+    ) -> InferenceResult {
         // Derive all constants from ModelSpec
         let dim = spec.n_embd as u32;
         let layer_count = spec.n_layer;
@@ -266,7 +268,7 @@ impl BindlessPipeline {
         // Therefore full-model loop must bind a distinct K/V buffer per layer.
         let kv_size_per_buffer = spec.kv_cache_size_per_layer as u64;
         let local_kv_storage_per_layer = if kv_state.is_none() {
-            let mut bufs = Vec::with_capacity(layer_count as usize);
+            let mut bufs = Vec::with_capacity(layer_count);
             for i in 0..layer_count {
                 let kv_buffer_k = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(&format!("KV Cache K L{}", i)),
@@ -313,7 +315,7 @@ impl BindlessPipeline {
         let mut _params_buffers: Vec<wgpu::Buffer> = Vec::new(); // Keep alive
 
         for i in 0..layer_count {
-            let compiled = &model.metadata.compiled_layers[i as usize];
+            let compiled = &model.metadata.compiled_layers[i];
             let layer_params_i = LayerParams {
                 quant_type: compiled.quant_type_packed,
                 ..params_base
@@ -326,11 +328,11 @@ impl BindlessPipeline {
 
             let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
                 if let Some((kv_k_layers, kv_v_layers)) = kv_state {
-                    (&kv_k_layers[i as usize], &kv_v_layers[i as usize])
+                    (&kv_k_layers[i], &kv_v_layers[i])
                 } else {
                     let (local_k, local_v) = &local_kv_storage_per_layer
                         .as_ref()
-                        .expect("local KV storage missing")[i as usize];
+                        .expect("local KV storage missing")[i];
                     (local_k, local_v)
                 };
 
@@ -594,20 +596,20 @@ impl BindlessPipeline {
             label: Some("Full Model"),
         });
 
-        let wg_dim = (dim + 255) / 256;
+        let wg_dim = dim.div_ceil(256);
         let ffn_total = ffn_dim * 2; // Gate + Up need this many threads
-        let wg_ffn = (ffn_total + 255) / 256; // Ceil div by workgroup size (256)
-        let wg_norm = (dim + 255) / 256;
+        let wg_ffn = ffn_total.div_ceil(256); // Ceil div by workgroup size (256)
+        let wg_norm = dim.div_ceil(256);
         // sh_head_blob.wgsl uses @workgroup_size(64, 1, 1); matmul_f32 uses @workgroup_size(256).
-        let wg_head_blob = (vocab_size + 63) / 64;
-        let wg_head_f32 = (vocab_size + 255) / 256;
+        let wg_head_blob = vocab_size.div_ceil(64);
+        let wg_head_f32 = vocab_size.div_ceil(256);
 
         // QKV Dispatch Calculation
         let q_len = params_base.head_count * params_base.head_dim;
         let kv_len = params_base.head_count_kv * params_base.head_dim;
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv = (total_qkv + 255) / 256;
-        let wg_qknorm = (params_base.head_dim + 255) / 256;
+        let wg_qkv = total_qkv.div_ceil(256);
+        let wg_qknorm = params_base.head_dim.div_ceil(256);
         let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);

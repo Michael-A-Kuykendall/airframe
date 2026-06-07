@@ -209,7 +209,7 @@ impl Default for OpDispatcher {
 mod tests {
     use super::*;
     use crate::core::tensor::Tensor;
-    use crate::runtime::kvcache::KvCache;
+    
 
     fn t(data: Vec<f32>, shape: Vec<usize>) -> Tensor {
         Tensor::new(data, shape).unwrap()
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn test_new_and_default_are_equivalent() {
         let _a = OpDispatcher::new();
-        let _b = OpDispatcher::default();
+        let _b = OpDispatcher;
         // no panic → pass
     }
 

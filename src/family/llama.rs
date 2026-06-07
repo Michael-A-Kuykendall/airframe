@@ -80,7 +80,7 @@ fn should_trace_layer_out(layer: usize, cache_len: usize) -> bool {
     let trace_cache_len = std::env::var("LIBSHIMMY_TRACE_LAYER_OUT_CACHELEN")
         .ok()
         .and_then(|s| s.parse::<usize>().ok());
-    trace_layer.map_or(true, |l| l == layer) && trace_cache_len.map_or(true, |c| c == cache_len)
+    trace_layer.is_none_or(|l| l == layer) && trace_cache_len.is_none_or(|c| c == cache_len)
 }
 
 /// Emit L0 checkpoint to trace file

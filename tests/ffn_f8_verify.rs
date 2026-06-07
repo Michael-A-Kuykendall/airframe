@@ -92,7 +92,7 @@ async fn test_f8_gpu_ffn_verification() -> Result<(), Box<dyn std::error::Error>
     println!("[3/6] Model loaded");
 
     // Process tokens: [1 (BOS), 15043 ("Hello")]
-    let tokens = vec![1u32, 15043u32];
+    let tokens = [1u32, 15043u32];
 
     let dim = spec.n_embd as u32;
     let embd_weight_offset = gpu_model

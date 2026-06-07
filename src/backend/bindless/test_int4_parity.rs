@@ -97,7 +97,7 @@ mod int4_parity_tests {
             }
         }
         let data = slice.get_mapped_range();
-        let result: Vec<u32> = bytemuck::cast_slice(&*data).to_vec();
+        let result: Vec<u32> = bytemuck::cast_slice(&data).to_vec();
         drop(data);
         buf.unmap();
         result[..n].to_vec()
@@ -115,7 +115,7 @@ mod int4_parity_tests {
             }
         }
         let data = slice.get_mapped_range();
-        let result: Vec<f32> = bytemuck::cast_slice(&*data).to_vec();
+        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
         drop(data);
         buf.unmap();
         result[..n].to_vec()

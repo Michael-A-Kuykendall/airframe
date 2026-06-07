@@ -234,7 +234,7 @@ impl BindlessPipeline {
             });
             cpass.set_pipeline(&self.dequant_pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
-            let workgroups = (count + 63) / 64;
+            let workgroups = count.div_ceil(64);
             cpass.dispatch_workgroups(workgroups, 1, 1);
         }
 
@@ -385,7 +385,7 @@ impl BindlessPipeline {
             });
             cpass.set_pipeline(&pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
-            let workgroups = (count + 63) / 64;
+            let workgroups = count.div_ceil(64);
             cpass.dispatch_workgroups(workgroups, 1, 1);
         }
 
