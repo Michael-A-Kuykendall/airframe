@@ -237,3 +237,37 @@ impl std::error::Error for ScanError {}
 fn words_for_bits(bit_count: usize) -> usize {
     bit_count.div_ceil(64)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify div_ceil replacement is behaviorally equivalent to old formula.
+    /// Old: (bit_count + 63) / 64
+    /// New: bit_count.div_ceil(64)
+    #[test]
+    fn words_for_bits_equivalence() {
+        // Test edge cases and boundary values
+        let test_cases = [
+            (0, 0),
+            (1, 1),
+            (63, 1),
+            (64, 1),
+            (65, 2),
+            (127, 2),
+            (128, 2),
+            (129, 3),
+            (1000, 16),
+            (10_000, 157),
+        ];
+
+        for (bit_count, expected) in test_cases {
+            let actual = words_for_bits(bit_count);
+            assert_eq!(
+                actual, expected,
+                "words_for_bits({}) = {}, expected {}",
+                bit_count, actual, expected
+            );
+        }
+    }
+}
