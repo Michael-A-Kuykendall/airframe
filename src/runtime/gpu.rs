@@ -149,11 +149,22 @@ impl GpuRuntime {
         let header_meta = BindlessMetadata::new(&mut header_file);
         drop(header_file);
         let mut spec = header_meta.to_model_spec();
-        // Respect SHIMMY_MAX_CTX for extended context (YaRN RoPE)
+
+        // Safe context window cap.
+        // Consumer GPUs (4-8 GB VRAM) cannot sustain the full native context of
+        // modern models (e.g. Llama-3.2 = 131072). The KV cache scales linearly:
+        //   n_layers × n_kv_heads × head_dim × ctx × 2 × 4 bytes
+        // Without a cap, a 131K-context model allocates ~28 GB of KV cache alone.
+        //
+        // If SHIMMY_MAX_CTX is explicitly set, honour it (user opted in).
+        // Otherwise, cap at 4096 tokens — enough for practical use on consumer hardware.
+        const DEFAULT_SAFE_CTX: usize = 4096;
+
         if let Some(max_ctx) = std::env::var("SHIMMY_MAX_CTX")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
         {
+            // Explicit override — apply YaRN RoPE scale if extending beyond native
             let rope_scale = std::env::var("SHIMMY_ROPE_SCALE")
                 .ok()
                 .and_then(|s| s.parse::<f32>().ok())
@@ -166,6 +177,15 @@ impl GpuRuntime {
                 });
             spec.n_ctx = max_ctx;
             spec.rope_scale = rope_scale;
+        } else if spec.n_ctx > DEFAULT_SAFE_CTX {
+            // Model native context exceeds safe default — cap it silently.
+            // Set SHIMMY_MAX_CTX=<n> to override.
+            eprintln!(
+                "[GpuRuntime] Model native context {} tokens exceeds safe default {}. \
+                 Capping to {} to protect GPU memory. Set SHIMMY_MAX_CTX=<n> to override.",
+                spec.n_ctx, DEFAULT_SAFE_CTX, DEFAULT_SAFE_CTX
+            );
+            spec.n_ctx = DEFAULT_SAFE_CTX;
         }
         let gpu_model = BindlessModel::load_from_disk(&device, model_path, Some(&spec));
         let pipeline = BindlessPipeline::new(&device);
