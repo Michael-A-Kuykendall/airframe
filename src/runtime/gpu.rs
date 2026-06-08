@@ -158,7 +158,7 @@ impl GpuRuntime {
         //
         // If SHIMMY_MAX_CTX is explicitly set, honour it (user opted in).
         // Otherwise, cap at 4096 tokens — enough for practical use on consumer hardware.
-        const DEFAULT_SAFE_CTX: usize = 4096;
+        const DEFAULT_SAFE_CTX: usize = 8192;
 
         if let Some(max_ctx) = std::env::var("SHIMMY_MAX_CTX")
             .ok()
