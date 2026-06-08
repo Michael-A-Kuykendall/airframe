@@ -60,3 +60,7 @@ docs/chat*.md
 .github/copilot-instructions.md
 .github/instructions/
 crates/libfse/docs/
+
+# Internal developer docs — never committed (session notes, AI handoffs, audits)
+docs/internal/
+artifacts/
