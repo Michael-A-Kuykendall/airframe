@@ -1,0 +1,21 @@
+[package]
+name = "airframe-observe"
+version = "0.1.0"
+edition = "2021"
+description = "FSE-based inference observation layer for Airframe. Selector-first, single-pass capture of layer outputs, logits, and text during inference."
+publish = false
+
+# Patent Notice: This crate implements the Fused Semantic Execution (FSE)
+# Inference Observation architecture — a selector-first, compile-once,
+# single-pass model for capturing and broadcasting inference state to multiple
+# independent observers simultaneously. This architecture and its application
+# to AI inference observability is covered by a pending US patent by
+# Michael A. Kuykendall. All rights reserved.
+# Contact: michaelallenkuykendall@gmail.com
+
+[dependencies]
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
+
+# airframe is a path dep here — this crate lives inside the workspace
+airframe    = { path = "../.." }

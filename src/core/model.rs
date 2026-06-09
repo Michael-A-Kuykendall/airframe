@@ -628,57 +628,156 @@ fn dump_metadata_keys(metadata: &HashMap<String, GgufMetaValue>) {
     }
 }
 
+/// Build a ModelSpec from raw GGUF metadata.
+///
+/// Uses suffix-based matching (strip everything up to and including the first '.')
+/// so this works for any architecture: llama, qwen2, qwen3, phi3, gemma, etc.
+/// The GGUF spec guarantees that key suffixes are unique within a single file.
 fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result<ModelSpec> {
-    let n_layer = require_usize(metadata, "llama.block_count")?;
-    let n_embd = require_usize(metadata, "llama.embedding_length")?;
-    let n_head = require_usize(metadata, "llama.attention.head_count")?;
-    let n_head_kv = require_usize(metadata, "llama.attention.head_count_kv")?;
-    let ff_dim = require_usize(metadata, "llama.feed_forward_length")?;
-    let n_ctx = require_usize(metadata, "llama.context_length")?;
-    let rope_base = require_f32(metadata, "llama.rope.freq_base")?;
-    let rope_dim = require_usize(metadata, "llama.rope.dimension_count")?;
-    let rms_eps = require_f32(metadata, "llama.attention.layer_norm_rms_epsilon")?;
+    use crate::core::spec::{GgufFileType, GgufValue, ModelArch};
 
-    // Vocab size: prefer explicit metadata if present, otherwise infer from tokenizer token array length.
-    let n_vocab_from_llama = optional_usize(metadata, "llama.vocab_size")?;
-    let n_vocab_from_tokens = optional_array_len(metadata, "tokenizer.ggml.tokens")?;
+    // Build a suffix-keyed view for arch-prefixed keys.
+    // "llama.block_count" → suffix "block_count"
+    // "general.architecture" → kept as-is (no strip needed, handled explicitly)
+    let mut arch_str = "llama".to_string();
+    let mut model_name = String::new();
+    let mut file_type_val = GgufFileType::Unknown;
 
-    let n_vocab = match (n_vocab_from_llama, n_vocab_from_tokens) {
-        (Some(v1), Some(v2)) => {
-            ensure!(
-                v1 == v2,
-                "Vocab size mismatch: llama.vocab_size={} tokenizer.ggml.tokens.len={}",
-                v1,
-                v2
-            );
-            v1
+    // Suffix-indexed values (strip up to first '.')
+    let mut n_layer: Option<usize> = None;
+    let mut n_embd: Option<usize> = None;
+    let mut n_head: Option<usize> = None;
+    let mut n_head_kv: Option<usize> = None;
+    let mut ff_dim: Option<usize> = None;
+    let mut n_ctx: Option<usize> = None;
+    let mut rope_base: Option<f32> = None;
+    let mut rope_dim: Option<usize> = None;
+    let mut rms_eps: Option<f32> = None;
+    let mut attn_softcap: Option<f32> = None;
+    let mut final_softcap: Option<f32> = None;
+    let mut n_vocab_explicit: Option<usize> = None;
+    let mut head_dim_explicit: Option<usize> = None;
+
+    for (key, value) in metadata.iter() {
+        match key.as_str() {
+            "general.architecture" => {
+                if let GgufMetaValue::String(s) = value {
+                    arch_str = s.clone();
+                }
+            }
+            "general.name" => {
+                if let GgufMetaValue::String(s) = value {
+                    model_name = s.clone();
+                }
+            }
+            "general.file_type" => {
+                if let GgufMetaValue::U32(v) = value {
+                    file_type_val = GgufFileType::from(*v);
+                }
+            }
+            "tokenizer.ggml.tokens" => {
+                if let GgufMetaValue::Array { len, .. } = value {
+                    if n_vocab_explicit.is_none() {
+                        n_vocab_explicit = Some(*len as usize);
+                    }
+                }
+            }
+            _ => {
+                // Strip arch prefix — suffix is globally unique within a GGUF file.
+                let suffix = match key.find('.') {
+                    Some(i) => &key[i + 1..],
+                    None => continue,
+                };
+                match suffix {
+                    "block_count" => {
+                        if let GgufMetaValue::U32(v) = value { n_layer = Some(*v as usize); }
+                    }
+                    "embedding_length" => {
+                        if let GgufMetaValue::U32(v) = value { n_embd = Some(*v as usize); }
+                    }
+                    "attention.head_count" => {
+                        if let GgufMetaValue::U32(v) = value { n_head = Some(*v as usize); }
+                    }
+                    "attention.head_count_kv" => {
+                        if let GgufMetaValue::U32(v) = value { n_head_kv = Some(*v as usize); }
+                    }
+                    "feed_forward_length" => {
+                        if let GgufMetaValue::U32(v) = value { ff_dim = Some(*v as usize); }
+                    }
+                    "context_length" => {
+                        if let GgufMetaValue::U32(v) = value { n_ctx = Some(*v as usize); }
+                    }
+                    "rope.freq_base" => {
+                        if let GgufMetaValue::F32(v) = value { rope_base = Some(*v); }
+                    }
+                    "rope.dimension_count" => {
+                        if let GgufMetaValue::U32(v) = value { rope_dim = Some(*v as usize); }
+                    }
+                    "attention.layer_norm_rms_epsilon"
+                    | "attention.layer_norm_epsilon"
+                    | "layer_norm_epsilon" => {
+                        if let GgufMetaValue::F32(v) = value { rms_eps = Some(*v); }
+                    }
+                    "attn_logit_softcapping" | "attention.logit_softcapping" => {
+                        if let GgufMetaValue::F32(v) = value { attn_softcap = Some(*v); }
+                    }
+                    "final_logit_softcapping" => {
+                        if let GgufMetaValue::F32(v) = value { final_softcap = Some(*v); }
+                    }
+                    "vocab_size" => {
+                        if n_vocab_explicit.is_none() {
+                            if let GgufMetaValue::U32(v) = value { n_vocab_explicit = Some(*v as usize); }
+                        }
+                    }
+                    "attention.key_length" => {
+                        if let GgufMetaValue::U32(v) = value { head_dim_explicit = Some(*v as usize); }
+                    }
+                    _ => {}
+                }
+            }
         }
-        (Some(v), None) => v,
-        (None, Some(v)) => v,
-        (None, None) => {
-            return Err(LibshimmyError::InvariantViolation {
-                msg: "Missing tokenizer vocab size: expected 'llama.vocab_size' or 'tokenizer.ggml.tokens'"
-                    .to_string(),
-            });
-        }
-    };
+    }
 
-    // Step 4 tightens RoPE scaling rules; for now, the no-scaling case is represented by 1.0.
-    let rope_scale = 1.0f32;
+    // Require the critical structural fields.
+    let n_layer = n_layer.ok_or_else(|| LibshimmyError::InvariantViolation {
+        msg: format!("Missing required GGUF metadata key: {arch_str}.block_count"),
+    })?;
+    let n_embd = n_embd.ok_or_else(|| LibshimmyError::InvariantViolation {
+        msg: format!("Missing required GGUF metadata key: {arch_str}.embedding_length"),
+    })?;
+    let n_head = n_head.ok_or_else(|| LibshimmyError::InvariantViolation {
+        msg: format!("Missing required GGUF metadata key: {arch_str}.attention.head_count"),
+    })?;
+    let ff_dim = ff_dim.ok_or_else(|| LibshimmyError::InvariantViolation {
+        msg: format!("Missing required GGUF metadata key: {arch_str}.feed_forward_length"),
+    })?;
+    let n_ctx = n_ctx.ok_or_else(|| LibshimmyError::InvariantViolation {
+        msg: format!("Missing required GGUF metadata key: {arch_str}.context_length"),
+    })?;
+
+    let n_head_kv = n_head_kv.unwrap_or(n_head);
+    let rope_base = rope_base.unwrap_or(10000.0);
+    let rope_dim = rope_dim.unwrap_or(n_embd / n_head);
+    let rms_eps = rms_eps.unwrap_or(1e-5);
+
+    // Vocab: prefer explicit over token array length
+    let n_vocab = n_vocab_explicit.ok_or_else(|| LibshimmyError::InvariantViolation {
+        msg: "Missing tokenizer vocab size: expected vocab_size or tokenizer.ggml.tokens".to_string(),
+    })?;
+
+    let arch = ModelArch::from(arch_str.as_str());
 
     ensure!(n_head > 0, "n_head must be > 0");
     ensure!(n_head_kv > 0, "n_head_kv must be > 0");
     ensure!(
         n_embd % n_head == 0,
         "n_embd % n_head must be 0 (n_embd={} n_head={})",
-        n_embd,
-        n_head
+        n_embd, n_head
     );
     ensure!(
         n_head % n_head_kv == 0,
         "n_head % n_head_kv must be 0 (n_head={} n_head_kv={})",
-        n_head,
-        n_head_kv
+        n_head, n_head_kv
     );
 
     Ok(ModelSpec {
@@ -690,26 +789,20 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
         ff_dim,
         rms_eps,
         rope_base,
-        rope_scale,
+        rope_scale: 1.0,
         rope_dim,
         yarn_alpha: 1.0,
         yarn_beta: 32.0,
         n_ctx,
-        attn_logit_softcap: 0.0,
-        final_logit_softcap: 0.0,
-        has_qk_norm: false,
-        head_dim: 0,
+        attn_logit_softcap: attn_softcap.unwrap_or(0.0),
+        final_logit_softcap: final_softcap.unwrap_or(0.0),
+        has_qk_norm: false, // set by compute_derived via arch
+        head_dim: head_dim_explicit.unwrap_or(0),
         gqa_ratio: 0,
         kv_dim: 0,
-        arch: crate::core::spec::ModelArch::Llama,
-        file_type: match metadata.get("general.file_type") {
-            Some(GgufMetaValue::U32(v)) => crate::core::spec::GgufFileType::from(*v),
-            _ => crate::core::spec::GgufFileType::Unknown,
-        },
-        model_name: match metadata.get("general.name") {
-            Some(GgufMetaValue::String(s)) => s.clone(),
-            _ => String::new(),
-        },
+        arch,
+        file_type: file_type_val,
+        model_name,
         temp_buffer_size: 0,
         kv_cache_size_per_layer: 0,
     }
@@ -1241,6 +1334,15 @@ fn load_required_weights(
         }
     }
 
+    // Tied embeddings (Qwen3 and others): if output projection is missing,
+    // alias it to the token embedding weight (they share the same matrix).
+    if model.get_weight(&WeightId::OutputProj).is_none() {
+        if let Some(embed) = model.get_weight(&WeightId::TokenEmbed).cloned() {
+            println!("  [tied embeddings] output.weight not found — using token_embd.weight for OutputProj");
+            model.insert_weight(WeightId::OutputProj, embed);
+        }
+    }
+
     Ok(())
 }
 
@@ -1250,8 +1352,13 @@ fn create_weight_mapping(n_layer: usize) -> HashMap<String, WeightId> {
     // Token embeddings
     mapping.insert("token_embd.weight".to_string(), WeightId::TokenEmbed);
 
-    // Output projection
+    // Output projection — may be tied to token embeddings (e.g. Qwen3)
     mapping.insert("output.weight".to_string(), WeightId::OutputProj);
+    mapping.insert("token_embd.weight".to_string(), WeightId::TokenEmbed);
+
+    // Handle tied embeddings: if a model has no output.weight, we fall back
+    // to token_embd.weight for OutputProj during validation. This is handled
+    // in validate_required_weights below.
 
     // Layer weights
     for layer in 0..n_layer {

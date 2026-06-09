@@ -195,6 +195,8 @@ impl GpuRuntime {
         let output_head_f32 =
             Self::load_output_head_f32(&model_path_str, &gpu_model, &device, &spec)?;
 
+        // === END DIAGNOSTIC ===
+
         // KV cache
         let max_ctx = spec.n_ctx as u32;
         let kv_cache = Arc::new(Mutex::new(KVCache::new(
@@ -534,6 +536,12 @@ impl GpuRuntime {
     ) -> Result<wgpu::Buffer, Box<dyn std::error::Error + Send + Sync>> {
         use wgpu::util::DeviceExt;
 
+        println!("[OutputHead] load_output_head_f32 ENTERED for model: {}", model_path);
+        println!("[OutputHead] data_start_offset={} tensor_offset={} weight_type={}", 
+            gpu_model.metadata.data_start_offset, 
+            gpu_model.metadata.get_tensor_offset("output.weight").unwrap_or(0),
+            gpu_model.metadata.get_tensor_type("output.weight").unwrap_or(0));
+
         // Determine which tensor to use for the output head.
         // Models with tied embeddings (e.g. Llama-3.2) omit `output.weight`
         // and reuse `token_embd.weight` for the final projection.
@@ -567,11 +575,16 @@ impl GpuRuntime {
         let mmap = unsafe { Mmap::map(&file)? };
         let data_start = gpu_model.metadata.data_start_offset;
 
+        // tensor_offset from get_tensor_offset() is an ABSOLUTE byte offset in the file.
+        // GgufTensorInfo.offset is a RELATIVE offset from the data section start.
+        // Convert: relative = absolute - data_start.
+        let tensor_offset_relative = tensor_offset.saturating_sub(data_start);
+
         let tensor_info = GgufTensorInfo {
             name: tensor_name.to_string(),
             dimensions: vec![spec.n_vocab, spec.n_embd],
             ggml_type: weight_type,
-            offset: tensor_offset,
+            offset: tensor_offset_relative,
         };
 
         // Dequantize to F32 — support all quant types used in output/embedding layers
@@ -579,7 +592,8 @@ impl GpuRuntime {
             0 => {
                 // F32 — already float, just read directly
                 use crate::core::tensor::Tensor;
-                let byte_offset = data_start + tensor_offset;
+                // tensor_offset_relative is already relative to data_start
+                let byte_offset = data_start + tensor_offset_relative;
                 let n_elements = spec.n_vocab * spec.n_embd;
                 let bytes = &mmap[byte_offset as usize..(byte_offset as usize + n_elements * 4)];
                 let floats: Vec<f32> = bytes
@@ -610,6 +624,16 @@ impl GpuRuntime {
             contents: bytemuck::cast_slice(&tensor_f32.data),
             usage: wgpu::BufferUsages::STORAGE,
         });
+
+        // CPU-side verification — runs before GPU upload, guaranteed to print.
+        let nan_in_head = tensor_f32.data.iter().filter(|v| v.is_nan()).count();
+        let inf_in_head = tensor_f32.data.iter().filter(|v| v.is_infinite()).count();
+        let max_abs = tensor_f32.data.iter().cloned().map(f32::abs).fold(0.0f32, f32::max);
+        println!(
+            "[OutputHead-CPU] tensor={} quant={} elements={} NaN={} Inf={} max_abs={:.4e}",
+            tensor_name, weight_type,
+            tensor_f32.data.len(), nan_in_head, inf_in_head, max_abs
+        );
 
         Ok(buffer)
     }
@@ -643,15 +667,20 @@ fn sample_token(
         return logits
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-            .unwrap()
-            .0 as u32;
+            .filter(|(_, v)| v.is_finite())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i as u32)
+            .unwrap_or(0);
     }
 
-    // Apply temperature
+    // Apply temperature — map NaN/inf to -inf so they're excluded from sampling
     let inv_t = 1.0 / temperature;
     for v in logits.iter_mut() {
-        *v *= inv_t;
+        if v.is_finite() {
+            *v *= inv_t;
+        } else {
+            *v = f32::NEG_INFINITY;
+        }
     }
 
     // Softmax
@@ -664,7 +693,12 @@ fn sample_token(
 
     // Top-p nucleus
     let mut indexed: Vec<(usize, f32)> = probs.iter().cloned().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    // Filter non-finite before sorting
+    indexed.retain(|(_, p)| p.is_finite());
+    if indexed.is_empty() {
+        return 0; // all logits were non-finite — safe fallback
+    }
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut cumsum = 0.0f32;
     let mut cutoff = indexed.len();
