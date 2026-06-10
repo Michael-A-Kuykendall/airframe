@@ -264,8 +264,8 @@ impl ModelSpec {
                             }
                         }
                         "vocab_size" => {
-                            if n_vocab.is_none() {
-                                if let GgufValue::U32(v) = value {
+                            if let GgufValue::U32(v) = value {
+                                if n_vocab.is_none() {
                                     n_vocab = Some(*v as usize);
                                 }
                             }

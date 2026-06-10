@@ -73,7 +73,7 @@ impl BindlessPipeline {
         let dim = spec.n_embd;
         assert!(dim > 0, "spec.n_embd must be > 0");
         assert!(
-            input_embd.len() % dim == 0,
+            input_embd.len().is_multiple_of(dim),
             "input_embd must align to token rows"
         );
         assert!(chunk_tokens > 0, "chunk_tokens must be > 0");

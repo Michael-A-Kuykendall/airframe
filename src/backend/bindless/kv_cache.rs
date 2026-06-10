@@ -150,7 +150,7 @@ impl KVCache {
         let (k_packed_buffers, v_packed_buffers, k_scale_buffers, v_scale_buffers) = if enable_int4
         {
             assert!(
-                head_dim % 8 == 0,
+                head_dim.is_multiple_of(8),
                 "head_dim must be divisible by 8 for INT4 packing (got {})",
                 head_dim
             );

@@ -29,7 +29,7 @@ pub fn attention_f32(
     causal_mask: bool,
 ) -> Result<Tensor> {
     // Validate GQA configuration
-    if n_head % n_head_kv != 0 {
+    if !n_head.is_multiple_of(n_head_kv) {
         return Err(LibshimmyError::Unsupported(format!(
             "n_head ({}) must be divisible by n_head_kv ({})",
             n_head, n_head_kv
@@ -131,7 +131,7 @@ pub fn attention_with_cache_f32(
     qk_norm: Option<(&Tensor, &Tensor)>, // (q_norm_weight, k_norm_weight) for Qwen3
 ) -> Result<Tensor> {
     // Validate GQA configuration
-    if n_head % n_head_kv != 0 {
+    if !n_head.is_multiple_of(n_head_kv) {
         return Err(LibshimmyError::Unsupported(format!(
             "n_head ({}) must be divisible by n_head_kv ({})",
             n_head, n_head_kv
