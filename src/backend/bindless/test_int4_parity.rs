@@ -54,7 +54,10 @@ mod int4_parity_tests {
     /// Mirrors sh_quantize_kv.wgsl exactly.
     /// Returns (scale, packed_u32s).
     fn cpu_quantize(vals: &[f32]) -> (f32, Vec<u32>) {
-        assert!(vals.len() % 8 == 0, "head_dim must be a multiple of 8");
+        assert!(
+            vals.len().is_multiple_of(8),
+            "head_dim must be a multiple of 8"
+        );
         let max_abs = vals.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
         let scale = if max_abs == 0.0 { 1.0 } else { max_abs / 7.0 };
         let hd8 = vals.len() / 8;
@@ -529,7 +532,7 @@ mod int4_parity_tests {
         let big_pos = vec![1000.0f32; head_dim as usize];
         // Alternating large positive/negative V: ±1000.0
         let alternating: Vec<f32> = (0..head_dim as usize)
-            .map(|d| if d % 2 == 0 { 1000.0 } else { -1000.0 })
+            .map(|d| if d.is_multiple_of(2) { 1000.0 } else { -1000.0 })
             .collect();
 
         let buf_size = (max_seq * n_head_kv * head_dim) as usize;

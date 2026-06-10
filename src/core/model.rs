@@ -797,13 +797,13 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
     ensure!(n_head > 0, "n_head must be > 0");
     ensure!(n_head_kv > 0, "n_head_kv must be > 0");
     ensure!(
-        n_embd % n_head == 0,
+        n_embd.is_multiple_of(n_head),
         "n_embd % n_head must be 0 (n_embd={} n_head={})",
         n_embd,
         n_head
     );
     ensure!(
-        n_head % n_head_kv == 0,
+        n_head.is_multiple_of(n_head_kv),
         "n_head % n_head_kv must be 0 (n_head={} n_head_kv={})",
         n_head,
         n_head_kv
