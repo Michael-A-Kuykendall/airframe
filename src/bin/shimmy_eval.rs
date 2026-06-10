@@ -1316,7 +1316,7 @@ async fn run_lambada(
         }
         evaluated += 1;
 
-        if evaluated % 10 == 0 {
+        if evaluated.is_multiple_of(10) {
             let elapsed = run_start.elapsed().as_secs_f64();
             let rate = if elapsed > 0.0 {
                 evaluated as f64 / elapsed
@@ -1335,7 +1335,7 @@ async fn run_lambada(
             );
         }
 
-        if sample_index % 50 == 0 {
+        if sample_index.is_multiple_of(50) {
             let acc = (matches as f32 / evaluated as f32) * 100.0;
             println!(
                 "LAMBADA_PROGRESS samples={} accuracy={:.2}% (lines_seen={})",
