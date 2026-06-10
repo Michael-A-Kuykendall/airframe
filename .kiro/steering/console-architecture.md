@@ -1,77 +1,50 @@
-# Shimmy Console — Canonical Location
+# Console — Two Different Products, Same Name
 
-**Consolidated:** 2026-06-10  
-**Branch:** `release/v0.2.2-clean`  
-**Status:** Compiles clean, zero warnings, zero errors.
-
----
-
-## THIS IS THE ONE
-
-`airframe/crates/console/` is the **canonical, authoritative implementation** of shimmy-console.
-
-Do not look elsewhere. Do not start a new implementation. Everything is here.
+**Corrected:** 2026-06-10  
+**Authoritative source:** `shimmy/docs/internal/CONSOLE_WORKSTREAM_2026-06-10.md`
 
 ---
 
-## What's Built
+## CRITICAL: There are TWO things called "console". Do not confuse them.
 
-- `src/main.rs` — CLI entrypoint: `shimmy-console chat|analyze|edit|config|tool`
-- `src/commands/chat.rs` — Full agentic REPL loop with tool execution
-- `src/adapters/` — Four adapters: `LocalInferenceAdapter` (airframe direct, no server), `HttpInferenceAdapter`, `ShimmyServerAdapter`, `WsInferenceAdapter`
-- `src/tools/` — 12 tools: file_ops, git, analysis, command, system, docs, image, loader
-- `src/discovery/` — Shimmy instance discovery (port scanning + health check)
-- `src/config.rs` — Config from env + file (`~/.shimmy/config.toml`)
-- `src/session_store.rs`, `src/history.rs` — Session and history persistence
-- `src/license/` — License validation scaffolding (dev backdoor active, replace before prod)
+### 1. `shimmy console` — THE PRODUCT being shipped (lives in shimmy repo)
+A **browser-based themed UI**. `shimmy console [theme]` spawns shimmy serve, opens
+the arcade web frontend in the browser, chats over WebSocket to the local airframe engine.
+This is the consumer product. It does NOT live in this (airframe) repo.
 
----
+### 2. `airframe/crates/console/` — a developer terminal tool (lives HERE)
+A terminal/CLI agentic console: chat REPL, 12 tools, adapters. This is a SEPARATE
+developer utility. It is NOT `shimmy console`. It is NOT the product being shipped.
 
-## Architecture: Single-Command Launch
-
-The goal is `shimmy-console chat` (or `shimmy console` once integrated) with:
-1. No second terminal — `LocalInferenceAdapter` calls airframe engine directly inline
-2. Model discovery at launch — scans standard paths + configured dirs
-3. First-run model chooser if no default configured
-4. Theme layer (Phase 2): corporate splash → theme chooser → "arcade" as default theme
-5. Config file: `~/.shimmy/config.toml`
-
-```toml
-[shimmy]
-default_theme = "arcade"
-default_model = "tinyllama-1.1b-chat"
-model_dirs = [
-    "D:/shimmy-test-models/gguf_collection"
-]
-```
+**DO NOT touch `airframe/crates/console/` for shimmy console work.**  
+**DO NOT treat it as the canonical shimmy console.**  
+It is a standalone dev tool that happens to share the word "console."
 
 ---
 
-## Theme Naming
+## Where shimmy console actually lives
 
-- Default theme: **`arcade`** (approved 2026-06-10)
-- "amiga" was never committed anywhere — no rename needed
-- Theme spec format: `~/.shimmy/themes/{name}/theme.toml` + assets
-- User themes: drop folder in `~/.shimmy/themes/`, auto-discovered
-
----
-
-## What's Next (Step 2+)
-
-1. Wire `LocalInferenceAdapter` into `chat.rs` based on config/flag
-2. Add model discovery + chooser at launch
-3. Build theme layer: splash, chooser, arcade theme
-4. Integrate into shimmy CLI as `shimmy console [theme]`
-
----
-
-## Prior Implementations (Dead — Do Not Resurrect)
-
-| Location | Status |
+| Piece | Location |
 |---|---|
-| `shimmy/console/` (feature/console branch) | Dead skeleton — kept for git history only |
-| `shimmy/src/` console feature stubs | Intentionally preserved — integration point for when console goes public |
-| `airframe-v2-gpu` branch console code | Identical to current branch — superseded |
+| CLI command `shimmy console [theme]` | `shimmy/src/cli.rs` (to be wired) |
+| WebSocket handler `/ws/console` | `shimmy/src/api.rs` (committed) |
+| Arcade theme frontend | `C:\Users\micha\repos\arcade` (GitHub: `Michael-A-Kuykendall/arcade`) |
+| Embedded server spawn helpers | `shimmy/console/embedded_server.rs` |
+
+---
+
+## This airframe crate (`crates/console`)
+
+It compiles clean (51 tests). Keep it as a standalone developer terminal tool if useful.
+It is NOT part of the shimmy console product line. Leave it alone unless explicitly
+working on the terminal dev tool itself.
+
+---
+
+## Theme
+
+Default theme: **`arcade`**. The repo `amiga-ai-interface` was renamed to `arcade`.
+No instance of "amiga" remains in that codebase.
 
 ---
 
