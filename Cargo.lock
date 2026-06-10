@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "airframe"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aho-corasick",
  "bytemuck",
@@ -55,6 +55,7 @@ name = "airframe-observe"
 version = "0.1.0"
 dependencies = [
  "airframe",
+ "d0-engine",
  "serde",
  "serde_json",
 ]
@@ -594,6 +595,10 @@ dependencies = [
  "generic-array",
  "typenum",
 ]
+
+[[package]]
+name = "d0-engine"
+version = "0.1.0"
 
 [[package]]
 name = "darling"
