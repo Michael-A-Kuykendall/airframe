@@ -16,11 +16,13 @@
 
 Airframe is the GPU inference core powering [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy). It runs full transformer inference directly on the GPU via WGSL compute shaders — works on NVIDIA, AMD, Intel, and Apple Silicon.
 
-**⚡ NEW in v0.2.1**: [TurboShimmy INT4 KV Cache](#-turboshimmy-int4-kv-cache) — ~7× less KV VRAM with one env var. Run Llama-3.2-3B on 4 GB GPUs.
+**⚡ v0.2.2**: Multi-architecture GGUF loading — Qwen3, Qwen2, Gemma-2, Phi-3 now load correctly. Tied embeddings support for Qwen3. Context cap safety for large-context models.
+
+**⚡ v0.2.1**: [TurboShimmy INT4 KV Cache](#-turboshimmy-int4-kv-cache) — ~7× less KV VRAM with one env var. Run Llama-3.2-3B on 4 GB GPUs.
 
 ```toml
 [dependencies]
-airframe = "0.1"
+airframe = "0.2"
 ```
 
 > **Patent Notice**: The Fused Semantic Execution (FSE) subsystem (`crates/libfse`) is covered by a pending US patent. The WebGPU inference runtime (attention, GGUF loader, quantization) is unencumbered MIT. See [license section](#license) for full terms.
@@ -68,19 +70,20 @@ LIBSHIMMY_MODEL_PATH=/path/to/model.gguf cargo run --example simple_flight -- "H
 
 ## Supported Architectures
 
-| Architecture | Models |
-|---|---|
-| **Llama** | Llama 3.2, Llama 3, Llama 2 |
-| **Mistral** | Mistral 7B, Mixtral (dense layers) |
-| **Phi** | Phi-3, Phi-2 |
-| **Qwen2** | Qwen2 7B |
-| **Falcon** | Falcon 7B |
-| **GPT-NeoX** | StableLM |
-| **Gemma** | Gemma 2B |
+| Architecture | Models | Status |
+|---|---|---|
+| **Llama** | Llama 3.2, Llama 3, Llama 2, DeepSeek | ✅ Verified |
+| **Mistral** | Mistral 7B, Mixtral (dense layers) | ✅ Verified |
+| **Phi** | Phi-3.5, Phi-3, Phi-2 | ✅ Verified |
+| **Qwen2** | Qwen2 0.5B–7B | ✅ Verified (fixed in v0.2.2) |
+| **Qwen3** | Qwen3 0.6B–8B | ✅ Loads correctly (forward pass in progress) |
+| **Gemma** | Gemma-2 2B, 9B | ✅ Verified (fixed in v0.2.2) |
+| **StarCoder2** | StarCoder2 3B | ✅ Verified |
+| **GPT-2** | GPT-2 | ✅ Verified |
 
 ## Supported Quantization
 
-`F32` · `F16` · `Q4_0` · `Q4_K_M` · `Q8_0`
+`F32` · `F16` · `Q4_0` · `Q4_K_M` · `Q5_K_M` · `Q6_K` · `Q8_0`
 
 All quantization types are implemented in both GPU shader and CPU reference paths, with parity validation — the same model produces bit-identical output on CPU and GPU.
 

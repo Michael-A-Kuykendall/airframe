@@ -9,60 +9,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
-- **Multi-architecture GGUF loading** — `model_spec_from_metadata` was hardcoded to
-  `llama.*` key prefix. Now uses suffix-based matching, correctly loading Qwen3, Qwen2,
-  Gemma, Phi3, and all other non-Llama architectures. This was a silent failure for
-  every non-Llama model.
+- **Multi-architecture GGUF loading** —  hardcoded 
+  key prefix, silently failing on every non-Llama model. Now uses suffix-based matching,
+  correctly loading Qwen3, Qwen2, Gemma2, Phi3, StarCoder2, GPT-2, and all other
+  non-Llama architectures from GGUF metadata.
 
-- **Tied embeddings support** — Models where `output.weight` is absent (Qwen3 uses
-  tied embeddings sharing `token_embd.weight`) now load correctly. Previously crashed
-  with `WeightMissing: OutputProj`.
+- **Tied embeddings (Qwen3)** — Qwen3 models have no separate  — they
+  reuse the token embedding. Loading now correctly aliases  as the
+  output projection. Previously crashed with .
 
-- **Context cap safety** — Added default context cap (4096) during oracle generation
-  to prevent 28+ GB KV cache allocation on large-context models (Qwen2-7B has
-  `n_ctx=32768`). GPU inference is unaffected; this only applies to CPU oracle runs.
+- **Context cap safety** — Large-context models like Qwen2-7B (n_ctx=32768) would
+  allocate 28+ GB KV cache on CPU oracle runs. Added a safe default cap (4096) for
+  CPU inference paths. GPU server operation is unaffected.
 
 ### Added
 
-- **Golden Reference Vault** — DuckDB-backed certification database populated with
-  oracle traces for 22 models across 6 architectures (Llama, Qwen2, Qwen3, Gemma,
-  Phi, DeepSeek). Internal tool; not published.
+- **Golden Reference Vault** — Internal DuckDB certification database with oracle traces
+  for 22 models across 6 architectures. Includes  binary for generating
+  CPU reference traces from any GGUF. Internal tool; not published to crates.io.
 
-- **airframe-observe crate** — FSE-based inference observation layer powered by
-  d0-engine reactive fact engine. Selector-first, single-pass capture of layer
-  outputs and logits. Internal; not published.
+- **FSE inference observation layer** () — Selector-first,
+  single-pass inference capture powered by d0-engine. Multiple observers sharing a
+  selector cost zero additional extraction (FSE invariant). Internal; not published.
+
+---
 
 ## [Unreleased] — v0.2.3
 
-### Added
-
-- **>2 GB GGUF blob split** — splits GGUF files across multiple ≤2 GB GPU storage
-  buffers, bypassing the WebGPU per-buffer size cap. Enables 7B+ parameter models
-  (deepseek-7b, qwen2-7b, MiniCPM-V 2.6 text path) on hardware that previously
-  hit the 2 GB ceiling. Also resolves the Gemma-2 output-head limitation
-  (output.weight = 2.19 GB) without any special-case code.
-
-- **GPU blob-based LM head matmul** — eliminates the CPU fallback logit path for
-  large models. All vocab projection now runs on-device regardless of model size.
-  Weight tensor reads use word offsets (`byte_offset / 4`) to prevent `u32` overflow
-  on tensor byte offsets > 4 GB.
-
-- **QKV bias + Qwen2 chat template** — adds additive QKV bias support required by
-  Qwen2-series models; wires the Qwen2-Instruct chat template for correct
-  `<|im_start|>` / `<|im_end|>` framing.
-
-### Planned (next)
-
-- **INT4 KV auto-suggestion** — at server startup, estimate peak VRAM
-  (`model_weights + ctx × layers × kv_heads × head_dim × 4 bytes`) and compare
-  against `adapter_limits.max_buffer_size`. When the model + F32 KV cache would
-  exceed safe limits, print a clear startup advisory:
-  ```
-  [Airframe] VRAM advisory: estimated peak 13.2 GB exceeds adapter limit 12.0 GB.
-  Consider setting SHIMMY_KV_QUANT=int4 to reduce KV cache by ~7x.
-  ```
-  No automatic mode switch — the user retains explicit control. Targeted at
-  7B+ models on ≤12 GB VRAM cards running with large context windows.
+_No changes yet._
 
 ---
 
