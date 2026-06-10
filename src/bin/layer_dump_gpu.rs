@@ -1,3 +1,10 @@
+// Cross-platform: suppress macOS clippy 1.86+ lints
+#![allow(
+    unknown_lints,
+    clippy::manual_is_multiple_of,
+    clippy::collapsible_match
+)]
+
 // Layer Dump Tool: Capture all 22 layer outputs for algebraic verification
 // Phase 2.1: Setup layer dump infrastructure
 

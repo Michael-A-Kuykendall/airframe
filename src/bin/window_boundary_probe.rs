@@ -1,3 +1,10 @@
+// Cross-platform: suppress macOS clippy 1.86+ lints
+#![allow(
+    unknown_lints,
+    clippy::manual_is_multiple_of,
+    clippy::collapsible_match
+)]
+
 use clap::{Parser, ValueEnum};
 use serde_json::{json, Value};
 use std::fs;

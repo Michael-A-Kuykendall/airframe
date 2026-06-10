@@ -1,3 +1,10 @@
+// Cross-platform: suppress macOS clippy 1.86+ lints
+#![allow(
+    unknown_lints,
+    clippy::manual_is_multiple_of,
+    clippy::collapsible_match
+)]
+
 //! vault_seed — Golden Reference Vault population tool
 //!
 //! Loads a GGUF file, runs a fixed CPU forward pass (BOS → "Hello"),

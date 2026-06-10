@@ -1,3 +1,10 @@
+// Cross-platform: suppress macOS clippy 1.86+ lints
+#![allow(
+    unknown_lints,
+    clippy::manual_is_multiple_of,
+    clippy::collapsible_match
+)]
+
 // quant_verify — GPU dequant validation binary.
 //
 // Loads a GGUF file, finds tensors of each supported quant type, dequantizes

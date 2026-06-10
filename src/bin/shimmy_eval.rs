@@ -1,3 +1,10 @@
+// Cross-platform: suppress macOS clippy 1.86+ lints that don't exist on older versions
+#![allow(
+    unknown_lints,
+    clippy::manual_is_multiple_of,
+    clippy::collapsible_match
+)]
+
 use airframe::backend::bindless::{
     loader::BindlessModel,
     pipeline::{BindlessPipeline, RMSNormParams},
