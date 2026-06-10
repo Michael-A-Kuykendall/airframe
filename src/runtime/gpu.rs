@@ -8,7 +8,7 @@ use crate::backend::bindless::loader::BindlessModel;
 use crate::backend::bindless::metadata::BindlessMetadata;
 use crate::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
 use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
-use crate::core::dequant::dequantize_q6_k;
+use crate::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0};
 use crate::core::model::GgufTensorInfo;
 use crate::core::spec::ModelSpec;
 use memmap2::Mmap;
@@ -149,11 +149,22 @@ impl GpuRuntime {
         let header_meta = BindlessMetadata::new(&mut header_file);
         drop(header_file);
         let mut spec = header_meta.to_model_spec();
-        // Respect SHIMMY_MAX_CTX for extended context (YaRN RoPE)
+
+        // Safe context window cap.
+        // Consumer GPUs (4-8 GB VRAM) cannot sustain the full native context of
+        // modern models (e.g. Llama-3.2 = 131072). The KV cache scales linearly:
+        //   n_layers × n_kv_heads × head_dim × ctx × 2 × 4 bytes
+        // Without a cap, a 131K-context model allocates ~28 GB of KV cache alone.
+        //
+        // If SHIMMY_MAX_CTX is explicitly set, honour it (user opted in).
+        // Otherwise, cap at 4096 tokens — enough for practical use on consumer hardware.
+        const DEFAULT_SAFE_CTX: usize = 8192;
+
         if let Some(max_ctx) = std::env::var("SHIMMY_MAX_CTX")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
         {
+            // Explicit override — apply YaRN RoPE scale if extending beyond native
             let rope_scale = std::env::var("SHIMMY_ROPE_SCALE")
                 .ok()
                 .and_then(|s| s.parse::<f32>().ok())
@@ -166,6 +177,15 @@ impl GpuRuntime {
                 });
             spec.n_ctx = max_ctx;
             spec.rope_scale = rope_scale;
+        } else if spec.n_ctx > DEFAULT_SAFE_CTX {
+            // Model native context exceeds safe default — cap it silently.
+            // Set SHIMMY_MAX_CTX=<n> to override.
+            eprintln!(
+                "[GpuRuntime] Model native context {} tokens exceeds safe default {}. \
+                 Capping to {} to protect GPU memory. Set SHIMMY_MAX_CTX=<n> to override.",
+                spec.n_ctx, DEFAULT_SAFE_CTX, DEFAULT_SAFE_CTX
+            );
+            spec.n_ctx = DEFAULT_SAFE_CTX;
         }
         let gpu_model = BindlessModel::load_from_disk(&device, model_path, Some(&spec));
         let pipeline = BindlessPipeline::new(&device);
@@ -174,6 +194,8 @@ impl GpuRuntime {
         // Dequantize output head (Q6_K → F32)
         let output_head_f32 =
             Self::load_output_head_f32(&model_path_str, &gpu_model, &device, &spec)?;
+
+        // === END DIAGNOSTIC ===
 
         // KV cache
         let max_ctx = spec.n_ctx as u32;
@@ -512,38 +534,106 @@ impl GpuRuntime {
         device: &wgpu::Device,
         spec: &ModelSpec,
     ) -> Result<wgpu::Buffer, Box<dyn std::error::Error + Send + Sync>> {
-        let output_weight_type = gpu_model
-            .metadata
-            .get_tensor_type("output.weight")
-            .expect("output.weight type not found");
+        use wgpu::util::DeviceExt;
 
-        if output_weight_type != 14 {
-            return Err(format!(
-                "Expected Q6_K (type 14) for output.weight, got type {}",
-                output_weight_type
-            )
-            .into());
-        }
+        println!("[OutputHead] load_output_head_f32 ENTERED for model: {}", model_path);
+        println!("[OutputHead] data_start_offset={} tensor_offset={} weight_type={}", 
+            gpu_model.metadata.data_start_offset, 
+            gpu_model.metadata.get_tensor_offset("output.weight").unwrap_or(0),
+            gpu_model.metadata.get_tensor_type("output.weight").unwrap_or(0));
+
+        // Determine which tensor to use for the output head.
+        // Models with tied embeddings (e.g. Llama-3.2) omit `output.weight`
+        // and reuse `token_embd.weight` for the final projection.
+        let (tensor_name, weight_type, tensor_offset) = {
+            let has_output = gpu_model.metadata.get_tensor_type("output.weight").is_some();
+            if has_output {
+                let wt = gpu_model
+                    .metadata
+                    .get_tensor_type("output.weight")
+                    .expect("output.weight type not found");
+                let off = gpu_model
+                    .metadata
+                    .get_tensor_offset("output.weight")
+                    .unwrap_or(0);
+                ("output.weight", wt, off)
+            } else {
+                // Tied embeddings: fall back to token_embd.weight
+                let wt = gpu_model
+                    .metadata
+                    .get_tensor_type("token_embd.weight")
+                    .ok_or("Neither output.weight nor token_embd.weight found in model")?;
+                let off = gpu_model
+                    .metadata
+                    .get_tensor_offset("token_embd.weight")
+                    .unwrap_or(0);
+                ("token_embd.weight", wt, off)
+            }
+        };
 
         let file = std::fs::File::open(model_path)?;
         let mmap = unsafe { Mmap::map(&file)? };
+        let data_start = gpu_model.metadata.data_start_offset;
+
+        // tensor_offset from get_tensor_offset() is an ABSOLUTE byte offset in the file.
+        // GgufTensorInfo.offset is a RELATIVE offset from the data section start.
+        // Convert: relative = absolute - data_start.
+        let tensor_offset_relative = tensor_offset.saturating_sub(data_start);
 
         let tensor_info = GgufTensorInfo {
-            name: "output.weight".to_string(),
+            name: tensor_name.to_string(),
             dimensions: vec![spec.n_vocab, spec.n_embd],
-            ggml_type: 14,
-            offset: 0,
+            ggml_type: weight_type,
+            offset: tensor_offset_relative,
         };
 
-        let data_start = gpu_model.metadata.data_start_offset;
-        let tensor_f32 = dequantize_q6_k(&tensor_info, &mmap, data_start)?;
+        // Dequantize to F32 — support all quant types used in output/embedding layers
+        let tensor_f32 = match weight_type {
+            0 => {
+                // F32 — already float, just read directly
+                use crate::core::tensor::Tensor;
+                // tensor_offset_relative is already relative to data_start
+                let byte_offset = data_start + tensor_offset_relative;
+                let n_elements = spec.n_vocab * spec.n_embd;
+                let bytes = &mmap[byte_offset as usize..(byte_offset as usize + n_elements * 4)];
+                let floats: Vec<f32> = bytes
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect();
+                Tensor {
+                    data: floats,
+                    shape: vec![spec.n_vocab, spec.n_embd],
+                }
+            }
+            2  => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
+            8  => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
+            12 => dequantize_q4_k(&tensor_info, &mmap, data_start)?,
+            13 => dequantize_q5_k(&tensor_info, &mmap, data_start)?,
+            14 => dequantize_q6_k(&tensor_info, &mmap, data_start)?,
+            other => {
+                return Err(format!(
+                    "Unsupported quant type {} for output head tensor '{}'",
+                    other, tensor_name
+                )
+                .into())
+            }
+        };
 
-        use wgpu::util::DeviceExt;
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Output Head F32"),
             contents: bytemuck::cast_slice(&tensor_f32.data),
             usage: wgpu::BufferUsages::STORAGE,
         });
+
+        // CPU-side verification — runs before GPU upload, guaranteed to print.
+        let nan_in_head = tensor_f32.data.iter().filter(|v| v.is_nan()).count();
+        let inf_in_head = tensor_f32.data.iter().filter(|v| v.is_infinite()).count();
+        let max_abs = tensor_f32.data.iter().cloned().map(f32::abs).fold(0.0f32, f32::max);
+        println!(
+            "[OutputHead-CPU] tensor={} quant={} elements={} NaN={} Inf={} max_abs={:.4e}",
+            tensor_name, weight_type,
+            tensor_f32.data.len(), nan_in_head, inf_in_head, max_abs
+        );
 
         Ok(buffer)
     }
@@ -577,15 +667,20 @@ fn sample_token(
         return logits
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-            .unwrap()
-            .0 as u32;
+            .filter(|(_, v)| v.is_finite())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i as u32)
+            .unwrap_or(0);
     }
 
-    // Apply temperature
+    // Apply temperature — map NaN/inf to -inf so they're excluded from sampling
     let inv_t = 1.0 / temperature;
     for v in logits.iter_mut() {
-        *v *= inv_t;
+        if v.is_finite() {
+            *v *= inv_t;
+        } else {
+            *v = f32::NEG_INFINITY;
+        }
     }
 
     // Softmax
@@ -598,7 +693,12 @@ fn sample_token(
 
     // Top-p nucleus
     let mut indexed: Vec<(usize, f32)> = probs.iter().cloned().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    // Filter non-finite before sorting
+    indexed.retain(|(_, p)| p.is_finite());
+    if indexed.is_empty() {
+        return 0; // all logits were non-finite — safe fallback
+    }
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut cumsum = 0.0f32;
     let mut cutoff = indexed.len();

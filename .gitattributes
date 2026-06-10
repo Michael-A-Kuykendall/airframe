@@ -1,3 +1,8 @@
 
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+
+# Golden Reference Vault - LFS tracking
+*.duckdb filter=lfs diff=lfs merge=lfs -text
+*.parquet filter=lfs diff=lfs merge=lfs -text
+vault/oracles/** filter=lfs diff=lfs merge=lfs -text

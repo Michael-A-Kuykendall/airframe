@@ -60,3 +60,14 @@ docs/chat*.md
 .github/copilot-instructions.md
 .github/instructions/
 crates/libfse/docs/
+
+# Internal developer docs — never committed (session notes, AI handoffs, audits)
+docs/internal/
+artifacts/
+
+# Generated vault seeds — reproducible, not committed
+vault/seeds/
+# vault/vault.duckdb IS committed (via LFS) — do NOT add vault/ here
+
+# Generated fixture CSVs from oracle runs
+fixtures/oracle_*.csv

@@ -5,7 +5,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased] — v0.2.2
+## [0.2.2] — 2026-06-09
+
+### Fixed
+
+- **Multi-architecture GGUF loading** — `model_spec_from_metadata` was hardcoded to
+  `llama.*` key prefix. Now uses suffix-based matching, correctly loading Qwen3, Qwen2,
+  Gemma, Phi3, and all other non-Llama architectures. This was a silent failure for
+  every non-Llama model.
+
+- **Tied embeddings support** — Models where `output.weight` is absent (Qwen3 uses
+  tied embeddings sharing `token_embd.weight`) now load correctly. Previously crashed
+  with `WeightMissing: OutputProj`.
+
+- **Context cap safety** — Added default context cap (4096) during oracle generation
+  to prevent 28+ GB KV cache allocation on large-context models (Qwen2-7B has
+  `n_ctx=32768`). GPU inference is unaffected; this only applies to CPU oracle runs.
+
+### Added
+
+- **Golden Reference Vault** — DuckDB-backed certification database populated with
+  oracle traces for 22 models across 6 architectures (Llama, Qwen2, Qwen3, Gemma,
+  Phi, DeepSeek). Internal tool; not published.
+
+- **airframe-observe crate** — FSE-based inference observation layer powered by
+  d0-engine reactive fact engine. Selector-first, single-pass capture of layer
+  outputs and logits. Internal; not published.
+
+## [Unreleased] — v0.2.3
 
 ### Added
 
