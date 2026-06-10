@@ -1,7 +1,6 @@
 pub mod client;
 
 use async_trait::async_trait;
-use anyhow::Result;
 
 #[async_trait]
 pub trait InferenceBackend: Send + Sync {

@@ -56,7 +56,8 @@ impl Tool for ReadImageTool {
         };
         
         // Base64 encode the image
-        let base64 = base64::encode(&bytes);
+        use base64::Engine as _;
+        let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         
         // Build response based on mode
         match mode {

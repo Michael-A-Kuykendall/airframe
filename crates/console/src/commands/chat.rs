@@ -1,6 +1,6 @@
 use clap::Args;
 use std::io::{self, Write};
-use crate::adapters::ShimmyServerAdapter;
+use crate::adapters::HttpInferenceAdapter;
 use crate::websocket::InferenceBackend;
 use crate::ToolRegistry;
 use serde_json::Value;
@@ -19,16 +19,16 @@ pub struct ChatCommand {
 
 impl ChatCommand {
     pub async fn run(&self) -> anyhow::Result<()> {
-        let default_model = "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string();
+        let default_model = "deepseek-coder-6.7b-instruct.Q4_K_M".to_string();
         let _model_path = self.model.clone().unwrap_or(default_model);
         let session_id = self
             .session
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-        println!("Connecting to Shimmy GPU Server at http://127.0.0.1:8080...");
+        println!("Connecting to Shimmy GPU Server at http://127.0.0.1:11435...");
         println!("Session: {}", session_id);
-        let adapter = ShimmyServerAdapter::new("http://127.0.0.1:8080".to_string(), session_id);
+        let adapter = HttpInferenceAdapter::new("http://127.0.0.1:11435".to_string());
         let registry = ToolRegistry::with_defaults();
         
         let tool_descriptions = registry
@@ -73,8 +73,8 @@ impl ChatCommand {
             io::stdout().flush()?;
 
             let mut response = String::new();
-            let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-            
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(32);
+
             let adapter_clone = adapter.clone();
             let prompt_clone = request_prompt.clone();
             let handle = tokio::spawn(async move {
@@ -117,7 +117,7 @@ impl ChatCommand {
                                         io::stdout().flush()?;
                             
                                         let mut next = String::new();
-                                        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+                                        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(32);
                                         
                                         let adapter_clone = adapter.clone();
                                         let prompt_clone = tool_prompt.clone();

@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use serde_json;
 
 /// HTTP adapter for InferenceBackend - communicates with shimmy via localhost HTTP
+#[derive(Clone)]
 pub struct HttpInferenceAdapter {
     base_url: String,
     client: reqwest::Client,

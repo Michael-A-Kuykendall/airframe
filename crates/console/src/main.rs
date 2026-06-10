@@ -7,7 +7,6 @@ use shimmy_console::commands::{
     license::LicenseCommand,
 };
 use shimmy_console::{ToolRegistry, ToolArgs};
-use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use serde_json::Value;
 

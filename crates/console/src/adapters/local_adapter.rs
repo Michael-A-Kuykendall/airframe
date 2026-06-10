@@ -65,7 +65,7 @@ impl InferenceBackend for LocalInferenceAdapter {
             if let Ok(text) = tokenizer.decode(&[next_token as u32], true) {
                 output.push_str(&text);
             }
-            let ts = vec![next_token];
+            let _ts = vec![next_token];
             logits = engine.decode(next_token, &model.weights)?;
             // Note: prompt_ids isn't strictly right for decode in simple loops if it expects full context,
             // but for shimmy stub this proves routing works
@@ -86,7 +86,7 @@ impl InferenceBackend for LocalInferenceAdapter {
         Ok(json!({"backend": "airframe-local"}))
     }
 
-    async fn generate_stream(&self, model_name: &str, prompt: &str, tx: tokio::sync::mpsc::Sender<String>) -> anyhow::Result<()> {
+    async fn generate_stream(&self, _model_name: &str, prompt: &str, tx: tokio::sync::mpsc::Sender<String>) -> anyhow::Result<()> {
         self.ensure_loaded().await?;
         let state = self.state.lock().await;
         let (model, tokenizer) = state.as_ref().unwrap();
@@ -110,7 +110,7 @@ impl InferenceBackend for LocalInferenceAdapter {
                     break;
                 }
             }
-            let ts = vec![next_token];
+            let _ts = vec![next_token];
             logits = engine.decode(next_token, &model.weights)?;
         }
 
