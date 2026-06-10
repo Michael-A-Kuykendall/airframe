@@ -634,7 +634,7 @@ fn dump_metadata_keys(metadata: &HashMap<String, GgufMetaValue>) {
 /// so this works for any architecture: llama, qwen2, qwen3, phi3, gemma, etc.
 /// The GGUF spec guarantees that key suffixes are unique within a single file.
 fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result<ModelSpec> {
-    use crate::core::spec::{GgufFileType, GgufValue, ModelArch};
+    use crate::core::spec::{GgufFileType, ModelArch};
 
     // Build a suffix-keyed view for arch-prefixed keys.
     // "llama.block_count" → suffix "block_count"
@@ -690,47 +690,73 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
                 };
                 match suffix {
                     "block_count" => {
-                        if let GgufMetaValue::U32(v) = value { n_layer = Some(*v as usize); }
+                        if let GgufMetaValue::U32(v) = value {
+                            n_layer = Some(*v as usize);
+                        }
                     }
                     "embedding_length" => {
-                        if let GgufMetaValue::U32(v) = value { n_embd = Some(*v as usize); }
+                        if let GgufMetaValue::U32(v) = value {
+                            n_embd = Some(*v as usize);
+                        }
                     }
                     "attention.head_count" => {
-                        if let GgufMetaValue::U32(v) = value { n_head = Some(*v as usize); }
+                        if let GgufMetaValue::U32(v) = value {
+                            n_head = Some(*v as usize);
+                        }
                     }
                     "attention.head_count_kv" => {
-                        if let GgufMetaValue::U32(v) = value { n_head_kv = Some(*v as usize); }
+                        if let GgufMetaValue::U32(v) = value {
+                            n_head_kv = Some(*v as usize);
+                        }
                     }
                     "feed_forward_length" => {
-                        if let GgufMetaValue::U32(v) = value { ff_dim = Some(*v as usize); }
+                        if let GgufMetaValue::U32(v) = value {
+                            ff_dim = Some(*v as usize);
+                        }
                     }
                     "context_length" => {
-                        if let GgufMetaValue::U32(v) = value { n_ctx = Some(*v as usize); }
+                        if let GgufMetaValue::U32(v) = value {
+                            n_ctx = Some(*v as usize);
+                        }
                     }
                     "rope.freq_base" => {
-                        if let GgufMetaValue::F32(v) = value { rope_base = Some(*v); }
+                        if let GgufMetaValue::F32(v) = value {
+                            rope_base = Some(*v);
+                        }
                     }
                     "rope.dimension_count" => {
-                        if let GgufMetaValue::U32(v) = value { rope_dim = Some(*v as usize); }
+                        if let GgufMetaValue::U32(v) = value {
+                            rope_dim = Some(*v as usize);
+                        }
                     }
                     "attention.layer_norm_rms_epsilon"
                     | "attention.layer_norm_epsilon"
                     | "layer_norm_epsilon" => {
-                        if let GgufMetaValue::F32(v) = value { rms_eps = Some(*v); }
+                        if let GgufMetaValue::F32(v) = value {
+                            rms_eps = Some(*v);
+                        }
                     }
                     "attn_logit_softcapping" | "attention.logit_softcapping" => {
-                        if let GgufMetaValue::F32(v) = value { attn_softcap = Some(*v); }
+                        if let GgufMetaValue::F32(v) = value {
+                            attn_softcap = Some(*v);
+                        }
                     }
                     "final_logit_softcapping" => {
-                        if let GgufMetaValue::F32(v) = value { final_softcap = Some(*v); }
+                        if let GgufMetaValue::F32(v) = value {
+                            final_softcap = Some(*v);
+                        }
                     }
                     "vocab_size" => {
                         if n_vocab_explicit.is_none() {
-                            if let GgufMetaValue::U32(v) = value { n_vocab_explicit = Some(*v as usize); }
+                            if let GgufMetaValue::U32(v) = value {
+                                n_vocab_explicit = Some(*v as usize);
+                            }
                         }
                     }
                     "attention.key_length" => {
-                        if let GgufMetaValue::U32(v) = value { head_dim_explicit = Some(*v as usize); }
+                        if let GgufMetaValue::U32(v) = value {
+                            head_dim_explicit = Some(*v as usize);
+                        }
                     }
                     _ => {}
                 }
@@ -762,7 +788,8 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
 
     // Vocab: prefer explicit over token array length
     let n_vocab = n_vocab_explicit.ok_or_else(|| LibshimmyError::InvariantViolation {
-        msg: "Missing tokenizer vocab size: expected vocab_size or tokenizer.ggml.tokens".to_string(),
+        msg: "Missing tokenizer vocab size: expected vocab_size or tokenizer.ggml.tokens"
+            .to_string(),
     })?;
 
     let arch = ModelArch::from(arch_str.as_str());
@@ -772,12 +799,14 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
     ensure!(
         n_embd % n_head == 0,
         "n_embd % n_head must be 0 (n_embd={} n_head={})",
-        n_embd, n_head
+        n_embd,
+        n_head
     );
     ensure!(
         n_head % n_head_kv == 0,
         "n_head % n_head_kv must be 0 (n_head={} n_head_kv={})",
-        n_head, n_head_kv
+        n_head,
+        n_head_kv
     );
 
     Ok(ModelSpec {
@@ -809,12 +838,16 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
     .compute_derived())
 }
 
+/// Legacy helper functions — kept for potential future use.
+/// The new model_spec_from_metadata uses direct iteration and no longer calls these.
+#[allow(dead_code)]
 fn require_usize(metadata: &HashMap<String, GgufMetaValue>, key: &str) -> Result<usize> {
     optional_usize(metadata, key)?.ok_or_else(|| LibshimmyError::InvariantViolation {
         msg: format!("Missing required GGUF metadata key: {key}"),
     })
 }
 
+#[allow(dead_code)]
 fn optional_usize(metadata: &HashMap<String, GgufMetaValue>, key: &str) -> Result<Option<usize>> {
     match metadata.get(key) {
         None => Ok(None),
@@ -830,6 +863,7 @@ fn optional_usize(metadata: &HashMap<String, GgufMetaValue>, key: &str) -> Resul
     }
 }
 
+#[allow(dead_code)]
 fn require_f32(metadata: &HashMap<String, GgufMetaValue>, key: &str) -> Result<f32> {
     match metadata.get(key) {
         Some(GgufMetaValue::F32(v)) => Ok(*v),
@@ -845,6 +879,7 @@ fn require_f32(metadata: &HashMap<String, GgufMetaValue>, key: &str) -> Result<f
     }
 }
 
+#[allow(dead_code)]
 fn optional_array_len(
     metadata: &HashMap<String, GgufMetaValue>,
     key: &str,

@@ -7,6 +7,7 @@ mod tests {
     use tempfile::NamedTempFile;
     use wgpu;
 
+    #[allow(dead_code)]
     fn get_tinyllama_spec() -> ModelSpec {
         ModelSpec::tinylama_1_1b_chat_v1_0()
     }

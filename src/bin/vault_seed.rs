@@ -23,9 +23,8 @@ use airframe::core::weight_id::WeightId;
 use airframe::family::llama::LlamaBlock;
 use airframe::ops::dispatch::OpDispatcher;
 use airframe::runtime::kvcache::KvCache;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use serde::Serialize;
+use std::path::PathBuf;
 use std::time::Instant;
 
 // ─── Output types ────────────────────────────────────────────────────────────
@@ -73,7 +72,7 @@ struct ModelRow {
 
 #[derive(Serialize)]
 struct OracleRow {
-    layer_idx: i32,   // -1 = embedding, 0..n_layer-1 = transformer layer
+    layer_idx: i32, // -1 = embedding, 0..n_layer-1 = transformer layer
     operation: String,
     position: usize,
     input_token_id: u32,
@@ -236,10 +235,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 gguf_filename: filename.to_string(),
                 arch: "unknown".to_string(),
                 quant: "unknown".to_string(),
-                n_layers: 0, n_heads: 0, n_heads_kv: 0, head_dim: 0,
-                n_embd: 0, ff_dim: 0, n_vocab: 0, n_ctx: 0,
-                rope_base: 0.0, rope_scale: 0.0, rope_dim: 0, rms_eps: 0.0,
-                has_qk_norm: false, attn_logit_softcap: 0.0, final_logit_softcap: 0.0,
+                n_layers: 0,
+                n_heads: 0,
+                n_heads_kv: 0,
+                head_dim: 0,
+                n_embd: 0,
+                ff_dim: 0,
+                n_vocab: 0,
+                n_ctx: 0,
+                rope_base: 0.0,
+                rope_scale: 0.0,
+                rope_dim: 0,
+                rms_eps: 0.0,
+                has_qk_norm: false,
+                attn_logit_softcap: 0.0,
+                final_logit_softcap: 0.0,
                 gguf_path: gguf_path.to_string_lossy().to_string(),
                 file_size_bytes: file_size,
             },
@@ -295,7 +305,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => {
                 forward_pass_ok = false;
                 forward_error = format!("{:?}", e);
-                eprintln!("  ⚠️  BOS prefill failed at layer {}: {}", layer.layer_idx, forward_error);
+                eprintln!(
+                    "  ⚠️  BOS prefill failed at layer {}: {}",
+                    layer.layer_idx, forward_error
+                );
                 break;
             }
         }
@@ -328,7 +341,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for layer in &layers {
             match layer.forward(&bos_h, &model.weights, &mut kv_cache2, &pos0, &ops) {
                 Ok(h) => bos_h = h,
-                Err(_) => { forward_pass_ok = false; break; }
+                Err(_) => {
+                    forward_pass_ok = false;
+                    break;
+                }
             }
         }
         if forward_pass_ok {
@@ -357,7 +373,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => {
                         forward_pass_ok = false;
                         forward_error = format!("{:?}", e);
-                        eprintln!("  ⚠️  forward failed at layer {}: {}", layer.layer_idx, forward_error);
+                        eprintln!(
+                            "  ⚠️  forward failed at layer {}: {}",
+                            layer.layer_idx, forward_error
+                        );
                         break;
                     }
                 }
@@ -372,38 +391,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_nan,
         total_inf,
         fwd_elapsed,
-        if !forward_pass_ok { " [PARTIAL - forward pass failed]" } else { "" }
+        if !forward_pass_ok {
+            " [PARTIAL - forward pass failed]"
+        } else {
+            ""
+        }
     );
 
     // ── 4b. Compute final logits (output_norm + output_proj matmul) ───────────
     // This is the comparison point for candle cross-validation.
-    // output_norm: RMSNorm on the last hidden state
-    // output_proj: matmul(normed, OutputProj.T) → [n_vocab] logit vector
-    let mut logit_rms: f32 = 0.0;
-    let mut logit_checksum: i64 = 0;
-    let mut logit_nan = 0usize;
-    let mut logit_inf = 0usize;
-
     if forward_pass_ok {
         if let (Some(output_norm_w), Some(output_proj_w)) = (
             model.weights.get(&WeightId::OutputNorm),
             model.weights.get(&WeightId::OutputProj),
         ) {
-            match ops.rmsnorm(&hidden, output_norm_w, spec.rms_eps)
+            match ops
+                .rmsnorm(&hidden, output_norm_w, spec.rms_eps)
                 .and_then(|normed| ops.matmul(&normed, output_proj_w))
             {
                 Ok(logits_tensor) => {
                     let logits = &logits_tensor.data;
-                    logit_rms = rms(logits);
-                    logit_checksum = checksum(logits);
+                    let logit_rms = rms(logits);
+                    let logit_checksum = checksum(logits);
                     let (ln, li) = nan_inf_count(logits);
-                    logit_nan = ln;
-                    logit_inf = li;
                     total_nan += ln;
                     total_inf += li;
-                    eprintln!("      Final logits: vocab={}, RMS={:.6}, NaN={}, Inf={}", logits.len(), logit_rms, ln, li);
-
-                    // Add logits as a special oracle row (layer_idx = -1 by convention)
+                    eprintln!(
+                        "      Final logits: vocab={}, RMS={:.6}, NaN={}, Inf={}",
+                        logits.len(),
+                        logit_rms,
+                        ln,
+                        li
+                    );
                     oracles.push(OracleRow {
                         layer_idx: -1,
                         operation: "final_logits".to_string(),
@@ -419,7 +438,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         } else {
-            eprintln!("      [skip] OutputNorm or OutputProj weights not available for logit capture");
+            eprintln!(
+                "      [skip] OutputNorm or OutputProj weights not available for logit capture"
+            );
         }
     }
 
@@ -431,10 +452,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let model_name = spec
-        .model_name
-        .trim_start_matches("tinyllama_")
-        .to_string();
+    let model_name = spec.model_name.trim_start_matches("tinyllama_").to_string();
 
     let seed = VaultSeed {
         seed_version: 1,
@@ -481,7 +499,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!();
     eprintln!("✅  Seed written: {}", output_path.display());
     eprintln!("    Models row       : 1");
-    eprintln!("    Oracle rows      : {}", seed.integrity.expected_oracle_count);
+    eprintln!(
+        "    Oracle rows      : {}",
+        seed.integrity.expected_oracle_count
+    );
     eprintln!("    Forward pass OK  : {}", seed.integrity.forward_pass_ok);
     if !seed.integrity.forward_error.is_empty() {
         eprintln!("    Forward error    : {}", seed.integrity.forward_error);
