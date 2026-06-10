@@ -1,29 +1,46 @@
 //! # airframe-observe
 //!
-//! FSE-based inference observation layer.
+//! FSE-based inference observation layer, powered by d0-engine.
 //!
 //! ## The Core Inversion
 //!
-//! Conventional inference capture is **observer-first**:
+//! Conventional inference capture is observer-first (broken pattern):
 //! ```text
 //! vault_seed:   forward_pass() → capture hidden_states
 //! candle_probe: forward_pass() → capture logits
-//! fse_control:  forward_pass() → scan output_text
+//! fse_policy:   forward_pass() → scan output_text
+//! Cost: O(N_observers × M_selectors)
 //! ```
-//! Each observer triggers its own extraction. Cost: O(N_observers × M_selectors).
 //!
-//! This crate is **selector-first** (FSE architecture):
+//! This crate is selector-first (FSE/d0-engine architecture):
 //! ```text
-//! ObservationPlan::compile([
-//!     Selector::LayerOutput(0..N),   // → broadcast to: vault_oracle, checksum
-//!     Selector::FinalLogits,          // → broadcast to: vault_oracle, candle_compare
-//!     Selector::OutputText,           // → broadcast to: fse_policy_scan
-//! ])
+//! ObservationSession::new(plan)  ← compile once
+//! forward_pass emits facts        ← single pass
+//! All observers receive data simultaneously via d0-engine broadcast
+//! Cost: O(M_selectors), independent of observer count
 //! ```
-//! One forward pass. All observers receive their data simultaneously.
-//! Adding a new observer with a shared selector costs zero additional extraction.
 //!
-//! ∂runtime / ∂observers ≈ 0 (for shared selectors)
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use airframe_observe::{ObservationSession, InferenceFact};
+//!
+//! // 1. Build a session with registered observers
+//! let mut session = ObservationSession::new();
+//! session.register_vault_oracle();
+//! session.register_candle_compare();
+//!
+//! // 2. During forward pass — emit facts via convenience helpers
+//! let hidden: Vec<f32> = vec![0.1; 2048];
+//! session.emit_layer_output(0, 1, &hidden);
+//!
+//! let logits: Vec<f32> = vec![0.01; 32000];
+//! session.emit_final_logits(1, &logits);
+//!
+//! // 3. Run to fixpoint — all observers receive their data
+//! let result = session.saturate();
+//! assert!(result.saturated);
+//! ```
 //!
 //! ## Patent Notice
 //!
@@ -31,13 +48,10 @@
 //! applied to AI inference is covered by a pending US patent by
 //! Michael A. Kuykendall. All rights reserved.
 //! Contact: michaelallenkuykendall@gmail.com
-//!
-//! ## Status: Skeleton
-//!
-//! This is the foundational skeleton. The observation plan compiles,
-//! selectors are defined, observers register interest.
-//! The execution module wires into the Airframe forward pass in Phase 2.
 
-pub mod plan;
-pub mod observer;
-pub mod output;
+pub mod facts;
+pub mod observers;
+pub mod session;
+
+pub use facts::{InferenceFact, alpha_key_of};
+pub use session::ObservationSession;

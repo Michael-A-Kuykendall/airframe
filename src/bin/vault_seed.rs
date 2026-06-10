@@ -375,6 +375,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !forward_pass_ok { " [PARTIAL - forward pass failed]" } else { "" }
     );
 
+    // ── 4b. Compute final logits (output_norm + output_proj matmul) ───────────
+    // This is the comparison point for candle cross-validation.
+    // output_norm: RMSNorm on the last hidden state
+    // output_proj: matmul(normed, OutputProj.T) → [n_vocab] logit vector
+    let mut logit_rms: f32 = 0.0;
+    let mut logit_checksum: i64 = 0;
+    let mut logit_nan = 0usize;
+    let mut logit_inf = 0usize;
+
+    if forward_pass_ok {
+        if let (Some(output_norm_w), Some(output_proj_w)) = (
+            model.weights.get(&WeightId::OutputNorm),
+            model.weights.get(&WeightId::OutputProj),
+        ) {
+            match ops.rmsnorm(&hidden, output_norm_w, spec.rms_eps)
+                .and_then(|normed| ops.matmul(&normed, output_proj_w))
+            {
+                Ok(logits_tensor) => {
+                    let logits = &logits_tensor.data;
+                    logit_rms = rms(logits);
+                    logit_checksum = checksum(logits);
+                    let (ln, li) = nan_inf_count(logits);
+                    logit_nan = ln;
+                    logit_inf = li;
+                    total_nan += ln;
+                    total_inf += li;
+                    eprintln!("      Final logits: vocab={}, RMS={:.6}, NaN={}, Inf={}", logits.len(), logit_rms, ln, li);
+
+                    // Add logits as a special oracle row (layer_idx = -1 by convention)
+                    oracles.push(OracleRow {
+                        layer_idx: -1,
+                        operation: "final_logits".to_string(),
+                        position: 1,
+                        input_token_id: hello_id,
+                        rms: logit_rms,
+                        first20: logits.iter().take(20).copied().collect(),
+                        checksum: logit_checksum,
+                    });
+                }
+                Err(e) => {
+                    eprintln!("      logit computation failed: {:?}", e);
+                }
+            }
+        } else {
+            eprintln!("      [skip] OutputNorm or OutputProj weights not available for logit capture");
+        }
+    }
+
     // ── 5. Assemble and write seed ───────────────────────────────────────────
     eprintln!("[5/5] Writing seed ...");
 

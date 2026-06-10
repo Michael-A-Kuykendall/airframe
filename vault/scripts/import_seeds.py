@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 vault import_seeds.py
-─────────────────────
+?????????????????????
 Reads all JSON seed files from vault/seeds/, validates integrity,
 then inserts model + oracle rows into vault/vault.duckdb.
 
@@ -41,9 +41,9 @@ def validate(seed, path):
         errors.append(f"unexpected seed_version {seed.get('seed_version')}")
     ig = seed.get("integrity", {})
     if ig.get("nan_count", -1) != 0:
-        errors.append(f"nan_count={ig.get('nan_count')} — not importing")
+        errors.append(f"nan_count={ig.get('nan_count')} ? not importing")
     if ig.get("inf_count", -1) != 0:
-        errors.append(f"inf_count={ig.get('inf_count')} — not importing")
+        errors.append(f"inf_count={ig.get('inf_count')} ? not importing")
     oracles = seed.get("oracles", [])
     expected = ig.get("expected_oracle_count", -1)
     if len(oracles) != expected:
@@ -70,7 +70,7 @@ def import_seed(con, seed, path):
         model_id = existing[0]
         print(f"  model already exists (id={model_id}), updating oracles only")
     else:
-        # Insert model row — DuckDB requires explicit nextval for INTEGER PRIMARY KEY
+        # Insert model row ? DuckDB requires explicit nextval for INTEGER PRIMARY KEY
         con.execute("""
             INSERT INTO models (
                 id,
@@ -198,7 +198,7 @@ def main():
         seed = load_seed(path)
         errors = validate(seed, path)
         if errors:
-            print(f"  SKIP — validation failed:")
+            print(f"  SKIP ? validation failed:")
             for e in errors:
                 print(f"    {e}")
             failed.append((label, errors))
@@ -207,26 +207,26 @@ def main():
         try:
             model_id, inserted, updated = import_seed(con, seed, path)
         except Exception as e:
-            print(f"  FAIL — import error: {e}")
+            print(f"  FAIL ? import error: {e}")
             failed.append((label, [str(e)]))
             continue
 
         # Post-import integrity check
         check_errors = post_import_checks(con, model_id, seed)
         if check_errors:
-            print(f"  ⚠️  POST-IMPORT CHECKS FAILED:")
+            print(f"  WARN  POST-IMPORT CHECKS FAILED:")
             for e in check_errors:
                 print(f"    {e}")
             failed.append((label, check_errors))
         else:
-            print(f"  ✅  oracle rows inserted={inserted} updated={updated} — checks passed")
+            print(f"  OK  oracle rows inserted={inserted} updated={updated} ? checks passed")
             total_models += 1
             total_oracles += inserted + updated
 
         print()
 
     # Summary
-    print("═" * 50)
+    print("=" * 50)
     print(f"Vault summary:")
     total_m = con.execute("SELECT COUNT(*) FROM models").fetchone()[0]
     total_o = con.execute("SELECT COUNT(*) FROM layer_oracles").fetchone()[0]

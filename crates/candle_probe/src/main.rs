@@ -39,7 +39,7 @@ struct ProbeOutput {
 
 #[derive(Serialize)]
 struct LayerResult {
-    layer_idx: usize,
+    layer_idx: i32,
     rms: f32,
     first20: Vec<f32>,
     checksum: i64,
@@ -146,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // For the spike, we report one "layer" which is actually the final logits
     // This is enough to validate the candle integration is working
     let layers = vec![LayerResult {
-        layer_idx: 999, // sentinel: 999 = final logits
+        layer_idx: -1_i32, // -1 = final logits (same convention as vault_seed)
         rms: r,
         first20,
         checksum: cs,
