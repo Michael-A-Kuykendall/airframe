@@ -1,13 +1,6 @@
 // GPU-Aware Shimmy Inference Server with FSE Integration
 // Phase 4D: Full Multi-Layer Inference with KV Cache
 
-// Cross-platform: suppress macOS clippy 1.86+ lints that don't exist on older versions
-#![allow(
-    unknown_lints,
-    clippy::manual_is_multiple_of,
-    clippy::collapsible_match
-)]
-
 use aho_corasick::AhoCorasick;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
@@ -817,7 +810,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let kv_quant_int4 = std::env::var("SHIMMY_KV_QUANT")
         .map(|v| v.to_lowercase() == "int4")
         .unwrap_or(false);
-    if kv_quant_int4 && spec.head_dim % 2 != 0 {
+    if kv_quant_int4 && !spec.head_dim.is_multiple_of(2) {
         eprintln!(
             "[GPU Server] ERROR: SHIMMY_KV_QUANT=int4 requires head_dim to be a multiple of 2 \
              (nibble packing), but this model has head_dim={}. \

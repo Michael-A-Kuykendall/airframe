@@ -3,13 +3,6 @@
 //! Provides CPU-only FP32 inference for TinyLlama Q4_0 GGUF models
 //! with exact numerical parity to llama.cpp.
 
-// Cross-platform clippy: macOS clippy (Rust 1.86+) flags these in pre-existing code.
-// Suppressed at crate level to keep CI green across platforms.
-// unknown_lints: allow these attrs even if current clippy version doesn't know them.
-#![allow(unknown_lints)]
-#![allow(clippy::manual_is_multiple_of)]
-#![allow(clippy::collapsible_match)]
-
 pub mod conformance;
 pub mod control;
 pub mod core;

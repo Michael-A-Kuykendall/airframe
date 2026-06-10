@@ -43,7 +43,10 @@ pub fn apply_rope_scaled_f32(
     }
 
     crate::ensure!(rope_dim > 0, "rope_dim must be > 0");
-    crate::ensure!(rope_dim % 2 == 0, "rope_dim must be even (got {rope_dim})");
+    crate::ensure!(
+        rope_dim.is_multiple_of(2),
+        "rope_dim must be even (got {rope_dim})"
+    );
 
     let mut output = tensor.data.clone();
 

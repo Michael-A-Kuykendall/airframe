@@ -1,10 +1,3 @@
-// Cross-platform: suppress macOS clippy 1.86+ lints
-#![allow(
-    unknown_lints,
-    clippy::manual_is_multiple_of,
-    clippy::collapsible_match
-)]
-
 use shimmytok::Tokenizer;
 fn main() {
     let models = [
