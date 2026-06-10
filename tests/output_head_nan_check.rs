@@ -23,12 +23,16 @@ fn test_output_head_nan_count() {
         offset: 0,     // output.weight is first tensor in data section
     };
 
-    let result = dequantize_q6_k(&tensor_info, &mmap, data_start)
-        .expect("dequantize_q6_k failed");
+    let result = dequantize_q6_k(&tensor_info, &mmap, data_start).expect("dequantize_q6_k failed");
 
     let nan_count = result.data.iter().filter(|&&x| x.is_nan()).count();
     let inf_count = result.data.iter().filter(|&&x| x.is_infinite()).count();
-    let max_abs = result.data.iter().cloned().map(f32::abs).fold(0.0f32, f32::max);
+    let max_abs = result
+        .data
+        .iter()
+        .cloned()
+        .map(f32::abs)
+        .fold(0.0f32, f32::max);
     let first5: Vec<f32> = result.data.iter().take(5).copied().collect();
 
     println!("[output_head_nan_check]");
@@ -38,7 +42,15 @@ fn test_output_head_nan_count() {
     println!("  max_abs:   {:.4e}", max_abs);
     println!("  first5:    {:?}", first5);
 
-    assert_eq!(nan_count, 0, "dequantize_q6_k produced {} NaN values", nan_count);
-    assert_eq!(inf_count, 0, "dequantize_q6_k produced {} Inf values", inf_count);
+    assert_eq!(
+        nan_count, 0,
+        "dequantize_q6_k produced {} NaN values",
+        nan_count
+    );
+    assert_eq!(
+        inf_count, 0,
+        "dequantize_q6_k produced {} Inf values",
+        inf_count
+    );
     assert!(max_abs < 10.0, "max_abs={} is suspiciously large", max_abs);
 }

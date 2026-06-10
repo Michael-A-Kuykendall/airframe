@@ -8,7 +8,9 @@ use crate::backend::bindless::loader::BindlessModel;
 use crate::backend::bindless::metadata::BindlessMetadata;
 use crate::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
 use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
-use crate::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0};
+use crate::core::dequant::{
+    dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,
+};
 use crate::core::model::GgufTensorInfo;
 use crate::core::spec::ModelSpec;
 use memmap2::Mmap;
@@ -536,17 +538,31 @@ impl GpuRuntime {
     ) -> Result<wgpu::Buffer, Box<dyn std::error::Error + Send + Sync>> {
         use wgpu::util::DeviceExt;
 
-        println!("[OutputHead] load_output_head_f32 ENTERED for model: {}", model_path);
-        println!("[OutputHead] data_start_offset={} tensor_offset={} weight_type={}", 
-            gpu_model.metadata.data_start_offset, 
-            gpu_model.metadata.get_tensor_offset("output.weight").unwrap_or(0),
-            gpu_model.metadata.get_tensor_type("output.weight").unwrap_or(0));
+        println!(
+            "[OutputHead] load_output_head_f32 ENTERED for model: {}",
+            model_path
+        );
+        println!(
+            "[OutputHead] data_start_offset={} tensor_offset={} weight_type={}",
+            gpu_model.metadata.data_start_offset,
+            gpu_model
+                .metadata
+                .get_tensor_offset("output.weight")
+                .unwrap_or(0),
+            gpu_model
+                .metadata
+                .get_tensor_type("output.weight")
+                .unwrap_or(0)
+        );
 
         // Determine which tensor to use for the output head.
         // Models with tied embeddings (e.g. Llama-3.2) omit `output.weight`
         // and reuse `token_embd.weight` for the final projection.
         let (tensor_name, weight_type, tensor_offset) = {
-            let has_output = gpu_model.metadata.get_tensor_type("output.weight").is_some();
+            let has_output = gpu_model
+                .metadata
+                .get_tensor_type("output.weight")
+                .is_some();
             if has_output {
                 let wt = gpu_model
                     .metadata
@@ -605,8 +621,8 @@ impl GpuRuntime {
                     shape: vec![spec.n_vocab, spec.n_embd],
                 }
             }
-            2  => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
-            8  => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
+            2 => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
+            8 => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
             12 => dequantize_q4_k(&tensor_info, &mmap, data_start)?,
             13 => dequantize_q5_k(&tensor_info, &mmap, data_start)?,
             14 => dequantize_q6_k(&tensor_info, &mmap, data_start)?,
@@ -628,11 +644,20 @@ impl GpuRuntime {
         // CPU-side verification — runs before GPU upload, guaranteed to print.
         let nan_in_head = tensor_f32.data.iter().filter(|v| v.is_nan()).count();
         let inf_in_head = tensor_f32.data.iter().filter(|v| v.is_infinite()).count();
-        let max_abs = tensor_f32.data.iter().cloned().map(f32::abs).fold(0.0f32, f32::max);
+        let max_abs = tensor_f32
+            .data
+            .iter()
+            .cloned()
+            .map(f32::abs)
+            .fold(0.0f32, f32::max);
         println!(
             "[OutputHead-CPU] tensor={} quant={} elements={} NaN={} Inf={} max_abs={:.4e}",
-            tensor_name, weight_type,
-            tensor_f32.data.len(), nan_in_head, inf_in_head, max_abs
+            tensor_name,
+            weight_type,
+            tensor_f32.data.len(),
+            nan_in_head,
+            inf_in_head,
+            max_abs
         );
 
         Ok(buffer)
