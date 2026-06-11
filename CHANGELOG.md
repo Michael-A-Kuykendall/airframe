@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.3] — 2026-06-11
+
+### Fixed
+- **Critical: GPU temp buffer underallocated for all GQA models** (`src/core/spec.rs`)
+  - `compute_derived()` used `ff_dim*2 + n_embd` (e.g. 13312 for TinyLlama) but the
+    GPU temp layout requires `n_embd + q_len + kv_len*2 + ff_dim*2` (15872 minimum).
+  - GPU writes past buffer end → silent memory corruption → all-NaN layer outputs →
+    single garbage token per inference call.
+  - Fix: correct formula produces 16384 for TinyLlama; all GQA models now sufficient.
+  - Models affected: TinyLlama, Qwen3, LLaMA 3.2, Gemma2, DeepSeek (any with GQA).
+  - Models unaffected: StarCoder2, GPT-2, Phi-2 (MHA, n_head == n_head_kv).
+  - Property tests: `tests/temp_buffer_invariant.rs` (4 tests, guards invariant forever).
+  - Vault: `temp_buffer_audit` view shows correct vs old formula for all known models.
+
+---
+
 ## [0.2.2] — 2026-06-09
 
 ### Fixed
