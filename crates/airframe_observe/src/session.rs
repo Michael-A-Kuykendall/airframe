@@ -10,7 +10,7 @@
 //! 4. Call saturate() to run d0-engine to fixpoint
 //! 5. Read results from observers
 
-use crate::facts::{InferenceFact, alpha_key_of};
+use crate::facts::{alpha_key_of, InferenceFact};
 use crate::observers::{CandleCompareObserver, LayerStabilityObserver, VaultOracleObserver};
 use d0_engine::{ClosureProgram, ReactiveGraph, RunBudget, RunResult};
 
@@ -39,10 +39,15 @@ impl ObservationSession {
         let observer = VaultOracleObserver::new();
 
         // Register oracle capture rule
-        self.graph.program.register(VaultOracleObserver::alpha_key(), observer.rule());
+        self.graph
+            .program
+            .register(VaultOracleObserver::alpha_key(), observer.rule());
 
         // Register stability check on the SAME alpha key — zero extra cost (FSE broadcast)
-        self.graph.program.register(LayerStabilityObserver::alpha_key(), LayerStabilityObserver::rule());
+        self.graph.program.register(
+            LayerStabilityObserver::alpha_key(),
+            LayerStabilityObserver::rule(),
+        );
 
         self.vault_oracle = Some(observer);
         self.vault_oracle.as_ref().unwrap()
@@ -51,7 +56,9 @@ impl ObservationSession {
     /// Register the CandleCompareObserver.
     pub fn register_candle_compare(&mut self) -> &CandleCompareObserver {
         let observer = CandleCompareObserver::new();
-        self.graph.program.register(CandleCompareObserver::alpha_key(), observer.rule());
+        self.graph
+            .program
+            .register(CandleCompareObserver::alpha_key(), observer.rule());
         self.candle_compare = Some(observer);
         self.candle_compare.as_ref().unwrap()
     }
@@ -116,7 +123,9 @@ impl ObservationSession {
 }
 
 impl Default for ObservationSession {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -183,8 +192,10 @@ mod tests {
 
         // d_runtime / d_rules = 0: both rules fired from ONE alpha lookup
         // Verified: result.facts_derived includes WriteOracleRow AND LayerOutputStable
-        assert!(result.facts_derived >= 2,
-            "at least 2 derived facts from one LayerOutput emission (oracle + stability)");
+        assert!(
+            result.facts_derived >= 2,
+            "at least 2 derived facts from one LayerOutput emission (oracle + stability)"
+        );
     }
 
     #[test]

@@ -91,7 +91,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output_path = if args.len() >= 3 {
         PathBuf::from(&args[2])
     } else {
-        let stem = gguf_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+        let stem = gguf_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
         PathBuf::from("vault/seeds/candle").join(format!("{}.json", stem))
     };
 
@@ -133,7 +136,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get the logit tensor as f32 — shape [1, 1, vocab_size]
     let logits_flat = logits.squeeze(0)?.squeeze(0)?.to_vec1::<f32>()?;
 
-    eprintln!("      Hello forward done — logits shape: [{}]", logits_flat.len());
+    eprintln!(
+        "      Hello forward done — logits shape: [{}]",
+        logits_flat.len()
+    );
 
     // ── Compute stats ────────────────────────────────────────────────────────
     eprintln!("[3/4] Computing stats ...");

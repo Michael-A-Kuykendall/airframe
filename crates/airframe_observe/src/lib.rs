@@ -53,5 +53,5 @@ pub mod facts;
 pub mod observers;
 pub mod session;
 
-pub use facts::{InferenceFact, alpha_key_of};
+pub use facts::{alpha_key_of, InferenceFact};
 pub use session::ObservationSession;

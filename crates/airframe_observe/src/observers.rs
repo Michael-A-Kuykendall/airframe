@@ -4,7 +4,7 @@
 //! When the forward pass emits a fact, all rules indexed on that fact's alpha key
 //! fire simultaneously — zero additional extraction cost per shared selector.
 
-use crate::facts::{InferenceFact, bits_to_f32, KEY_LAYER_OUTPUT, KEY_FINAL_LOGITS};
+use crate::facts::{bits_to_f32, InferenceFact, KEY_FINAL_LOGITS, KEY_LAYER_OUTPUT};
 use d0_engine::{AlphaKey, FactStore};
 use std::sync::{Arc, Mutex};
 
@@ -34,15 +34,26 @@ pub struct VaultOracleObserver {
 
 impl VaultOracleObserver {
     pub fn new() -> Self {
-        Self { captures: Arc::new(Mutex::new(Vec::new())) }
+        Self {
+            captures: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 
     /// Returns the rule closure to register with d0-engine.
     /// The closure fires on every LayerOutput fact.
-    pub fn rule(&self) -> impl Fn(&InferenceFact, &FactStore<InferenceFact>) -> Vec<InferenceFact> + Send + Sync {
+    pub fn rule(
+        &self,
+    ) -> impl Fn(&InferenceFact, &FactStore<InferenceFact>) -> Vec<InferenceFact> + Send + Sync
+    {
         let captures = self.captures.clone();
         move |fact, _store| {
-            if let InferenceFact::LayerOutput { layer_idx, position, rms_bits, checksum } = fact {
+            if let InferenceFact::LayerOutput {
+                layer_idx,
+                position,
+                rms_bits,
+                checksum,
+            } = fact
+            {
                 captures.lock().unwrap().push(OracleCapture {
                     layer_idx: *layer_idx,
                     position: *position,
@@ -50,7 +61,9 @@ impl VaultOracleObserver {
                     checksum: *checksum,
                 });
                 // Emit a consequent to trigger oracle row write
-                vec![InferenceFact::WriteOracleRow { layer_idx: *layer_idx }]
+                vec![InferenceFact::WriteOracleRow {
+                    layer_idx: *layer_idx,
+                }]
             } else {
                 vec![]
             }
@@ -69,7 +82,9 @@ impl VaultOracleObserver {
 }
 
 impl Default for VaultOracleObserver {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// CandleCompareObserver captures final logits for cross-validation.
@@ -82,14 +97,24 @@ pub struct CandleCompareObserver {
 
 impl CandleCompareObserver {
     pub fn new() -> Self {
-        Self { capture: Arc::new(Mutex::new(None)) }
+        Self {
+            capture: Arc::new(Mutex::new(None)),
+        }
     }
 
     /// Returns the rule closure to register with d0-engine.
-    pub fn rule(&self) -> impl Fn(&InferenceFact, &FactStore<InferenceFact>) -> Vec<InferenceFact> + Send + Sync {
+    pub fn rule(
+        &self,
+    ) -> impl Fn(&InferenceFact, &FactStore<InferenceFact>) -> Vec<InferenceFact> + Send + Sync
+    {
         let capture = self.capture.clone();
         move |fact, _store| {
-            if let InferenceFact::FinalLogits { position, rms_bits, checksum } = fact {
+            if let InferenceFact::FinalLogits {
+                position,
+                rms_bits,
+                checksum,
+            } = fact
+            {
                 *capture.lock().unwrap() = Some(LogitCapture {
                     position: *position,
                     rms: bits_to_f32(*rms_bits),
@@ -118,7 +143,9 @@ impl CandleCompareObserver {
 }
 
 impl Default for CandleCompareObserver {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// LayerStabilityObserver derives semantic facts about layer health.
@@ -132,13 +159,22 @@ impl LayerStabilityObserver {
         AlphaKey(KEY_LAYER_OUTPUT) // shares the key — free broadcast
     }
 
-    pub fn rule() -> impl Fn(&InferenceFact, &FactStore<InferenceFact>) -> Vec<InferenceFact> + Send + Sync {
+    pub fn rule(
+    ) -> impl Fn(&InferenceFact, &FactStore<InferenceFact>) -> Vec<InferenceFact> + Send + Sync
+    {
         |fact, _store| {
-            if let InferenceFact::LayerOutput { layer_idx, rms_bits, .. } = fact {
+            if let InferenceFact::LayerOutput {
+                layer_idx,
+                rms_bits,
+                ..
+            } = fact
+            {
                 let rms = bits_to_f32(*rms_bits);
                 // Derive stability fact if RMS is in sane range
                 if rms > 0.0 && rms < 1000.0 && !rms.is_nan() && !rms.is_infinite() {
-                    vec![InferenceFact::LayerOutputStable { layer_idx: *layer_idx }]
+                    vec![InferenceFact::LayerOutputStable {
+                        layer_idx: *layer_idx,
+                    }]
                 } else {
                     vec![] // No stability fact — something is wrong
                 }
