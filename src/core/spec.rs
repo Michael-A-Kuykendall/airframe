@@ -137,8 +137,8 @@ impl ModelSpec {
         //   [+q_len..+kv_len]        = K vectors (n_head_kv * head_dim)
         //   [+kv_len..+kv_len]       = V vectors (n_head_kv * head_dim)
         //   [after KV..]             = attn scores or FFN gate + FFN up (ff_dim * 2)
-        let q_len = self.n_head * self.head_dim;       // same as n_embd
-        let kv_len = self.n_head_kv * self.head_dim;  // = kv_dim
+        let q_len = self.n_head * self.head_dim; // same as n_embd
+        let kv_len = self.n_head_kv * self.head_dim; // = kv_dim
         let full_layout = self.n_embd + q_len + kv_len * 2 + self.ff_dim * 2;
         let ffn_scratch = self.ff_dim * 2 + self.n_embd;
         let min_scratch = std::cmp::max(full_layout, ffn_scratch);
