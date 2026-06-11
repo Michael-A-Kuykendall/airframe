@@ -131,10 +131,17 @@ impl ModelSpec {
         // Qwen3 uses per-head Q and K RMSNorm before RoPE
         self.has_qk_norm = matches!(self.arch, ModelArch::Qwen3);
 
-        // Temp buffer needs to hold the largest intermediate:
-        // FFN uses ff_dim*2 (gate+up) plus dim for residual connections
+        // Temp buffer layout (must fit ALL intermediates at once):
+        //   [0..n_embd]              = attn_norm output / activation copy
+        //   [n_embd..+q_len]         = Q vectors (n_head * head_dim)
+        //   [+q_len..+kv_len]        = K vectors (n_head_kv * head_dim)
+        //   [+kv_len..+kv_len]       = V vectors (n_head_kv * head_dim)
+        //   [after KV..]             = attn scores or FFN gate + FFN up (ff_dim * 2)
+        let q_len = self.n_head * self.head_dim;       // same as n_embd
+        let kv_len = self.n_head_kv * self.head_dim;  // = kv_dim
+        let full_layout = self.n_embd + q_len + kv_len * 2 + self.ff_dim * 2;
         let ffn_scratch = self.ff_dim * 2 + self.n_embd;
-        let min_scratch = std::cmp::max(self.n_embd * 4, ffn_scratch);
+        let min_scratch = std::cmp::max(full_layout, ffn_scratch);
         // Round up to next 1024 boundary for GPU alignment
         self.temp_buffer_size = (min_scratch + 1023) & !1023;
 
