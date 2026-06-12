@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.4] — 2026-06-12
+
+### Fixed
+- **frontier_compare: tied-embedding crash** (`src/bin/frontier_compare.rs`)
+  - `load_output_head_f32` falls back to `token_embd.weight` when `output.weight` absent.
+  - Supports all quant types (was Q6_K-only — broke Q4_K_M, Q4_0, etc.).
+  - `CpuKvCache` uses `spec.head_dim` not `n_embd/n_head` (wrong for GQA head_dim=128).
+  - Unblocks diagnostic tracing for: Qwen3-0.6B/1.7B, Llama-3.2-1B/3B.
+
+---
+
 ## [0.2.2] — 2026-06-09
 
 ### Fixed
