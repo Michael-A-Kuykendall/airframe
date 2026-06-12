@@ -159,6 +159,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         layer_norm_enabled: 0,
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 0,
     };
 
     let mut kv_cache = KVCache::new(

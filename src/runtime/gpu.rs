@@ -250,6 +250,8 @@ impl GpuRuntime {
             layer_norm_enabled: 0,
             ffn_kind_policy: 0,
             qkv_layout_policy: 0,
+            batch_offset: 0,
+            batch_count: 0, // placeholder — overridden per-dispatch in inference.rs
         };
 
         let norm_weight_offset = gpu_model
@@ -373,7 +375,16 @@ impl GpuRuntime {
             .collect();
 
         // Decode loop
+        let log_logits = std::env::var("AIRFRAME_LOG_LOGITS").map(|v| v == "1").unwrap_or(false);
         for _step in 0..params.max_tokens {
+            if log_logits {
+                let mut top: Vec<(usize, f32)> = logits_vec.iter().enumerate()
+                    .map(|(i, &v)| (i, v)).collect();
+                top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                let argmax = top[0].0;
+                let top5: Vec<(usize, f32)> = top.into_iter().take(5).collect();
+                eprintln!("[LOGITS] step={} argmax={} top5={:?}", _step, argmax, top5);
+            }
             let next_token = sample_token(
                 &mut logits_vec,
                 params.temperature,
@@ -582,7 +593,7 @@ impl GpuRuntime {
                 let off = gpu_model
                     .metadata
                     .get_tensor_offset("token_embd.weight")
-                    .unwrap_or(0);
+                    .ok_or_else(|| format!("token_embd.weight not found in tensor_offsets map (tensor_count={})", gpu_model.metadata.tensor_count))?;
                 ("token_embd.weight", wt, off)
             }
         };
@@ -591,10 +602,15 @@ impl GpuRuntime {
         let mmap = unsafe { Mmap::map(&file)? };
         let data_start = gpu_model.metadata.data_start_offset;
 
-        // tensor_offset from get_tensor_offset() is an ABSOLUTE byte offset in the file.
-        // GgufTensorInfo.offset is a RELATIVE offset from the data section start.
-        // Convert: relative = absolute - data_start.
-        let tensor_offset_relative = tensor_offset.saturating_sub(data_start);
+        // tensor_offset from get_tensor_offset() may be either:
+        // - GGUF v2: absolute offset in file (offset >= data_start)
+        // - GGUF v3: relative offset from data_start (offset < data_start)
+        // Detect by checking if offset >= data_start.
+        let tensor_offset_relative = if tensor_offset >= data_start {
+            tensor_offset - data_start  // v2 absolute → convert to relative
+        } else {
+            tensor_offset               // v3 relative → use directly
+        };
 
         let tensor_info = GgufTensorInfo {
             name: tensor_name.to_string(),

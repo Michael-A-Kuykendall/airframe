@@ -1550,6 +1550,8 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         layer_norm_enabled: 0,
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 0,
     };
 
     let (gpu_l04_mid, gpu_l0_final) = pipeline.run_layer_stepwise_test(

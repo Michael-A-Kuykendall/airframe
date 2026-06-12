@@ -100,6 +100,8 @@ mod layer_dump_tests {
             layer_norm_enabled: 0,
             ffn_kind_policy: 0,
             qkv_layout_policy: 0,
+            batch_offset: 0,
+            batch_count: 0,
         };
 
         // Process sequence: BOS (1), "Hello" (15043), then 1 decode step

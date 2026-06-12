@@ -90,6 +90,10 @@ pub struct LayerParams {
     pub layer_norm_enabled: u32, // 1 = use LayerNorm math in layer norms (Phi-family)
     pub ffn_kind_policy: u32, // 0 = infer from offsets (compat), 1 = gated, 2 = non-gated
     pub qkv_layout_policy: u32, // 0 = infer from offsets (compat), 1 = separate, 2 = fused
+    /// Micro-batch offset: first token index in this QKV chunk (0 for non-chunked dispatches)
+    pub batch_offset: u32,
+    /// Micro-batch count: number of tokens in this QKV chunk (== batch_size for non-chunked)
+    pub batch_count: u32,
 }
 
 /// Uniform params for the quantize_kv.wgsl dispatch (TurboQuant).

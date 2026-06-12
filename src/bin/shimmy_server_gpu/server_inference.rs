@@ -652,6 +652,8 @@ fn run_inference_completion(
         layer_norm_enabled: layer_norm_mode,
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 0,
     };
 
     let mut generated_text = String::new();

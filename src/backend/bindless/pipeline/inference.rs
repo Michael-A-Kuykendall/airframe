@@ -233,7 +233,19 @@ impl BindlessPipeline {
             layer_norm_enabled: if spec.uses_layer_norm() { 1 } else { 0 },
             ffn_kind_policy,
             qkv_layout_policy,
+            batch_offset: 0,
+            batch_count: batch_size,
         };
+
+        // Adaptive QKV micro-batch chunk size.
+        // Reads SHIMMY_PREFILL_CHUNK; defaults to 1 (safest — one token per dispatch).
+        // Users with fast GPUs can raise this; Q4_K_M on RTX 3060 is safe at 1.
+        // A future TIMESTAMP_QUERY calibration pass will auto-tune this at model load.
+        let qkv_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1)
+            .clamp(1, batch_size.max(1));
 
         // D. Output Logits
         // Only computed for the LAST token in the sequence (usually).
@@ -310,6 +322,7 @@ impl BindlessPipeline {
         let mut layer_bind_groups = Vec::new();
         let mut _offset_buffers = Vec::new(); // Keep alive
         let mut _params_buffers: Vec<wgpu::Buffer> = Vec::new(); // Keep alive
+        let mut _layer_params: Vec<LayerParams> = Vec::new(); // Per-layer params for QKV chunking
 
         for i in 0..layer_count {
             let compiled = &model.metadata.compiled_layers[i];
@@ -320,7 +333,7 @@ impl BindlessPipeline {
             let params_buffer_i = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Layer {} Params", i)),
                 contents: bytemuck::bytes_of(&layer_params_i),
-                usage: wgpu::BufferUsages::UNIFORM,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
             let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
@@ -406,6 +419,7 @@ impl BindlessPipeline {
 
             _offset_buffers.push(buf);
             _params_buffers.push(params_buffer_i);
+            _layer_params.push(layer_params_i);
             layer_bind_groups.push(bg);
         }
 
@@ -623,6 +637,7 @@ impl BindlessPipeline {
 
         // Loop Layers
         for (i, bg) in layer_bind_groups.iter().enumerate() {
+            let params_layer = _layer_params[i]; // per-layer quant_type + base fields
             if trace_prefill_layers {
                 eprintln!(
                     "[PREFILL-LAYER] start layer={} batch_size={} current_pos={} seq_len={}",
@@ -683,14 +698,49 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
+            // QKV: micro-batched to avoid Windows TDR on Q4_K_M models.
+            // Each chunk dispatches `qkv_chunk` tokens, submits, and polls before the next.
+            // The params buffer is updated via write_buffer — no new bind group needed.
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - QKV", i)),
-                    timestamp_writes: None,
-                });
-                cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(pipe_qkv);
-                cpass.dispatch_workgroups(wg_qkv, batch_size, 1);
+                let params_buf_i = &_params_buffers[i];
+                let mut qkv_offset: u32 = 0;
+                while qkv_offset < batch_size {
+                    let this_chunk = (batch_size - qkv_offset).min(qkv_chunk);
+                    // Patch batch_offset + batch_count into the layer params buffer
+                    let params_chunk = LayerParams {
+                        batch_offset: qkv_offset,
+                        batch_count: this_chunk,
+                        ..params_layer
+                    };
+                    // Submit all pending work in the current encoder first
+                    queue.submit(Some(encoder.finish()));
+                    device.poll(wgpu::PollType::wait_indefinitely())
+                        .map_err(|_| "GPU TDR before QKV chunk write".to_string())?;
+                    // Update the params buffer in place
+                    queue.write_buffer(params_buf_i, 0, bytemuck::bytes_of(&params_chunk));
+                    // New encoder for this chunk
+                    encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(&format!("Layer {} QKV chunk {}", i, qkv_offset)),
+                    });
+                    {
+                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some(&format!("Layer {} QKV [{}/{}]", i, qkv_offset, batch_size)),
+                            timestamp_writes: None,
+                        });
+                        cpass.set_bind_group(0, bg, &[]);
+                        cpass.set_pipeline(pipe_qkv);
+                        cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
+                    }
+                    queue.submit(Some(encoder.finish()));
+                    device.poll(wgpu::PollType::wait_indefinitely())
+                        .map_err(|_| "GPU TDR during QKV micro-batch".to_string())?;
+                    // Restore full params for remaining kernels
+                    queue.write_buffer(params_buf_i, 0, bytemuck::bytes_of(&params_layer));
+                    encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(&format!("Layer {} post-QKV chunk {}", i, qkv_offset)),
+                    });
+                    qkv_offset += this_chunk;
+                }
             }
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

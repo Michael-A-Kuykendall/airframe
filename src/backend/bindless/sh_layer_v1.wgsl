@@ -41,6 +41,8 @@ struct LayerParams {
     layer_norm_enabled: u32,  // 1 = LayerNorm (mean+variance), 0 = RMSNorm
     ffn_kind_policy: u32,     // 0 = infer from offsets, 1 = gated, 2 = non-gated
     qkv_layout_policy: u32,   // 0 = infer from offsets, 1 = separate, 2 = fused
+    batch_offset: u32,        // first token index in this QKV micro-batch chunk
+    batch_count: u32,         // number of tokens in this chunk (guard for last chunk)
 };
 
 struct CacheParams {
@@ -340,8 +342,9 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(256, 1, 1)
 fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
-    let token_idx = global_id.y;
+    let token_idx = global_id.y + params.batch_offset;
     
+    if (global_id.y >= params.batch_count) { return; }
     if (token_idx >= cache_params.batch_size) { return; }
     let act_base = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;

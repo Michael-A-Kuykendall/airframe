@@ -5,17 +5,22 @@
 
 struct LayerOffsets {
     attn_norm: u32,
+    attn_norm_bias: u32,     // byte offset of attn norm bias (F32); 0 = disabled
     attn_q: u32,
     attn_k: u32,
     attn_v: u32,
     attn_out: u32,
     ffn_norm: u32,
+    ffn_norm_bias: u32,      // byte offset of ffn norm bias (F32); 0 = disabled
     ffn_gate: u32,
     ffn_down: u32,
     ffn_up: u32,
     layer_idx: u32,          // layer index (used by shader)
-    post_attn_norm: u32,     // byte offset into gguf_blob for post-attention RMS norm weights (F32; 0 if absent)
-    post_ffn_norm: u32,      // byte offset into gguf_blob for post-FFW RMS norm weights (F32; 0 if absent)
+    attn_q_norm: u32,        // byte offset of Q-norm weights (Qwen3; 0 = disabled)
+    attn_k_norm: u32,        // byte offset of K-norm weights (Qwen3; 0 = disabled)
+    attn_q_bias: u32,        // byte offset of Q bias F32 (Qwen2; 0 = disabled)
+    attn_k_bias: u32,        // byte offset of K bias F32 (Qwen2; 0 = disabled)
+    attn_v_bias: u32,        // byte offset of V bias F32 (Qwen2; 0 = disabled)
     v_is_q4k: u32,           // 1 if attn_v uses Q4_K (144-byte blocks), 0 for Q6_K (210-byte)
     ffn_down_is_q4k: u32,    // 1 if ffn_down uses Q4_K (144-byte blocks), 0 for Q6_K (210-byte)
 };
@@ -25,10 +30,19 @@ struct LayerParams {
     head_count: u32,
     head_count_kv: u32,
     head_dim: u32,
+    rope_dim: u32,             // rotary sub-dimension (must match V1 struct offset)
     rms_eps: f32,
     ffn_dim: u32,
     temp_stride: u32,
-    attn_softcap: f32,  // Attention logit soft-cap (Gemma-2: 50.0, 0.0 = disabled)
+    quant_type: u32,           // GGML quant type (packed: bits[7:0]=main, [15:8]=v, [23:16]=ffn_down)
+    attn_logit_softcap: f32,   // Attention logit soft-cap (Gemma-2: 50.0, 0.0 = disabled)
+    post_norm_enabled: u32,    // 1 = apply post-attn/post-ffw norms (Gemma-2)
+    qk_norm_enabled: u32,      // 1 = per-head Q/K RMSNorm (Qwen3)
+    layer_norm_enabled: u32,   // 1 = LayerNorm (Phi-family)
+    ffn_kind_policy: u32,      // 0 = infer, 1 = gated, 2 = non-gated
+    qkv_layout_policy: u32,    // 0 = infer, 1 = separate, 2 = fused
+    batch_offset: u32,         // first token index in this QKV micro-batch chunk
+    batch_count: u32,          // number of tokens in this chunk
 };
 
 struct CacheParams {
@@ -400,8 +414,8 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
 
         var score = dot_qk * scale;
-        if (params.attn_softcap > 0.0) {
-            score = params.attn_softcap * tanh(score / params.attn_softcap);
+        if (params.attn_logit_softcap > 0.0) {
+            score = params.attn_logit_softcap * tanh(score / params.attn_logit_softcap);
         }
         let v_idx = (pos * params.head_count_kv * params.head_dim)
                   + (kv_head_idx * params.head_dim) + head_offset;
@@ -482,6 +496,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // -------------------------------------------------------------------------
 // Kernel 2.75: Post-Attention Norm + Residual Add  (Gemma-2)
 // Applies RMS norm to attention output stored in scratch, adds to residual.
+// Matches V1 shader implementation — uses norm_bank slot 2 and post_norm_enabled flag.
 // -------------------------------------------------------------------------
 @compute @workgroup_size(256, 1, 1)
 fn main_post_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -489,27 +504,24 @@ fn main_post_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let token_idx = global_id.y;
 
     if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
+    if (params.post_norm_enabled == 0u) { return; }
 
     let act_base = token_idx * params.dim;
-    let scratch  = token_idx * params.temp_stride + params.ffn_dim * 2u;
+    let temp_base = token_idx * params.temp_stride;
+    let attn_stash_base = params.dim + params.head_count * params.head_dim;
 
-    let attn_out = temp_state[scratch + idx];
-    let residual = activation_in[act_base + idx];
-
-    if (offsets.post_attn_norm == 0u) {
-        // Standard (Llama-style): no extra post-attention norm — add residual directly
-        activation_in[act_base + idx] = residual + attn_out;
-    } else {
-        // Gemma-2: apply extra post-attention RMS norm before residual add
-        var sum_sq = 0.0;
-        for (var i = 0u; i < params.dim; i++) {
-            let v = temp_state[scratch + i];
-            sum_sq += v * v;
-        }
-        let rms_inv = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
-        let norm_w   = get_f32_at(offsets.post_attn_norm + idx * 4u);
-        activation_in[act_base + idx] = residual + attn_out * rms_inv * norm_w;
+    var sum_sq = 0.0;
+    for (var i = 0u; i < params.dim; i++) {
+        let v = temp_state[temp_base + attn_stash_base + i];
+        sum_sq += v * v;
     }
+    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    let norm_offset_base = (offsets.layer_idx * 4u + 2u) * params.dim;
+    let norm_w = norm_bank[norm_offset_base + idx];
+    let dot = temp_state[temp_base + attn_stash_base + idx];
+    let normed_dot = dot * rms * norm_w;
+    activation_in[act_base + idx] += normed_dot - dot;
 }
 
 // -------------------------------------------------------------------------
@@ -596,7 +608,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Gemma-2 uses GeGLU (GELU activation); LLaMA-style models use SwiGLU (SiLU).
         // We detect Gemma-2 by attn_softcap > 0 (only Gemma-2 uses attention logit softcapping).
         var activated: f32;
-        if (params.attn_softcap > 0.0) {
+        if (params.attn_logit_softcap > 0.0) {
             // GELU approximate (PyTorch tanh variant): 0.5*x*(1+tanh(sqrt(2/π)*(x+0.044715*x³)))
             let gelu = 0.5 * dot * (1.0 + tanh(0.7978845608f * (dot + 0.044715f * dot * dot * dot)));
             activated = gelu;
@@ -723,7 +735,9 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // -------------------------------------------------------------------------
 // Kernel 4.5: Post-FFW Norm + Residual Add  (Gemma-2)
-// Applies RMS norm to FFN output stored in scratch, adds to residual.
+// -------------------------------------------------------------------------
+// Kernel 5: Post-FFN Norm + Residual Add  (Gemma-2)
+// Matches V1 shader implementation — uses norm_bank slot 3 and post_norm_enabled flag.
 // -------------------------------------------------------------------------
 @compute @workgroup_size(256, 1, 1)
 fn main_post_ffn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -731,25 +745,21 @@ fn main_post_ffn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let token_idx = global_id.y;
 
     if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
+    if (params.post_norm_enabled == 0u) { return; }
 
     let act_base = token_idx * params.dim;
-    let scratch  = token_idx * params.temp_stride + params.ffn_dim * 2u;
+    let temp_base = token_idx * params.temp_stride;
 
-    let ffn_out  = temp_state[scratch + idx];
-    let residual = activation_in[act_base + idx];
-
-    if (offsets.post_ffn_norm == 0u) {
-        // Standard (Llama-style): no extra post-FFN norm — add residual directly
-        activation_in[act_base + idx] = residual + ffn_out;
-    } else {
-        // Gemma-2: apply extra post-FFN RMS norm before residual add
-        var sum_sq = 0.0;
-        for (var i = 0u; i < params.dim; i++) {
-            let v = temp_state[scratch + i];
-            sum_sq += v * v;
-        }
-        let rms_inv = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
-        let norm_w   = get_f32_at(offsets.post_ffn_norm + idx * 4u);
-        activation_in[act_base + idx] = residual + ffn_out * rms_inv * norm_w;
+    var sum_sq = 0.0;
+    for (var i = 0u; i < params.dim; i++) {
+        let v = temp_state[temp_base + params.ffn_dim * 2u + i];
+        sum_sq += v * v;
     }
+    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    let norm_offset_base = (offsets.layer_idx * 4u + 3u) * params.dim;
+    let norm_w = norm_bank[norm_offset_base + idx];
+    let dot = temp_state[temp_base + params.ffn_dim * 2u + idx];
+    let normed_dot = dot * rms * norm_w;
+    activation_in[act_base + idx] += normed_dot - dot;
 }
