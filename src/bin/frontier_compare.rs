@@ -2,6 +2,7 @@ use airframe::backend::bindless::kv_cache::KVCache as GpuKvCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
 use airframe::core::dequant::dequantize_q6_k;
+use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q8_0};
 use airframe::core::error::{LibshimmyError, Result};
 use airframe::core::model::{GgufTensorInfo, Model as CpuModelContainer};
 use airframe::core::spec::ModelSpec;
@@ -253,7 +254,7 @@ async fn async_main() -> Result<()> {
             spec.n_ctx,
             spec.n_layer,
             spec.n_head_kv,
-            spec.n_embd / spec.n_head,
+            spec.head_dim, // use derived head_dim (not n_embd/n_head — wrong for GQA)
         );
 
         if !prefix_tokens.is_empty() {
@@ -347,12 +348,13 @@ async fn async_main() -> Result<()> {
             .ok_or_else(|| LibshimmyError::MissingTensor {
                 name: "output_norm.weight".to_string(),
             })?;
-    let output_proj =
-        weights
-            .get(&WeightId::OutputProj)
-            .ok_or_else(|| LibshimmyError::MissingTensor {
-                name: "output.weight".to_string(),
-            })?;
+    // Tied-embedding models (Qwen3, Llama-3.2) have no OutputProj — fall back to TokenEmbed
+    let output_proj = weights
+        .get(&WeightId::OutputProj)
+        .or_else(|| weights.get(&WeightId::TokenEmbed))
+        .ok_or_else(|| LibshimmyError::MissingTensor {
+            name: "output.weight (and token_embd.weight tied-embedding fallback)".to_string(),
+        })?;
 
     let cpu_hidden_tensor = Tensor::new(
         gpu_to_row(cpu_hidden_vec, spec.n_embd),
@@ -479,19 +481,36 @@ fn load_output_head_f32(
     device: &wgpu::Device,
     spec: &ModelSpec,
 ) -> Result<wgpu::Buffer> {
-    let output_weight_type = gpu_model
-        .metadata
-        .get_tensor_type("output.weight")
-        .ok_or_else(|| LibshimmyError::MissingTensor {
-            name: "output.weight".to_string(),
-        })?;
-
-    if output_weight_type != 14 {
-        return Err(LibshimmyError::Unsupported(format!(
-            "expected Q6_K (type 14) for output.weight, got type {}",
-            output_weight_type
-        )));
-    }
+    // Determine which tensor to use for the output head.
+    // Models with tied embeddings (e.g. Qwen3, Llama-3.2) omit `output.weight`
+    // and reuse `token_embd.weight` for the final projection.
+    let (tensor_name, weight_type, tensor_offset) = {
+        let has_output = gpu_model
+            .metadata
+            .get_tensor_type("output.weight")
+            .is_some();
+        if has_output {
+            let wt = gpu_model.metadata.get_tensor_type("output.weight").unwrap();
+            let off = gpu_model
+                .metadata
+                .get_tensor_offset("output.weight")
+                .unwrap_or(0);
+            ("output.weight", wt, off)
+        } else {
+            // Tied embeddings: fall back to token_embd.weight
+            let wt = gpu_model
+                .metadata
+                .get_tensor_type("token_embd.weight")
+                .ok_or_else(|| LibshimmyError::MissingTensor {
+                    name: "token_embd.weight (tied embedding fallback)".to_string(),
+                })?;
+            let off = gpu_model
+                .metadata
+                .get_tensor_offset("token_embd.weight")
+                .unwrap_or(0);
+            ("token_embd.weight", wt, off)
+        }
+    };
 
     let file = std::fs::File::open(model_path).map_err(|err| {
         LibshimmyError::Unsupported(format!(
@@ -506,14 +525,43 @@ fn load_output_head_f32(
         ))
     })?;
 
+    let data_start = gpu_model.metadata.data_start_offset;
+    let tensor_offset_relative = tensor_offset.saturating_sub(data_start);
+
     let tensor_info = GgufTensorInfo {
-        name: "output.weight".to_string(),
+        name: tensor_name.to_string(),
         dimensions: vec![spec.n_vocab, spec.n_embd],
-        ggml_type: 14,
-        offset: 0,
+        ggml_type: weight_type,
+        offset: tensor_offset_relative,
     };
 
-    let tensor_f32 = dequantize_q6_k(&tensor_info, &mmap, gpu_model.metadata.data_start_offset)?;
+    let tensor_f32 = match weight_type {
+        0 => {
+            use airframe::core::tensor::Tensor as AirframeTensor;
+            let byte_offset = data_start + tensor_offset_relative;
+            let n_elements = spec.n_vocab * spec.n_embd;
+            let bytes = &mmap[byte_offset as usize..(byte_offset as usize + n_elements * 4)];
+            let floats: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            AirframeTensor {
+                data: floats,
+                shape: vec![spec.n_vocab, spec.n_embd],
+            }
+        }
+        2 => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
+        8 => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
+        12 => dequantize_q4_k(&tensor_info, &mmap, data_start)?,
+        13 => dequantize_q5_k(&tensor_info, &mmap, data_start)?,
+        14 => dequantize_q6_k(&tensor_info, &mmap, data_start)?,
+        other => {
+            return Err(LibshimmyError::Unsupported(format!(
+                "unsupported quant type {} for output head tensor '{}'",
+                other, tensor_name
+            )));
+        }
+    };
 
     use wgpu::util::DeviceExt;
     Ok(
