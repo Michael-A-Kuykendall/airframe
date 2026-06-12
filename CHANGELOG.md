@@ -184,3 +184,19 @@ Initial public release: Bindless WebGPU pipeline, FSE subsystem, OpenAI-compatib
 server (`shimmy_server_gpu`). Supports Llama, Gemma, Phi, Qwen2, Qwen3 architectures via
 GGUF Q4_K_M and related quantization types. Ships `shimmyjinja` (Jinja2 chat_template
 renderer) and `shimmytok` (GGUF-native tokenizer) as zero-dependency companion crates.
+
+## [0.2.5] — 2026-06-12
+
+### Fixed (rolled-up hotfix — includes all v0.2.3 and v0.2.4 fixes)
+
+- **Critical: GPU temp buffer underallocated for all GQA models** (`src/core/spec.rs`)
+  - Formula `ff_dim*2+n_embd` was missing Q/K/V vectors — 13312 vs 15872 needed for TinyLlama.
+  - All GQA models affected: TinyLlama, Qwen3, LLaMA 3.2, Gemma2, DeepSeek, Qwen2.
+  - Symptom: single garbage token output on every inference call.
+
+- **frontier_compare: tied-embedding crash** (`src/bin/frontier_compare.rs`)
+  - `load_output_head_f32` now falls back to `token_embd.weight` when `output.weight` absent.
+  - Supports all quant types (was Q6_K only).
+  - `CpuKvCache` uses `spec.head_dim` not `n_embd/n_head` (wrong for GQA head_dim=128).
+  - Unblocks diagnostic tracing for Qwen3, LLaMA-3.2.
+
