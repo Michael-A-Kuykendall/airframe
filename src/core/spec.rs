@@ -304,7 +304,7 @@ impl ModelSpec {
             rms_eps: rms_eps.unwrap_or(1e-5),
             rope_base: rope_base.unwrap_or(10000.0),
             rope_scale: 1.0,
-            rope_dim: rope_dim.unwrap_or(n_embd / n_head),
+            rope_dim: rope_dim.unwrap_or(n_embd / n_head).max(n_embd / n_head), // force full head_dim for rope table size to match shader n_pairs=head_dim/2 (fixes Q4K models with metadata rope_dim=64 but head_dim=128)
             yarn_alpha: 1.0,
             yarn_beta: 32.0,
             n_ctx: n_ctx.unwrap_or(2048),

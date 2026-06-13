@@ -252,6 +252,8 @@ impl GpuRuntime {
             qkv_layout_policy: 0,
             batch_offset: 0,
             batch_count: 0, // placeholder — overridden per-dispatch in inference.rs
+            q_weight_k: 0,
+            k_weight_k: 0,
         };
 
         let norm_weight_offset = gpu_model
@@ -342,9 +344,16 @@ impl GpuRuntime {
                     0,
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     &self.spec,
-                    128,
+                    8,  // Forced small chunk for TDR safety on Q4_K models (1 of 8 test)
                 )?
         };
+
+        // Debug for garbage output diagnosis (1 of 8)
+        let hidden_rms: f32 = _final_act.iter().map(|x| x * x).sum::<f32>().sqrt() / _final_act.len() as f32;
+        eprintln!("[DEBUG 1/8] Final hidden rms: {:.6}, first5: {:?}", hidden_rms, &_final_act[..5.min(_final_act.len())]);
+        let mut top: Vec<(usize, f32)> = prefill_logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+        top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        eprintln!("[DEBUG 1/8] Prefill logits top5 tokens: {:?}", &top[..5]);
 
         // Advance KV cache position
         {

@@ -654,6 +654,8 @@ fn run_inference_completion(
         qkv_layout_policy: 0,
         batch_offset: 0,
         batch_count: 0,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let mut generated_text = String::new();

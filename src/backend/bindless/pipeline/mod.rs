@@ -94,6 +94,10 @@ pub struct LayerParams {
     pub batch_offset: u32,
     /// Micro-batch count: number of tokens in this QKV chunk (== batch_size for non-chunked)
     pub batch_count: u32,
+    /// Stored K (in-dim) for attn_q.weight tensor (packed Qwen3 GGUF etc; 0 = use dim; for correct blocks_per_row/stride in Q4K qkv stage 0)
+    pub q_weight_k: u32,
+    /// Stored K for attn_k.weight (packed case)
+    pub k_weight_k: u32,
 }
 
 /// Uniform params for the quantize_kv.wgsl dispatch (TurboQuant).

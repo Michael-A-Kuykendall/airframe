@@ -783,7 +783,7 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
 
     let n_head_kv = n_head_kv.unwrap_or(n_head);
     let rope_base = rope_base.unwrap_or(10000.0);
-    let rope_dim = rope_dim.unwrap_or(n_embd / n_head);
+    let rope_dim = rope_dim.unwrap_or(n_embd / n_head).max(n_embd / n_head); // force full head for rope table vs shader (Q4K mismatch)
     let rms_eps = rms_eps.unwrap_or(1e-5);
 
     // Vocab: prefer explicit over token array length

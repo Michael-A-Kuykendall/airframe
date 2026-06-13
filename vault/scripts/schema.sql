@@ -134,6 +134,7 @@ CREATE TABLE verification_runs (
     backend             VARCHAR NOT NULL,           -- airframe_gpu, airframe_cpu, llama_cpp
     kv_quant            VARCHAR,                    -- none, int4 (for KV cache quant)
     test_name           VARCHAR,                    -- which test was run
+    family              VARCHAR,                    -- e.g. "Qwen", "Llama" for family workshop
     
     -- Results
     passed              BOOLEAN NOT NULL,

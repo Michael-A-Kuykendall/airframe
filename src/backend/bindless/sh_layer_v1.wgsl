@@ -43,6 +43,8 @@ struct LayerParams {
     qkv_layout_policy: u32,   // 0 = infer from offsets, 1 = separate, 2 = fused
     batch_offset: u32,        // first token index in this QKV micro-batch chunk
     batch_count: u32,         // number of tokens in this chunk (guard for last chunk)
+    q_weight_k: u32,          // stored K for attn_q.weight (packed Qwen3 etc; 0=dim)
+    k_weight_k: u32,          // for attn_k
 };
 
 struct CacheParams {

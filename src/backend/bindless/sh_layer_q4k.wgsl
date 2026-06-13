@@ -43,6 +43,8 @@ struct LayerParams {
     qkv_layout_policy: u32,    // 0 = infer, 1 = separate, 2 = fused
     batch_offset: u32,         // first token index in this QKV micro-batch chunk
     batch_count: u32,          // number of tokens in this chunk
+    q_weight_k: u32,           // stored K (in dim) for attn_q.weight (packed Qwen3 etc; 0=dim)
+    k_weight_k: u32,           // for attn_k.weight (packed)
 };
 
 struct CacheParams {
@@ -212,7 +214,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_val   = get_f16_at(bb);
             let dm_val  = get_f16_at(bb + 2u);
             let sb      = bb + 4u;    // scales base (12 bytes)
-            let qs_base = bb + 16u;   // quantized nibbles base (128 bytes)
+            let qs_base = bb + 16u;   // quantized nibbles base (128 bytes);
 
             for (var group = 0u; group < 4u; group++) {
                 let is0 = group * 2u;
@@ -242,6 +244,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else if (offsets.v_is_q4k == 0u) {
         // ---- Q6_K (attn_v): 210-byte superblocks ----
         // Layout: ql[128] | qh[64] | scales[16] | d[2]
+        let blocks_per_row = params.dim / 256u;
         let row_start_byte = weight_byte_offset + row_idx * blocks_per_row * 210u;
 
         for (var b = 0u; b < blocks_per_row; b++) {
@@ -298,7 +301,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // ---- Q4_K (attn_v): 144-byte superblocks ----
         let row_start_byte = weight_byte_offset + row_idx * blocks_per_row * 144u;
 
-        for (var b = 0u; b < blocks_per_row; b++) {
+        for (var b = 0u; b < logical_blocks; b++) {
             let bb = row_start_byte + b * 144u;
             let d_val   = get_f16_at(bb);
             let dm_val  = get_f16_at(bb + 2u);
@@ -334,7 +337,8 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Store output
     if (target_stage == 0u) {
-        temp_state[temp_base + row_idx] = dot;
+        // Write Q to V1-expected position so V1 qk_norm can see it for Qwen3 etc.
+        temp_state[temp_base + params.dim + row_idx] = dot;
     } else if (target_stage == 1u) {
         let head        = row_idx / params.head_dim;
         let dim_in_head = row_idx % params.head_dim;
@@ -351,11 +355,12 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 
 // -------------------------------------------------------------------------
-// Kernel 1.5: QK Norm (stub - uses V1 shader at runtime)
+// Kernel 1.5: QK Norm (Q4K path uses V1 impl via pipe selection for now)
 // -------------------------------------------------------------------------
 @compute @workgroup_size(256, 1, 1)
 fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    // No-op: actual qk_norm is handled by V1 pipeline
+    // Q4K models dispatch qk_norm via the V1 pipeline entry (real impl) for hybrid
+    // compatibility with Q write positions established for Qwen3 etc.
 }
 
 // -------------------------------------------------------------------------
@@ -377,7 +382,8 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (head_idx >= params.head_count) { return; }  // guard: skip threads beyond valid heads
     let head_offset = idx % params.head_dim;
     let kv_head_idx = head_idx / gqa_ratio;
-    let q_base      = temp_base + head_idx * params.head_dim;
+    // Read Q from V1-expected position (after activation dim) so qk_norm from V1 applies.
+    let q_base      = temp_base + params.dim + head_idx * params.head_dim;
     let causal_pos  = cache_params.current_pos + token_idx;
     let n_pairs     = params.head_dim / 2u;
 
@@ -569,7 +575,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var dot = 0.0;
     let blocks_per_row   = params.dim / 256u;
     let row_start_byte   = weight_off + row_idx * blocks_per_row * 144u;
-    let norm_offset_base = (offsets.layer_idx * 2u + 1u) * params.dim;
+    let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;  // Fixed for Q4K norm_bank layout (4 slots/layer from preflight)
 
     for (var b = 0u; b < blocks_per_row; b++) {
         let bb = row_start_byte + b * 144u;
@@ -644,7 +650,7 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // ---- Q6_K (ffn_down): 210-byte superblocks ----
         let row_start_byte = weight_off + idx * blocks_per_row * 210u;
 
-        for (var b = 0u; b < blocks_per_row; b++) {
+        for (var b = 0u; b < logical_blocks; b++) {
             let bb = row_start_byte + b * 210u;
             let d_val = f16_from_bytes(get_byte(bb + 208u), get_byte(bb + 209u));
 
@@ -695,7 +701,7 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // ---- Q4_K (ffn_down): 144-byte superblocks ----
         let row_start_byte = weight_off + idx * blocks_per_row * 144u;
 
-        for (var b = 0u; b < blocks_per_row; b++) {
+        for (var b = 0u; b < logical_blocks; b++) {
             let bb = row_start_byte + b * 144u;
             let d_val   = get_f16_at(bb);
             let dm_val  = get_f16_at(bb + 2u);

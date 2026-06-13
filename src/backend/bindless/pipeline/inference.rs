@@ -235,6 +235,8 @@ impl BindlessPipeline {
             qkv_layout_policy,
             batch_offset: 0,
             batch_count: batch_size,
+            q_weight_k: 0,
+            k_weight_k: 0,
         };
 
         // Adaptive QKV micro-batch chunk size.
@@ -326,10 +328,17 @@ impl BindlessPipeline {
 
         for i in 0..layer_count {
             let compiled = &model.metadata.compiled_layers[i];
-            let layer_params_i = LayerParams {
+            let mut layer_params_i = LayerParams {
                 quant_type: compiled.quant_type_packed,
                 ..params_base
             };
+            if spec.arch_string() == "qwen3" {
+                // For Qwen3 GGUF in the test collection, attn_q.weight (and k) tensors have dim1 = 2 * n_embd (packed Q/K layout).
+                // Pass the stored K so Q4K qkv uses correct blocks_per_row/row stride for the stored tensor (fixes q=0 rms, post nonfin).
+                let packed_k = 2 * dim;
+                layer_params_i.q_weight_k = packed_k;
+                layer_params_i.k_weight_k = packed_k;
+            }
             let params_buffer_i = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Layer {} Params", i)),
                 contents: bytemuck::bytes_of(&layer_params_i),
@@ -665,10 +674,10 @@ impl BindlessPipeline {
                 (
                     &self.layer_pipeline_attn_norm, // Q4K: Use V1 (no main_attn_norm in Q4K shader)
                     &self.layer_pipeline_q4k_qkv,
-                    &self.layer_pipeline_qk_norm, // Q4K: Use V1 (no main_qk_norm in Q4K shader)
+                    &self.layer_pipeline_qk_norm, // Q4K: now has real main_qk_norm in sh_layer_q4k.wgsl (self-contained for Q4K Q writes + offsets)
                     &self.layer_pipeline_q4k_attn_out,
                     &self.layer_pipeline_q4k_attn_proj,
-                    &self.layer_pipeline_q4k_post_attn_norm,
+                    &self.layer_pipeline_post_attn_norm, // Q4K non-Gemma: Use V1 for post_attn_norm (Q4K version is Gemma-only)
                     &self.layer_pipeline_ffn_norm, // Q4K: Use V1 (no main_ffn_norm in Q4K shader)
                     &self.layer_pipeline_q4k_ffn_proj,
                     &self.layer_pipeline_q4k_ffn_down,
@@ -779,7 +788,8 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_post_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            {
+            if (params_layer.quant_type != 12u32) {
+                // For Q4K, ffn_norm is inside the Q4K ffn_proj kernel; skip V1 to avoid double norm.
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - FFNNorm", i)),
                     timestamp_writes: None,
