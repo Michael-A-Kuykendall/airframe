@@ -796,7 +796,7 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_post_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            if (params_layer.quant_type != 12u32) {
+            if params_layer.quant_type != 12u32 {
                 // For Q4K, ffn_norm is inside the Q4K ffn_proj kernel; skip V1 to avoid double norm.
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - FFNNorm", i)),

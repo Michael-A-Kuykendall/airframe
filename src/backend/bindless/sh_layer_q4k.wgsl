@@ -301,7 +301,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // ---- Q4_K (attn_v): 144-byte superblocks ----
         let row_start_byte = weight_byte_offset + row_idx * blocks_per_row * 144u;
 
-        for (var b = 0u; b < logical_blocks; b++) {
+        for (var b = 0u; b < blocks_per_row; b++) {
             let bb = row_start_byte + b * 144u;
             let d_val   = get_f16_at(bb);
             let dm_val  = get_f16_at(bb + 2u);
@@ -650,7 +650,7 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // ---- Q6_K (ffn_down): 210-byte superblocks ----
         let row_start_byte = weight_off + idx * blocks_per_row * 210u;
 
-        for (var b = 0u; b < logical_blocks; b++) {
+        for (var b = 0u; b < blocks_per_row; b++) {
             let bb = row_start_byte + b * 210u;
             let d_val = f16_from_bytes(get_byte(bb + 208u), get_byte(bb + 209u));
 
@@ -701,7 +701,7 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // ---- Q4_K (ffn_down): 144-byte superblocks ----
         let row_start_byte = weight_off + idx * blocks_per_row * 144u;
 
-        for (var b = 0u; b < logical_blocks; b++) {
+        for (var b = 0u; b < blocks_per_row; b++) {
             let bb = row_start_byte + b * 144u;
             let d_val   = get_f16_at(bb);
             let dm_val  = get_f16_at(bb + 2u);
