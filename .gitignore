@@ -74,3 +74,4 @@ fixtures/oracle_*.csv
 
 # Windows reserved device name artifact (from bad command redirect)
 nul
+internal/
