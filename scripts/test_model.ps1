@@ -59,13 +59,15 @@ if (-not $ready) {
     exit 1
 }
 
-# 6. Get model name — use the filename stem, verify it's in the list
+# 6. Get model name — use the filename stem, avoid fallback to unrelated discovered models
 $expectedModel = $label
 try {
     $allModels = (Invoke-RestMethod -Uri "$URL/v1/models" -TimeoutSec 5).data | ForEach-Object { $_.id }
     Write-Host "  Available: $($allModels -join ', ')"
-    # Prefer exact match, then first model
+    # Best match: exact > partial filename > first non-phi non-default model
     $m = ($allModels | Where-Object { $_ -eq $expectedModel }) | Select-Object -First 1
+    if (-not $m) { $m = ($allModels | Where-Object { $_ -like "*$expectedModel*" }) | Select-Object -First 1 }
+    if (-not $m) { $m = ($allModels | Where-Object { $_ -notlike "*phi*" -and $_ -notlike "*default*" }) | Select-Object -First 1 }
     if (-not $m) { $m = $allModels[0] }
     Write-Host "  Using: $m"
 } catch {
@@ -74,7 +76,7 @@ try {
 }
 
 # 7. Inference
-$body = (@{ model=$m; messages=@(@{role="user";content="Say hello in exactly 3 words."}); stream=$false; max_tokens=$MAX_TOKENS } | ConvertTo-Json)
+$body = (@{ model=$m; messages=@(@{role="user";content="hi"}); stream=$false; max_tokens=$MAX_TOKENS } | ConvertTo-Json)
 try {
     $resp    = Invoke-RestMethod -Uri "$URL/v1/chat/completions" -Method POST -ContentType "application/json" -Body $body -TimeoutSec 120
     $content = $resp.choices[0].message.content

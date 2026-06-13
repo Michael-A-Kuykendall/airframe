@@ -3734,6 +3734,7 @@
         "State Management"
       ]
     },
+<<<<<<< Updated upstream
     "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZHplcm8tY2Fz\\b7512c5f-9e25-4c78-8561-7f8f18e87c0b.json": {
       "autoTopicsOverride": [
         "API Integration",
@@ -3741,6 +3742,8 @@
         "Audit/Review"
       ]
     },
+=======
+>>>>>>> Stashed changes
     "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcYWlyZnJhbWU_\\b6c3774b-3ef3-4c68-a556-a2d07ca35bef.json": {
       "autoTopicsOverride": [
         "Frontend/UI",
@@ -3748,6 +3751,16 @@
         "Multi-Source Ingestion"
       ]
     },
+<<<<<<< Updated upstream
+=======
+    "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZHplcm8tY2Fz\\b7512c5f-9e25-4c78-8561-7f8f18e87c0b.json": {
+      "autoTopicsOverride": [
+        "API Integration",
+        "TypeScript/Node",
+        "Cloud Platforms"
+      ]
+    },
+>>>>>>> Stashed changes
     "C:\\Users\\micha\\AppData\\Roaming\\Kiro\\User\\globalStorage\\kiro.kiroagent\\workspace-sessions\\YzpcVXNlcnNcbWljaGFccmVwb3NcZHplcm8tY2Fz\\4de0205e-49f7-43a1-9678-9c2a5fcaff50.json": {
       "autoTopicsOverride": [
         "Multi-Source Ingestion",

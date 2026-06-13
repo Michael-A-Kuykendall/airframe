@@ -340,7 +340,32 @@ impl BindlessMetadata {
 
     /// Construct ModelSpec from the parsed GGUF metadata
     pub fn to_model_spec(&self) -> ModelSpec {
-        ModelSpec::from_gguf_metadata(&self.gguf_metadata)
+        let mut spec = ModelSpec::from_gguf_metadata(&self.gguf_metadata);
+        // If head_dim was not in GGUF metadata (e.g. Qwen3 omits attention.key_length),
+        // infer it from the Q weight shape: blk.0.attn_q.weight dims = [n_embd, n_head * head_dim]
+        if spec.n_head > 0 {
+            // Try direct key first, then search for any blk.0.attn_q key
+            let q_key = "blk.0.attn_q.weight";
+            let dims_opt = self.tensor_dims.get(q_key).or_else(|| {
+                self.tensor_dims.keys()
+                    .find(|k| k.contains("attn_q.weight") && k.starts_with("blk.0"))
+                    .and_then(|k| self.tensor_dims.get(k))
+            });
+            if let Some(dims) = dims_opt {
+                if dims.len() >= 2 {
+                    let inferred = (dims[1] as usize) / spec.n_head;
+                    if inferred > 0 && inferred != spec.head_dim {
+                        eprintln!(
+                            "[Spec] head_dim corrected {} -> {} via {} shape {:?}",
+                            spec.head_dim, inferred, q_key, dims
+                        );
+                        spec.head_dim = inferred;
+                        spec = spec.compute_derived();
+                    }
+                }
+            }
+        }
+        spec
     }
 
     pub fn get_tensor_offset(&self, name: &str) -> Option<u64> {

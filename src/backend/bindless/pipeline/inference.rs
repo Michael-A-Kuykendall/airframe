@@ -636,7 +636,7 @@ impl BindlessPipeline {
         let kv_len = params_base.head_count_kv * params_base.head_dim;
         let total_qkv = q_len + kv_len * 2;
         let wg_qkv = total_qkv.div_ceil(256);
-        let wg_qknorm = params_base.head_dim.div_ceil(256);
+        let wg_qknorm = (q_len + kv_len).div_ceil(256); // must cover all Q+K elements, not just head_dim
         let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
