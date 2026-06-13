@@ -86,6 +86,8 @@ C:\Users\micha\AppData\Local\Temp\shimmy_err.txt
 
 ## Formula Comparison Workflow (for GPU NaN investigation)
 
+**FSE + D0 Lens filter (mandatory):** All verification runs (smoke, frontier_compare, direct generate, vault checks) are single-pass fact emission + rule saturation. Emit LayerOutput / DispatchTiming facts; rules derive stability + TdrRisk + SafeChunk; consequents drive chunking + oracle writes + formula diffs. See `.kiro/steering/fse-d0-lens.md`.
+
 ```bash
 # 1. Run frontier_compare to get GPU vs CPU trace
 ./target/debug/frontier_compare.exe \
@@ -111,6 +113,62 @@ python scripts/trace_formula_diff.py \
 Vault golden data available for Qwen3 1.7B, Qwen3 8B, TinyLlama (see DuckDB vault).
 
 ---
+
+## Algebraic / Formula Diagnosis Method (Mandatory — Use to Break Math Loops)
+
+When stuck in a loop on a model (NaN, exploding rms, garbage, TDR, empty), **do not dive into raw vectors or step-by-step arithmetic**. Step back to the analytical algebraic point of view.
+
+We have several formula Python scripts (`scripts/trace_formula_diff.py`, `scripts/llama_formula_side_by_side.py`, `phi_smoke_formula.sh`, `template_formula_alignment.py` etc.) that develop compact algebraic signatures (energies=std, gains=ratios, qk_balance, residual/ffn gains, top1/top2 logit margins, log2-fold deltas). The formula is also produced in the vault (migration_002_inference_formulas + layer_oracles with expected_rms + integrity checksums).
+
+**Look at the formula level.** The math will blow your context every time. The formula shows exactly where the issues are.
+
+**Primary method — Vault + two golden trace sources per model:**
+- Vault (DuckDB `vault/vault.duckdb`) + `vault_seed` (CPU forward on BOS+"Hello" or fixed prompt producing per-layer oracles) is one golden source.
+- Candle probe seeds (`vault/seeds/candle/*.json`) + `vault/scripts/vault_certify.py` is the second (marks certified/disputed/provisional per oracle row using rms delta tolerances).
+- `import_seeds.py` loads validated seeds (no NaN, rms_sum match, oracle count match) into `models` + `layer_oracles`.
+- For any model: query gives the "known good" per-layer expected_rms / NaN / checksum for CPU (and certified status vs candle).
+- Run frontier_compare (or instrumented run) to get our GPU values for the same.
+- Vault highlights for **each individual model specifically** where we are diverging from the two different golden trace sources.
+
+**Table compare/contrast method (keeps you out of cycling):**
+- Column 1: all the inference that we know works for another known source (CPU golden from vault/frontier cpu_rms + first8 + finite; or candle; or llama.cpp canonical from side_by_side).
+- Next column: what we have (GPU rms/non_finite from frontier layers[q/k/v/...], or generate output, or our formula energies).
+- Compare and contrast row-by-row (per layer, per op Q/K/V/post_attn/ffn/output, or per formula metric). First row with large delta / non_finite / energy fold-change / MISMATCH on qk_norm flag is the smoking gun. Fix only there. Re-measure.
+
+**Practical commands (use after every suspect edit):**
+```powershell
+# 1. Fresh per-layer cpu|gpu table (the direct compare/contrast table)
+./target/release/frontier_compare.exe --model "D:/shimmy-test-models/gguf_collection/Qwen3-0.6B-Q4_K_M.gguf" --prompt "2+2=" --output artifacts/qwen3_current.json --chunk_tokens 8
+python -c '
+import json
+d=json.load(open("artifacts/qwen3_current.json"))
+print("layer | cpu_rms_q | gpu_rms_q | gpu_nonfin_q | ... first divergence from golden CPU column")
+for l in d["layers"][:4]: 
+    q=l["q"]; print(l["layer_idx"], q["cpu_rms"], q["gpu_rms"], q["gpu_non_finite"])
+'
+
+# 2. Vault per-model golden oracles (second source view)
+python -c '
+import duckdb
+con=duckdb.connect("vault/vault.duckdb")
+print(con.execute("SELECT layer_idx, operation, expected_rms FROM layer_oracles o JOIN models m ON o.model_id=m.id WHERE m.name LIKE \"%Qwen3-0.6B%\" ORDER BY layer_idx LIMIT 6").df())
+'
+
+# 3. Formula diff (algebraic signatures, log2 fold on energies/gains/qk_balance etc)
+python scripts/trace_formula_diff.py --candidate artifacts/...trace.json --golden artifacts/...golden.json --top 10 || echo "adapt golden or use table above"
+
+# 4. Arch formula vs llama.cpp canonical (qk_norm enabled? RMS vs LayerNorm? rope?)
+python scripts/llama_formula_side_by_side.py --trace artifacts/qwen3_current.json --out artifacts/qwen3_formula_check.md
+```
+
+**FSE + D0 Lens filter (mandatory):** All of the above (frontier runs, vault queries, formula scripts, table emission) are single-pass fact emission + saturation. Emit LayerOutput {layer, rms, nan}, DispatchTiming; rules derive FirstBadLayer + DivergenceScore + QkNormMismatch; consequents write the table, update beads, drive next SafeChunk or kernel patch. See fse-d0-lens.md + beads-workflow.md. Never re-scan traces imperatively when the reactive graph + broadcast gives it for free.
+
+Use this method (or the table) before any other debugging. It is the prescribed way to stabilize models on this branch.
+
+---
+
+## Rebuild Procedure
+
 
 ## Rebuild Procedure
 

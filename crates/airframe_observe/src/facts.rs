@@ -55,6 +55,29 @@ pub enum InferenceFact {
 
     /// Candle cross-validation should be triggered for these logits.
     TriggerCandleCompare { rms_bits: u32, checksum: i64 },
+
+    // New for model family workshop using Saturation Fabric and vault
+    FamilyContext {
+        family: String,
+        quant: String,
+        has_qk_norm: bool,
+    },
+    PerTensorOutput {
+        layer_idx: u32,
+        position: u32,
+        q_rms_bits: u32,
+        k_rms_bits: u32,
+        v_rms_bits: u32,
+        post_rms_bits: u32,
+        ffn_rms_bits: u32,
+        output_rms_bits: u32,
+        q_checksum: i64,
+        k_checksum: i64,
+        v_checksum: i64,
+        post_checksum: i64,
+        ffn_checksum: i64,
+        output_checksum: i64,
+    },
 }
 
 /// Discriminant constants for alpha indexing.
@@ -66,6 +89,8 @@ pub const KEY_LAYER_STABLE: u64 = 4;
 pub const KEY_LOGITS_CLEAN: u64 = 5;
 pub const KEY_WRITE_ORACLE: u64 = 6;
 pub const KEY_CANDLE_COMPARE: u64 = 7;
+pub const KEY_FAMILY_CONTEXT: u64 = 8;
+pub const KEY_PER_TENSOR_OUTPUT: u64 = 9;
 
 /// Map an InferenceFact to its AlphaKey for d0-engine dispatch.
 ///
@@ -79,6 +104,8 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::OutputToken { .. } => Some(AlphaKey(KEY_OUTPUT_TOKEN)),
         InferenceFact::LayerOutputStable { .. } => Some(AlphaKey(KEY_LAYER_STABLE)),
         InferenceFact::LogitsClean => Some(AlphaKey(KEY_LOGITS_CLEAN)),
+        InferenceFact::FamilyContext { .. } => Some(AlphaKey(KEY_FAMILY_CONTEXT)),
+        InferenceFact::PerTensorOutput { .. } => Some(AlphaKey(KEY_PER_TENSOR_OUTPUT)),
         // Tier 3 consequents — don't trigger further rules
         InferenceFact::WriteOracleRow { .. } => None,
         InferenceFact::TriggerCandleCompare { .. } => None,
@@ -132,6 +159,27 @@ mod tests {
             InferenceFact::OutputToken {
                 step: 0,
                 token_id: 1,
+            },
+            InferenceFact::FamilyContext {
+                family: "test".to_string(),
+                quant: "Q4_K_M".to_string(),
+                has_qk_norm: true,
+            },
+            InferenceFact::PerTensorOutput {
+                layer_idx: 0,
+                position: 1,
+                q_rms_bits: 0,
+                k_rms_bits: 0,
+                v_rms_bits: 0,
+                post_rms_bits: 0,
+                ffn_rms_bits: 0,
+                output_rms_bits: 0,
+                q_checksum: 0,
+                k_checksum: 0,
+                v_checksum: 0,
+                post_checksum: 0,
+                ffn_checksum: 0,
+                output_checksum: 0,
             },
         ];
         for f in &facts {

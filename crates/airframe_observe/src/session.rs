@@ -120,6 +120,76 @@ impl ObservationSession {
     pub fn contains(&self, fact: &InferenceFact) -> bool {
         self.graph.store.contains(fact)
     }
+
+    /// Register for family workshop mode (uses Saturation Fabric for auto family analysis and vault recording).
+    pub fn register_family_workshop(&mut self) {
+        // Rules for divergence and formula will be added via Saturation Fabric in future extensions.
+        // For now, enables emit of new facts for per-family debug passes.
+        // Example rule for divergence (in full impl, compare to vault).
+        self.graph.program.register(
+            crate::facts::alpha_key_of(&InferenceFact::LayerOutput { layer_idx: 0, position: 0, rms_bits: 0, checksum: 0 }).unwrap(),
+            |fact, _store| {
+                if let InferenceFact::LayerOutput { layer_idx, .. } = fact {
+                    // In full, derive divergence if not stable.
+                    if *layer_idx == 0 {
+                        // Placeholder for family divergence fact.
+                    }
+                }
+                vec![]
+            },
+        );
+    }
+
+    /// Emit family context fact.
+    pub fn emit_family_context(&mut self, family: String, quant: String, has_qk_norm: bool) {
+        self.emit(InferenceFact::FamilyContext {
+            family,
+            quant,
+            has_qk_norm,
+        });
+    }
+
+    /// Emit per-tensor output fact (for Q/K/V/post/ffn/output stats per layer/position).
+    pub fn emit_per_tensor_output(
+        &mut self,
+        layer_idx: u32,
+        position: u32,
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        post: &[f32],
+        ffn: &[f32],
+        output: &[f32],
+    ) {
+        let q_rms = crate::facts::rms(q);
+        let k_rms = crate::facts::rms(k);
+        let v_rms = crate::facts::rms(v);
+        let post_rms = crate::facts::rms(post);
+        let ffn_rms = crate::facts::rms(ffn);
+        let output_rms = crate::facts::rms(output);
+        let q_cs = crate::facts::checksum(q);
+        let k_cs = crate::facts::checksum(k);
+        let v_cs = crate::facts::checksum(v);
+        let post_cs = crate::facts::checksum(post);
+        let ffn_cs = crate::facts::checksum(ffn);
+        let output_cs = crate::facts::checksum(output);
+        self.emit(InferenceFact::PerTensorOutput {
+            layer_idx,
+            position,
+            q_rms_bits: q_rms.to_bits(),
+            k_rms_bits: k_rms.to_bits(),
+            v_rms_bits: v_rms.to_bits(),
+            post_rms_bits: post_rms.to_bits(),
+            ffn_rms_bits: ffn_rms.to_bits(),
+            output_rms_bits: output_rms.to_bits(),
+            q_checksum: q_cs,
+            k_checksum: k_cs,
+            v_checksum: v_cs,
+            post_checksum: post_cs,
+            ffn_checksum: ffn_cs,
+            output_checksum: output_cs,
+        });
+    }
 }
 
 impl Default for ObservationSession {

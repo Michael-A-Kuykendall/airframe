@@ -53,5 +53,9 @@ pub mod facts;
 pub mod observers;
 pub mod session;
 
+// Private experimentation / tuning surface (Saturation Fabric, TDR, beads integration).
+// Not re-exported publicly. Use only from within airframe crate.
+mod internal;
+
 pub use facts::{alpha_key_of, InferenceFact};
 pub use session::ObservationSession;

@@ -17,10 +17,24 @@ Target: gentek local development platform fully operational as **primary develop
 
 ## Compliance Constraints (Things That Have Happened Before — Do Not Repeat)
 Sourced from:
-- This repo's `.kiro/steering/` (inference-testing.md, deploy-hotfix.md, terminal-discipline.md) and global `C:\Users\micha\.kiro/steering/skills/`
+- This repo's `.kiro/steering/` (inference-testing.md, deploy-hotfix.md, terminal-discipline.md, **fse-d0-lens.md**) and global `C:\Users\micha\.kiro/steering/skills/`
 - `docs/internal/kiro-handoff-2026-06-06.md` (Session Ethos)
 - `docs/internal/MASTER_HOTFIX_WORKSTREAM.md`, NAN_BUG_ANALYSIS, previous session handoffs
 - Immediate prior context: the Golden Reference Vault was built (vault_seed, DuckDB with 500+ layer_oracles rows for 11+ models, import/certify scripts) but repeatedly ignored in favor of manual `shimmy generate` + eyeballing or layer_dump_gpu. gpu_22layer_verify remained CSV-hardcoded + ignored. **Never again.**
+- **FSE + D0 Lens is now mandatory perspective** (see `.kiro/steering/fse-d0-lens.md`): every challenge must be reframed as facts emitted from data streams, rules deriving semantics, consequents driving actions — in single fused/reactive passes with deduplication and broadcast. Use airframe_observe + d0-engine as the vehicle. 
+
+## FSE + D0 Lens (Permanent Required Filter)
+All work in this workspace (TDR stabilization, vault/golden traces, model verification, observation, console, etc.) **shall be viewed and solved through the FSE + D0 lens**:
+- Data streams emit structural facts (Tier 1).
+- Rules (alpha/beta, selectors) derive semantic facts (Tier 2).
+- Consequents drive immediate actions/mutations (Tier 3).
+- Single-pass, deduplicated selectors, value broadcast, early exit, saturation to empty.
+- `∂runtime / ∂rules ≈ 0` for shared selectors.
+- Arena for structural sharing where applicable.
+- Implemented via ObservationSession / ReactiveGraph<InferenceFact> (extend as needed).
+- This is the "increasingly fast shit" architecture. Do not re-implement imperative repeated traversals.
+
+See full enshrinement and TDR application in `.kiro/steering/fse-d0-lens.md`.
 
 ### 1. KIRO Handoff Ethos (Non-Negotiable)
 - One hypothesis at a time.
