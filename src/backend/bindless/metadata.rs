@@ -385,15 +385,21 @@ impl BindlessMetadata {
 
         let p = |s: &str| -> u32 {
             let key = format!("blk.{}.{}", layer_idx, s);
-            let val = self.tensor_offsets.get(&key);
-            if val.is_none() {
-                // Critical failure: layer exists but sub-tensor is missing
-                panic!(
-                    "Layer {} exists but tensor '{}' is missing!",
-                    layer_idx, key
-                );
+            if let Some(&val) = self.tensor_offsets.get(&key) {
+                return val as u32;
             }
-            *val.unwrap() as u32
+            // Fused QKV fallback for Phi/GPT2/Other arch (GROUP C): use attn_qkv offset for q/k/v
+            // so we don't panic on missing separate tensors. The fused layout is Q then K then V concatenated.
+            if (s == "attn_q.weight" || s == "attn_k.weight" || s == "attn_v.weight")
+                && self.tensor_offsets.contains_key(&format!("blk.{}.attn_qkv.weight", layer_idx))
+            {
+                return self.tensor_offsets[&format!("blk.{}.attn_qkv.weight", layer_idx)] as u32;
+            }
+            // Critical failure: layer exists but sub-tensor is missing
+            panic!(
+                "Layer {} exists but tensor '{}' is missing!",
+                layer_idx, key
+            );
         };
 
         // If primary weights are missing, return None (layer doesn't exist)

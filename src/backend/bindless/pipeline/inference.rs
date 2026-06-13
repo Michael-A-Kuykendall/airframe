@@ -769,6 +769,14 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_attn_out);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
+            // Per-kernel submit+poll after attn_out (and similarly for ffn) to bound submission time and prevent Windows TDR on Q4_K_M models (GROUP A TDR).
+            // This applies the same pattern as the QKV micro-batch to heavy kernels.
+            queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::PollType::wait_indefinitely())
+                .map_err(|_| "GPU TDR during attn_out".to_string())?;
+            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("Layer {} post-attn_out {}", i, i)),
+            });
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - AttnProj", i)),
@@ -818,6 +826,13 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_ffn_down);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
+            // Per-kernel submit+poll after ffn_down (heavy for Q4_K_M) to bound time and fix remaining TDR (GROUP A).
+            queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::PollType::wait_indefinitely())
+                .map_err(|_| "GPU TDR during ffn_down".to_string())?;
+            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("Layer {} post-ffn_down {}", i, i)),
+            });
             {
                 // Post-FFW norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
