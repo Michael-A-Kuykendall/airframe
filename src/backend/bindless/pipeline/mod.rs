@@ -153,6 +153,10 @@ pub struct BindlessPipeline {
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub dequant_pipeline: wgpu::ComputePipeline,
     pub dequant_bind_group_layout: wgpu::BindGroupLayout,
+    /// Pre-compiled multi-type dequant pipeline (Q4_0/Q8_0/Q4_K/Q5_K/Q6_K/F16/F32).
+    /// Hot-path safe — compiled once at startup, reused for all embedding dequants.
+    pub dequant_any_pipeline: wgpu::ComputePipeline,
+    pub dequant_any_bind_group_layout: wgpu::BindGroupLayout,
     pub matmul_pipeline: wgpu::ComputePipeline,
     pub matmul_layout: wgpu::BindGroupLayout,
     pub matmul_f32_pipeline: wgpu::ComputePipeline,
@@ -330,6 +334,65 @@ impl BindlessPipeline {
             compilation_options: Default::default(),
             cache: None,
         });
+
+        // --- 4b. DequantAny Pipeline (pre-compiled, hot-path safe) ---
+        // Same binding layout as dequant_layout but uses sh_dequant_any.wgsl
+        // which dispatches on quant_type: Q4_0/Q8_0/Q4_K/Q5_K/Q6_K/F16/F32.
+        // Used for token_embd.weight which may be Q4_K on mixed-quant models.
+        let dequant_any_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("DequantAny Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let dequant_any_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("DequantAny Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../sh_dequant_any.wgsl").into()),
+        });
+        let dequant_any_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("DequantAny Pipeline Layout"),
+                bind_group_layouts: &[&dequant_any_layout],
+                push_constant_ranges: &[],
+            });
+        let dequant_any_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("DequantAny Pipeline"),
+                layout: Some(&dequant_any_pipeline_layout),
+                module: &dequant_any_shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
         // --- 5. MatMul Pipeline ---
         // Bindings: 0=GGUF Blob read-only, 1=Input Vector read-only,
@@ -1292,6 +1355,8 @@ impl BindlessPipeline {
             bind_group_layout,
             dequant_pipeline,
             dequant_bind_group_layout: dequant_layout,
+            dequant_any_pipeline,
+            dequant_any_bind_group_layout: dequant_any_layout,
             matmul_pipeline,
             matmul_layout,
             matmul_f32_pipeline,

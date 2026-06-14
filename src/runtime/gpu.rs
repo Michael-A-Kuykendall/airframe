@@ -75,6 +75,7 @@ pub struct GpuRuntime {
     norm_params: RMSNormParams,
     embd_weight_offset: u64,
     row_bytes: u64,
+    embd_quant_type: u32,
     eos_token: u32,
     im_end_token: Option<u32>,
 }
@@ -237,7 +238,31 @@ impl GpuRuntime {
             .metadata
             .get_tensor_offset("token_embd.weight")
             .expect("token_embd.weight not found");
-        let row_bytes = (dim as u64 / 32) * 18; // Q4_0 quantization
+
+        // Quant type for token_embd.weight — may differ from layer weights.
+        // Q4_K_M models often use Q4_K (type 12) for embeddings.
+        let embd_quant_type = gpu_model
+            .metadata
+            .get_tensor_type("token_embd.weight")
+            .unwrap_or(2); // default Q4_0
+
+        // Row stride in bytes for the embedding table.
+        // Q4_0: (dim/32)*18 = 2304 for dim=4096
+        // Q4_K: (dim/256)*144 = 2304 for dim=4096  (coincidentally identical)
+        // Q8_0: (dim/32)*34
+        // F16:  dim*2
+        // F32:  dim*4
+        let row_bytes: u64 = match embd_quant_type {
+            0 => dim as u64 * 4,           // F32
+            1 => dim as u64 * 2,           // F16
+            2 => (dim as u64 / 32) * 18,   // Q4_0
+            8 => (dim as u64 / 32) * 34,   // Q8_0
+            12 => (dim as u64 / 256) * 144, // Q4_K
+            13 => (dim as u64 / 256) * 176, // Q5_K
+            14 => (dim as u64 / 256) * 210, // Q6_K
+            _ => (dim as u64 / 32) * 18,   // fallback Q4_0
+        };
+        eprintln!("[GpuRuntime] token_embd.weight: quant_type={} row_bytes={}", embd_quant_type, row_bytes);
 
         let weight_quant_type = gpu_model
             .metadata
@@ -314,6 +339,7 @@ impl GpuRuntime {
             norm_params,
             embd_weight_offset,
             row_bytes,
+            embd_quant_type,
             eos_token,
             im_end_token,
         })
@@ -383,6 +409,7 @@ impl GpuRuntime {
 
         let embd_offset = self.embd_weight_offset;
         let row_bytes_val = self.row_bytes;
+        let embd_quant_type_val = self.embd_quant_type;
         let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -411,10 +438,13 @@ impl GpuRuntime {
         let spec_isf = self.spec.clone();
 
         // ── Closure: GPU embedding dequant ───────────────────────────────
+        // Uses run_dequant_any_hot with the correct quant type for token_embd.weight.
+        // This fixes NaN on Q4_K_M models where token_embd.weight is type=12 (Q4_K)
+        // but the legacy run_dequant_request hardcodes the Q4_0 shader.
         let dequant_fn: std::sync::Arc<dyn Fn(u32, u32) -> Vec<f32> + Send + Sync> =
             std::sync::Arc::new(move |token_id: u32, dim: u32| {
                 let row_offset = embd_offset + (token_id as u64 * row_bytes_val);
-                pipeline_ref.run_dequant_request(device_ref, queue_ref, model_ref, row_offset as u32, dim)
+                pipeline_ref.run_dequant_any_hot(device_ref, queue_ref, model_ref, row_offset as u32, dim, embd_quant_type_val)
             });
 
         // ── Closure: GPU prefill dispatch ─────────────────────────────────
@@ -444,8 +474,8 @@ impl GpuRuntime {
             std::sync::Arc::new(move |token_data: Vec<f32>, current_pos: u32| {
                 let token_id = token_data[0] as u32;
                 let row_offset = embd_offset + (token_id as u64 * row_bytes_val);
-                let token_embd = pipeline_ref.run_dequant_request(
-                    device_ref, queue_ref, model_ref, row_offset as u32, dim,
+                let token_embd = pipeline_ref.run_dequant_any_hot(
+                    device_ref, queue_ref, model_ref, row_offset as u32, dim, embd_quant_type_val,
                 );
                 let cache_guard = kv_for_forward.lock().unwrap();
                 match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
@@ -504,6 +534,15 @@ impl GpuRuntime {
         }
         append_log(&format!("pre_batch done, {} tokens, {} unique, {:.2}s", 
             prompt_tokens.len(), embedding_cache.len(), t_embed_start.elapsed().as_secs_f32()));
+
+        // Embedding quality check — log first 8 values of first token embedding.
+        // NaN here = wrong dequant shader or bad offset. Non-zero finite = good.
+        if !batched_embd.is_empty() {
+            let first8: Vec<f32> = batched_embd.iter().take(8).cloned().collect();
+            let nan_count = batched_embd[..dim.min(batched_embd.len() as u32) as usize]
+                .iter().filter(|v| v.is_nan() || v.is_infinite()).count();
+            append_log(&format!("embd_check: first8={:?} nan_in_row0={}", first8, nan_count));
+        }
 
         // Store batched embeddings in ISF state and assert PrefillBatchReady
         {

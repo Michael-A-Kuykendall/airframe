@@ -271,6 +271,92 @@ impl BindlessPipeline {
         result
     }
 
+    /// Dequantize any supported GGML quant type to f32 via GPU — HOT PATH.
+    ///
+    /// Uses the pre-compiled `dequant_any_pipeline` (compiled once at startup).
+    /// Safe to call in the embedding pre-batch loop.
+    /// Supports: 0=F32, 1=F16, 2=Q4_0, 8=Q8_0, 12=Q4_K, 13=Q5_K, 14=Q6_K
+    pub fn run_dequant_any_hot(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        model: &BindlessModel,
+        offset_bytes: u32,
+        count: u32,
+        quant_type: u32,
+    ) -> Vec<f32> {
+        let params = DequantAnyParams {
+            offset_bytes,
+            count,
+            quant_type,
+            pad: 0,
+        };
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("DequantAny Params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let output_size = (count as usize * 4) as u64;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("DequantAny Output"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("DequantAny BindGroup Hot"),
+            layout: &self.dequant_any_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model.blob_binding_0(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.dequant_any_pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.dispatch_workgroups(count.div_ceil(64), 1, 1);
+        }
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("DequantAny Staging"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_size);
+        queue.submit(Some(encoder.finish()));
+        let slice = staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+        loop {
+            device.poll(wgpu::PollType::Poll).ok();
+            if let Ok(res) = rx.try_recv() {
+                res.expect("DequantAny staging map failed");
+                break;
+            }
+        }
+        let data = slice.get_mapped_range();
+        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging_buffer.unmap();
+        result
+    }
+
     /// Dequantize any supported GGML quant type to f32 via GPU.
     ///
     /// Uses `sh_dequant_any.wgsl` which supports:
