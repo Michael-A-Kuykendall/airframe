@@ -43,6 +43,13 @@ sha2 = "0.10"
 aho-corasick = { version = "1.1", features = ["std"] }
 shimmyjinja = { version = "0.5.0" }
 
+# Optional: ISF (Inference Saturation Fabric) — depends on private d0-engine.
+# Enable with --features isf. Not published to crates.io.
+airframe-observe = { path = "crates/airframe_observe", optional = true }
+
+[features]
+isf = ["dep:airframe-observe"]
+
 [dev-dependencies]
 sha2 = "0.10"
 tempfile = "3.24.0"

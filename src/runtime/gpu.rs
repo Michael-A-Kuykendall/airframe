@@ -296,7 +296,175 @@ impl GpuRuntime {
         })
     }
 
-    /// Generate text from a raw prompt string.
+    /// Generate text using the Inference Saturation Fabric (ISF).
+    ///
+    /// Replaces the imperative for-loop in generate() with a D0 reactive graph.
+    /// Rules registered at call time drive: embedding extraction, prefill dispatch,
+    /// decode loop, EOS detection, and streaming — all as reactive facts.
+    ///
+    /// Patent Notice: Implements FSE + D0 Saturation Fabric.
+    /// Pending patent by Michael A. Kuykendall. All rights reserved.
+    #[cfg(feature = "isf")]
+    pub fn generate_isf(
+        &self,
+        prompt: &str,
+        params: &SamplingParams,
+        on_token: Option<Box<dyn FnMut(&str) + Send>>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
+
+        let prompt_tokens = self.tokenizer.encode(prompt, true)?;
+        let dim = self.spec.n_embd as u32;
+        let prompt_len = prompt_tokens.len() as u32;
+
+        // Reset KV cache
+        {
+            let mut cache = self.kv_cache.lock().unwrap();
+            cache.reset();
+        }
+
+        // Encode extra stop tokens
+        let extra_stop_ids: Vec<u32> = params
+            .extra_stop_tokens
+            .iter()
+            .filter_map(|s| {
+                self.tokenizer.encode(s, false).ok().and_then(|v| {
+                    if v.len() == 1 { Some(v[0]) } else { None }
+                })
+            })
+            .collect();
+
+        // Build shared ISF state
+        let state = std::sync::Arc::new(std::sync::Mutex::new(ISFState::new(
+            prompt_len,
+            params.max_tokens as u32,
+            self.eos_token,
+            extra_stop_ids,
+            on_token,
+        )));
+
+        let embd_offset = self.embd_weight_offset;
+        let row_bytes_val = self.row_bytes;
+        let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(64);
+        let temp = params.temperature;
+        let top_p_val = params.top_p;
+        let rep_penalty = params.repetition_penalty;
+        let seed = params.seed;
+
+        // Safety: all closures are called synchronously within this function's
+        // lifetime. The references to self.device, self.queue, self.model,
+        // self.pipeline, self.tokenizer are valid for the duration of generate_isf().
+        // We extend lifetimes here only because Arc<dyn Fn> requires 'static,
+        // but these closures never escape this stack frame.
+        let device_ref: &'static wgpu::Device = unsafe { &*(&self.device as *const _) };
+        let queue_ref: &'static wgpu::Queue = unsafe { &*(&self.queue as *const _) };
+        let model_ref: &'static crate::backend::bindless::loader::BindlessModel =
+            unsafe { &*(&self.model as *const _) };
+        let pipeline_ref: &'static crate::backend::bindless::pipeline::BindlessPipeline =
+            unsafe { &*(&self.pipeline as *const _) };
+        let tokenizer_ref: &'static shimmytok::Tokenizer =
+            unsafe { &*(&self.tokenizer as *const _) };
+        let output_head_ref: &'static wgpu::Buffer =
+            unsafe { &*(&self.output_head_f32 as *const _) };
+        let kv_cache_isf = self.kv_cache.clone();
+        let spec_isf = self.spec.clone();
+
+        // ── Closure: GPU embedding dequant ───────────────────────────────
+        let dequant_fn: std::sync::Arc<dyn Fn(u32, u32) -> Vec<f32> + Send + Sync> =
+            std::sync::Arc::new(move |token_id: u32, dim: u32| {
+                let row_offset = embd_offset + (token_id as u64 * row_bytes_val);
+                pipeline_ref.run_dequant_request(device_ref, queue_ref, model_ref, row_offset as u32, dim)
+            });
+
+        // ── Closure: GPU prefill dispatch ─────────────────────────────────
+        let kv_for_prefill = kv_cache_isf.clone();
+        let spec_for_prefill = spec_isf.clone();
+        let prefill_fn: std::sync::Arc<dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync> =
+            std::sync::Arc::new(move |batched: Vec<f32>, _token_count: u32| {
+                let cache_guard = kv_for_prefill.lock().unwrap();
+                match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
+                    device_ref, queue_ref, model_ref,
+                    &batched,
+                    Some(output_head_ref),
+                    0,
+                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                    &spec_for_prefill,
+                    prefill_chunk,
+                ) {
+                    Ok((hidden, _l21, logits)) => (hidden, logits),
+                    Err(_) => (vec![], vec![]),
+                }
+            });
+
+        // ── Closure: GPU decode forward pass ─────────────────────────────
+        let kv_for_forward = kv_cache_isf.clone();
+        let spec_for_forward = spec_isf.clone();
+        let forward_fn: std::sync::Arc<dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync> =
+            std::sync::Arc::new(move |token_data: Vec<f32>, current_pos: u32| {
+                let token_id = token_data[0] as u32;
+                let row_offset = embd_offset + (token_id as u64 * row_bytes_val);
+                let token_embd = pipeline_ref.run_dequant_request(
+                    device_ref, queue_ref, model_ref, row_offset as u32, dim,
+                );
+                let cache_guard = kv_for_forward.lock().unwrap();
+                match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
+                    device_ref, queue_ref, model_ref,
+                    &token_embd,
+                    Some(output_head_ref),
+                    current_pos,
+                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                    &spec_for_forward,
+                    1,
+                ) {
+                    Ok((hidden, _l21, logits)) => (hidden, logits),
+                    Err(_) => (vec![], vec![]),
+                }
+            });
+
+        // ── Closure: sampling ─────────────────────────────────────────────
+        let rng_cell = std::sync::Arc::new(std::sync::Mutex::new(Rng::new(seed)));
+        let sample_fn: std::sync::Arc<dyn Fn(&mut Vec<f32>) -> u32 + Send + Sync> = {
+            let rc = rng_cell.clone();
+            std::sync::Arc::new(move |logits: &mut Vec<f32>| {
+                let mut rng = rc.lock().unwrap();
+                sample_token(logits, temp, top_p_val, rep_penalty, &[], &mut rng)
+            })
+        };
+
+        // ── Closure: token decode ─────────────────────────────────────────
+        let decode_fn: std::sync::Arc<dyn Fn(u32) -> String + Send + Sync> =
+            std::sync::Arc::new(move |token_id: u32| {
+                tokenizer_ref.decode_single(token_id, true).unwrap_or_default()
+            });
+
+        // ── Closure: KV cache increment ───────────────────────────────────
+        let kv_for_inc = kv_cache_isf.clone();
+        let kv_increment_fn: std::sync::Arc<dyn Fn() + Send + Sync> =
+            std::sync::Arc::new(move || {
+                let mut cache = kv_for_inc.lock().unwrap();
+                let _ = cache.increment();
+            });
+
+        // ── Build and run the ISF ─────────────────────────────────────────
+        let mut isf = InferenceSaturationFabric::new(
+            state.clone(),
+            dequant_fn,
+            prefill_fn,
+            forward_fn,
+            sample_fn,
+            decode_fn,
+            kv_increment_fn,
+            dim,
+        );
+
+        let output = isf.generate(&prompt_tokens);
+        Ok(output.text)
+    }
+
+
     ///
     /// `on_token` is called for each generated token (for streaming).
     /// Returns the full generated text.
