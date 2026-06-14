@@ -17,7 +17,7 @@
 use crate::facts::{
     alpha_key_of, HaltReason, InferenceFact,
     KEY_DECODE_STEP, KEY_EMBEDDING_READY, KEY_PREFILL_BATCH_READY,
-    KEY_PREFILL_COMPLETE, KEY_PROMPT_TOKEN,
+    KEY_PREFILL_COMPLETE, KEY_PROMPT_TOKEN, KEY_DISPATCH_COMPLETED, KEY_TDR_RISK_HIGH,
 };
 use d0_engine::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric};
 use std::collections::HashSet;
@@ -59,6 +59,14 @@ pub struct ISFState {
     pub extra_stop_ids: Vec<u32>,
     /// Streaming callback — called with each decoded token piece
     pub on_token: Option<Box<dyn FnMut(&str) + Send>>,
+    /// TDR budget state — accumulated GPU time since last yield (ms).
+    /// Rules emit DispatchTiming facts; when accumulated >= budget, a yield is needed.
+    /// The actual yield (wgpu submit+poll) happens in the closure that emits the fact.
+    pub tdr_accumulated_ms: u128,
+    /// TDR budget in ms. Platform-aware: 1400ms on Windows, 30000ms elsewhere.
+    pub tdr_budget_ms: u128,
+    /// Number of yields performed this generation (for diagnostics).
+    pub tdr_yield_count: u32,
 }
 
 impl ISFState {
@@ -80,6 +88,20 @@ impl ISFState {
             eos_token,
             extra_stop_ids,
             on_token,
+            tdr_accumulated_ms: 0,
+            tdr_budget_ms: {
+                // Platform-aware TDR budget.
+                // Windows D3D12: hard 2s TDR, use 1400ms budget.
+                // Linux/macOS: no hard TDR (or much longer), use 30s.
+                #[cfg(windows)]
+                let budget = std::env::var("SHIMMY_TDR_BUDGET_MS")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(1400u128);
+                #[cfg(not(windows))]
+                let budget = std::env::var("SHIMMY_TDR_BUDGET_MS")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(30000u128);
+                budget
+            },
+            tdr_yield_count: 0,
         }
     }
 
@@ -190,13 +212,14 @@ impl InferenceSaturationFabric {
                     let t_prefill = std::time::Instant::now();
                     eprintln!("[ISF-RULE] PrefillBatchReady: {} tokens → GPU prefill starting", token_count);
                     let (hidden, logits) = prefill(batched, *token_count);
+                    let elapsed_ms = t_prefill.elapsed().as_millis() as u32;
                     let hidden_rms: f32 = if hidden.is_empty() { 0.0 } else {
                         (hidden.iter().map(|x| x*x).sum::<f32>() / hidden.len() as f32).sqrt()
                     };
                     let logits_max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
                     let logits_nans = logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
                     eprintln!("[ISF-RULE] GPU prefill done in {:.2}s — hidden_rms={:.4} logits_max={:.3} logits_nans={}/{}", 
-                        t_prefill.elapsed().as_secs_f32(), hidden_rms, logits_max, logits_nans, logits.len());
+                        elapsed_ms as f32 / 1000.0, hidden_rms, logits_max, logits_nans, logits.len());
                     // Increment KV cache once per prompt token
                     for _ in 0..*token_count {
                         kv_inc();
@@ -205,7 +228,15 @@ impl InferenceSaturationFabric {
                         let mut s = state_ref.lock().unwrap();
                         s.logits = logits;
                     }
-                    vec![InferenceFact::PrefillComplete { position: *token_count }]
+                    // Emit DispatchCompleted fact for TDR accounting (Rule 6 picks it up)
+                    vec![
+                        InferenceFact::PrefillComplete { position: *token_count },
+                        InferenceFact::DispatchCompleted {
+                            layer: 0, // prefill spans all layers — use 0 as sentinel
+                            kernel: crate::facts::KernelKind::FullLayer,
+                            elapsed_ms,
+                        },
+                    ]
                 } else {
                     vec![]
                 }
@@ -279,6 +310,7 @@ impl InferenceSaturationFabric {
                     // Dequant embedding for this token — forward pass
                     let (_hidden, mut logits) = forward(vec![*token_id as f32], current_pos);
                     kv_inc();
+                    let elapsed_ms = t_decode.elapsed().as_millis() as u32;
 
                     let logits_max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
                     let logits_nans = logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
@@ -286,7 +318,7 @@ impl InferenceSaturationFabric {
 
                     if *step % 10 == 0 || *step < 3 {
                         eprintln!("[ISF-DECODE] step={} gpu_forward={:.2}s logits_len={} max={:.3} nans={} in_token={}",
-                            step, t_decode.elapsed().as_secs_f32(), logits.len(), logits_max, logits_nans, token_id);
+                            step, elapsed_ms as f32 / 1000.0, logits.len(), logits_max, logits_nans, token_id);
                     }
 
                     if is_empty {
@@ -332,9 +364,66 @@ impl InferenceSaturationFabric {
                     }
 
                     // Self-assert next decode step — the D0 reactive inversion
-                    vec![InferenceFact::DecodeStep {
-                        step: step + 1,
-                        token_id: next_token,
+                    vec![
+                        InferenceFact::DecodeStep {
+                            step: step + 1,
+                            token_id: next_token,
+                        },
+                        InferenceFact::DispatchCompleted {
+                            layer: current_pos, // decode position as layer proxy
+                            kernel: crate::facts::KernelKind::FullLayer,
+                            elapsed_ms,
+                        },
+                    ]
+                } else {
+                    vec![]
+                }
+            });
+        }
+
+        // ── Rule 6: DispatchCompleted → TdrRiskHigh (when budget exceeded) ──
+        // Accumulates GPU dispatch time in ISFState.tdr_accumulated_ms.
+        // When accumulated >= budget → derives TdrRiskHigh.
+        // The actual yield (wgpu submit+poll) is performed in gpu.rs closures
+        // which check ISFState.tdr_accumulated_ms directly before heavy work.
+        // This rule makes TDR visible as a fabric fact for observability.
+        {
+            let state_ref = state.clone();
+            program.register(AlphaKey(KEY_DISPATCH_COMPLETED), move |fact, _store| {
+                if let InferenceFact::DispatchCompleted { layer, elapsed_ms, .. } = fact {
+                    let (accumulated, budget) = {
+                        let mut s = state_ref.lock().unwrap();
+                        s.tdr_accumulated_ms += *elapsed_ms as u128;
+                        (s.tdr_accumulated_ms, s.tdr_budget_ms)
+                    };
+                    if accumulated >= budget {
+                        eprintln!("[ISF-TDR] layer={} accumulated={}ms >= budget={}ms → TdrRiskHigh",
+                            layer, accumulated, budget);
+                        vec![InferenceFact::TdrRiskHigh { layer: *layer }]
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            });
+        }
+
+        // ── Rule 7: TdrRiskHigh → YieldNow ────────────────────────────────
+        // Derives the YieldNow consequent. The actual wgpu submit+poll happens
+        // in the gpu.rs closures — they reset tdr_accumulated_ms after yielding.
+        {
+            let state_ref = state.clone();
+            program.register(AlphaKey(KEY_TDR_RISK_HIGH), move |fact, _store| {
+                if let InferenceFact::TdrRiskHigh { layer } = fact {
+                    {
+                        let mut s = state_ref.lock().unwrap();
+                        s.tdr_accumulated_ms = 0; // reset after yield signal
+                        s.tdr_yield_count += 1;
+                    }
+                    vec![InferenceFact::YieldNow {
+                        layer: *layer,
+                        reason: crate::facts::YieldReason::TdrBudgetExceeded,
                     }]
                 } else {
                     vec![]

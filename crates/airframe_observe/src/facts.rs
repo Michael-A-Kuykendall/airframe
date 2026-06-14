@@ -91,6 +91,15 @@ pub enum InferenceFact {
         elapsed_ms: u32,
     },
 
+    /// A GPU dispatch completed — carries layer index, what ran, and wall time.
+    /// This is the primary TDR input fact. Rules accumulate elapsed_ms and
+    /// derive TdrRiskHigh when budget is approached.
+    DispatchCompleted {
+        layer: u32,
+        kernel: KernelKind,
+        elapsed_ms: u32,
+    },
+
     // ── Tier 2: TDR risk derived from accumulated dispatch timings ────────
     /// Accumulated dispatch time exceeds TDR threshold — yield required.
     TdrRiskHigh { layer: u32 },
@@ -180,6 +189,7 @@ pub const KEY_FAMILY_CONTEXT: u64 = 8;
 pub const KEY_PER_TENSOR_OUTPUT: u64 = 9;
 pub const KEY_DISPATCH_TIMING: u64 = 10;
 pub const KEY_TDR_RISK_HIGH: u64 = 11;
+pub const KEY_DISPATCH_COMPLETED: u64 = 18;
 // ISF: Inference Saturation Fabric keys
 pub const KEY_PROMPT_TOKEN: u64 = 12;
 pub const KEY_EMBEDDING_READY: u64 = 13;
@@ -203,6 +213,7 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::FamilyContext { .. } => Some(AlphaKey(KEY_FAMILY_CONTEXT)),
         InferenceFact::PerTensorOutput { .. } => Some(AlphaKey(KEY_PER_TENSOR_OUTPUT)),
         InferenceFact::DispatchTiming { .. } => Some(AlphaKey(KEY_DISPATCH_TIMING)),
+        InferenceFact::DispatchCompleted { .. } => Some(AlphaKey(KEY_DISPATCH_COMPLETED)),
         InferenceFact::TdrRiskHigh { .. } => Some(AlphaKey(KEY_TDR_RISK_HIGH)),
         // Tier 2 derived — no further rules fire on these
         InferenceFact::TdrRiskLow { .. } => None,
