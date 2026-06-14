@@ -50,12 +50,17 @@
 //! Contact: michaelallenkuykendall@gmail.com
 
 pub mod facts;
+pub mod isf;
+pub mod observer;
 pub mod observers;
+pub mod output;
+pub mod plan;
 pub mod session;
 
 // Private experimentation / tuning surface (Saturation Fabric, TDR, beads integration).
 // Not re-exported publicly. Use only from within airframe crate.
 mod internal;
 
-pub use facts::{alpha_key_of, InferenceFact};
+pub use facts::{alpha_key_of, HaltReason, InferenceFact};
+pub use isf::{GenerateOutput, ISFState, InferenceSaturationFabric};
 pub use session::ObservationSession;
