@@ -9,6 +9,23 @@
 
 use d0_engine::AlphaKey;
 
+/// Which GPU kernel produced a timing measurement.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum KernelKind {
+    Qkv,
+    AttnOut,
+    FfnDown,
+    FfnProj,
+    FullLayer, // combined when not measuring per-kernel
+}
+
+/// Why a yield point was requested.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum YieldReason {
+    TdrBudgetExceeded,
+    LayerBoundary,
+}
+
 /// A fact about an inference run.
 ///
 /// Three tiers following d0-engine conventions:
@@ -56,6 +73,27 @@ pub enum InferenceFact {
     /// Candle cross-validation should be triggered for these logits.
     TriggerCandleCompare { rms_bits: u32, checksum: i64 },
 
+    // ── Tier 1: Dispatch timing (for TDR scheduling via Saturation Fabric) ──
+    /// CPU-side elapsed time for a GPU kernel dispatch at a given layer.
+    /// Emitted by inference.rs after each queue.submit()+poll() completes.
+    /// The fabric uses this to decide whether to yield on the next dispatch.
+    DispatchTiming {
+        layer: u32,
+        kernel: KernelKind,
+        elapsed_ms: u32,
+    },
+
+    // ── Tier 2: TDR risk derived from accumulated dispatch timings ────────
+    /// Accumulated dispatch time exceeds TDR threshold — yield required.
+    TdrRiskHigh { layer: u32 },
+
+    /// Accumulated dispatch time is safe — continue batching.
+    TdrRiskLow { layer: u32 },
+
+    // ── Tier 3: Yield decisions (consequents — not stored long-term) ──────
+    /// Inference loop must submit+poll now.
+    YieldNow { layer: u32, reason: YieldReason },
+
     // New for model family workshop using Saturation Fabric and vault
     FamilyContext {
         family: String,
@@ -91,6 +129,8 @@ pub const KEY_WRITE_ORACLE: u64 = 6;
 pub const KEY_CANDLE_COMPARE: u64 = 7;
 pub const KEY_FAMILY_CONTEXT: u64 = 8;
 pub const KEY_PER_TENSOR_OUTPUT: u64 = 9;
+pub const KEY_DISPATCH_TIMING: u64 = 10;
+pub const KEY_TDR_RISK_HIGH: u64 = 11;
 
 /// Map an InferenceFact to its AlphaKey for d0-engine dispatch.
 ///
@@ -106,9 +146,14 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::LogitsClean => Some(AlphaKey(KEY_LOGITS_CLEAN)),
         InferenceFact::FamilyContext { .. } => Some(AlphaKey(KEY_FAMILY_CONTEXT)),
         InferenceFact::PerTensorOutput { .. } => Some(AlphaKey(KEY_PER_TENSOR_OUTPUT)),
+        InferenceFact::DispatchTiming { .. } => Some(AlphaKey(KEY_DISPATCH_TIMING)),
+        InferenceFact::TdrRiskHigh { .. } => Some(AlphaKey(KEY_TDR_RISK_HIGH)),
+        // Tier 2 derived — no further rules fire on these
+        InferenceFact::TdrRiskLow { .. } => None,
         // Tier 3 consequents — don't trigger further rules
         InferenceFact::WriteOracleRow { .. } => None,
         InferenceFact::TriggerCandleCompare { .. } => None,
+        InferenceFact::YieldNow { .. } => None,
     }
 }
 

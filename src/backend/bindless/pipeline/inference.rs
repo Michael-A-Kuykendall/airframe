@@ -249,6 +249,21 @@ impl BindlessPipeline {
             .unwrap_or(1)
             .clamp(1, batch_size.max(1));
 
+        // ── Saturation Fabric TDR accumulator ────────────────────────────────
+        // Implements the saturation fabric scheduling invariant for GPU dispatch:
+        // accumulated CPU-side time drives yield decisions, not layer count.
+        // Budget: SHIMMY_TDR_BUDGET_MS env var (default 1400ms, conservative for
+        // Windows TDR ~2s watchdog). Accumulates across kernels; resets on yield.
+        //
+        // Patent Notice: This scheduling model implements Fused Semantic Execution
+        // (FSE) and D0 Saturation Fabric — selector-first, single-pass, reactive.
+        // Pending patent by Michael A. Kuykendall. All rights reserved.
+        let tdr_budget_ms: u128 = std::env::var("SHIMMY_TDR_BUDGET_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1400u128);
+        let mut tdr_accumulated_ms: u128 = 0;
+
         // D. Output Logits
         // Only computed for the LAST token in the sequence (usually).
         // If we want all logits, we'd need batch_size * vocab_size.
@@ -623,6 +638,40 @@ impl BindlessPipeline {
             label: Some("Full Model"),
         });
 
+        // ── Saturation Fabric TDR macros ─────────────────────────────────────
+        // Defined here so they can capture `encoder` (mutable, moved on finish()).
+        // tdr_budget_ms and tdr_accumulated_ms are declared earlier in this fn.
+
+        /// Submit the current encoder, poll GPU, time the round-trip, create new encoder.
+        macro_rules! tdr_submit_poll {
+            ($label:expr) => {{
+                let t0 = std::time::Instant::now();
+                queue.submit(Some(encoder.finish()));
+                device
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .map_err(|_| format!("GPU TDR during {}", $label))?;
+                let elapsed = t0.elapsed().as_millis();
+                tdr_accumulated_ms += elapsed;
+                encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some(&format!("post-{}", $label)),
+                });
+                elapsed
+            }};
+        }
+
+        /// Yield only if accumulated time >= TDR budget. Always yields on force=true.
+        macro_rules! tdr_yield_if_needed {
+            ($label:expr, force=$force:expr) => {{
+                if $force || tdr_accumulated_ms >= tdr_budget_ms {
+                    let _elapsed = tdr_submit_poll!($label);
+                    tdr_accumulated_ms = 0; // reset after any yield
+                    true
+                } else {
+                    false
+                }
+            }};
+        }
+
         let wg_dim = dim.div_ceil(256);
         let ffn_total = ffn_dim * 2; // Gate + Up need this many threads
         let wg_ffn = ffn_total.div_ceil(256); // Ceil div by workgroup size (256)
@@ -722,9 +771,7 @@ impl BindlessPipeline {
                         ..params_layer
                     };
                     // Submit all pending work in the current encoder first
-                    queue.submit(Some(encoder.finish()));
-                    device.poll(wgpu::PollType::wait_indefinitely())
-                        .map_err(|_| "GPU TDR before QKV chunk write".to_string())?;
+                    let _e1 = tdr_submit_poll!(format!("Layer {} QKV pre-chunk {}", i, qkv_offset));
                     // Update the params buffer in place
                     queue.write_buffer(params_buf_i, 0, bytemuck::bytes_of(&params_chunk));
                     // New encoder for this chunk
@@ -740,9 +787,7 @@ impl BindlessPipeline {
                         cpass.set_pipeline(pipe_qkv);
                         cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
                     }
-                    queue.submit(Some(encoder.finish()));
-                    device.poll(wgpu::PollType::wait_indefinitely())
-                        .map_err(|_| "GPU TDR during QKV micro-batch".to_string())?;
+                    let _e2 = tdr_submit_poll!(format!("Layer {} QKV chunk {}", i, qkv_offset));
                     // Restore full params for remaining kernels
                     queue.write_buffer(params_buf_i, 0, bytemuck::bytes_of(&params_layer));
                     encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -769,14 +814,9 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_attn_out);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            // Per-kernel submit+poll after attn_out (and similarly for ffn) to bound submission time and prevent Windows TDR on Q4_K_M models (GROUP A TDR).
-            // This applies the same pattern as the QKV micro-batch to heavy kernels.
-            queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::PollType::wait_indefinitely())
-                .map_err(|_| "GPU TDR during attn_out".to_string())?;
-            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some(&format!("Layer {} post-attn_out {}", i, i)),
-            });
+            // Fabric TDR: yield after attn_out only if accumulated budget exceeded.
+            // attn_out is the heaviest per-layer kernel for Q4_K_M.
+            tdr_yield_if_needed!(format!("layer-{}-attn_out", i), force=false);
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - AttnProj", i)),
@@ -826,13 +866,8 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_ffn_down);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            // Per-kernel submit+poll after ffn_down (heavy for Q4_K_M) to bound time and fix remaining TDR (GROUP A).
-            queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::PollType::wait_indefinitely())
-                .map_err(|_| "GPU TDR during ffn_down".to_string())?;
-            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some(&format!("Layer {} post-ffn_down {}", i, i)),
-            });
+            // Fabric TDR: yield after ffn_down only if accumulated budget exceeded.
+            tdr_yield_if_needed!(format!("layer-{}-ffn_down", i), force=false);
             {
                 // Post-FFW norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -844,14 +879,12 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
 
-            // TDR Mitigation: submit and wait after each layer so the GPU activation buffer
-            // is fully flushed before the next layer reads it.  Without this on D3D12/Windows
-            // the driver may pipeline commands in a way that produces NaN in the residual
-            // stream (observed on RTX 3060 with phi-2 and other non-LLaMA architectures).
-            queue.submit(Some(encoder.finish()));
-            device
-                .poll(wgpu::PollType::wait_indefinitely())
-                .map_err(|_| "GPU device lost or TDR timeout during per-layer wait".to_string())?;
+            // TDR Mitigation: forced yield at layer boundary — ensures activation buffer
+            // is fully flushed before the next layer reads it. This poll is always forced
+            // (layer boundary) so NaN in residual stream cannot occur from pipelining.
+            // The fabric resets accumulated time here.
+            tdr_submit_poll!(format!("layer-{}-boundary", i));
+            tdr_accumulated_ms = 0; // layer boundary = full reset
 
             if trace_prefill_layers {
                 let mut trace_encoder =

@@ -37,8 +37,8 @@ pub fn build_tdr_program() -> ClosureProgram<InferenceFact> {
     // Real version will use TIMESTAMP data + model context.
     prog.register(AlphaKey(10), |fact, _store| {
         // Placeholder: in real impl, compute from timing facts.
-        if let InferenceFact::LayerOutput { layer, .. } = fact {
-            if *layer == 0 {
+        if let InferenceFact::LayerOutput { layer_idx, .. } = fact {
+            if *layer_idx == 0 {
                 vec![InferenceFact::WriteOracleRow { layer_idx: 0 }] // example tie-in
             } else {
                 vec![]

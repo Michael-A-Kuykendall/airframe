@@ -10,15 +10,69 @@
 //! 4. Call saturate() to run d0-engine to fixpoint
 //! 5. Read results from observers
 
-use crate::facts::{alpha_key_of, InferenceFact};
+use crate::facts::{alpha_key_of, InferenceFact, KernelKind, YieldReason, KEY_DISPATCH_TIMING, KEY_TDR_RISK_HIGH};
 use crate::observers::{CandleCompareObserver, LayerStabilityObserver, VaultOracleObserver};
-use d0_engine::{ClosureProgram, ReactiveGraph, RunBudget, RunResult};
+use d0_engine::{AlphaKey, ClosureProgram, ReactiveGraph, RunBudget, RunResult};
+use std::sync::{Arc, Mutex};
+
+/// TDR scheduler — holds mutable timing state between layer dispatches.
+/// Lives inside ObservationSession. After each `saturate()`, check
+/// `scheduler.should_yield` and act accordingly in the inference loop.
+pub struct TdrScheduler {
+    /// Accumulated CPU-side ms since last yield. Reset when yield fires.
+    pub accumulated_ms: u32,
+    /// Budget before a yield is required (default: 1500ms, conservative for Windows TDR ~2s limit)
+    pub budget_ms: u32,
+    /// Set by the YieldNow consequent rule. Inference loop reads this.
+    pub should_yield: bool,
+    /// Last layer that triggered a yield (for logging).
+    pub last_yield_layer: Option<u32>,
+}
+
+impl TdrScheduler {
+    pub fn new(budget_ms: u32) -> Self {
+        Self {
+            accumulated_ms: 0,
+            budget_ms,
+            should_yield: false,
+            last_yield_layer: None,
+        }
+    }
+
+    /// Add timing and determine if yield is needed.
+    /// Returns the YieldNow fact if threshold exceeded.
+    pub fn accumulate(&mut self, layer: u32, elapsed_ms: u32) -> Option<InferenceFact> {
+        self.should_yield = false;
+        self.accumulated_ms += elapsed_ms;
+        if self.accumulated_ms >= self.budget_ms {
+            self.should_yield = true;
+            self.last_yield_layer = Some(layer);
+            self.accumulated_ms = 0; // reset after yield
+            Some(InferenceFact::YieldNow {
+                layer,
+                reason: YieldReason::TdrBudgetExceeded,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Force reset (call after actual GPU poll completes).
+    pub fn reset(&mut self) {
+        self.accumulated_ms = 0;
+        self.should_yield = false;
+    }
+}
 
 /// The live observation session for one inference pass.
 pub struct ObservationSession {
     graph: ReactiveGraph<InferenceFact>,
     vault_oracle: Option<VaultOracleObserver>,
     candle_compare: Option<CandleCompareObserver>,
+    /// TDR scheduler — drives adaptive yield decisions via saturation fabric.
+    pub scheduler: Option<TdrScheduler>,
+    /// Arc-backed live TDR scheduler state (shared with the registered rule closure).
+    _tdr_sched_arc: Option<Arc<Mutex<TdrScheduler>>>,
 }
 
 impl ObservationSession {
@@ -30,7 +84,71 @@ impl ObservationSession {
             graph,
             vault_oracle: None,
             candle_compare: None,
+            scheduler: None,
+            _tdr_sched_arc: None,
         }
+    }
+
+    /// Register the TDR scheduler with the saturation fabric.
+    ///
+    /// `budget_ms`: accumulated CPU-side ms before a YieldNow consequent fires.
+    /// Default 1500ms is conservative for Windows TDR (~2s watchdog).
+    ///
+    /// Registers a rule on KEY_DISPATCH_TIMING. Every DispatchTiming fact
+    /// broadcasts to this rule — zero additional extraction cost per dispatch.
+    /// The rule derives TdrRiskHigh or TdrRiskLow and emits YieldNow when needed.
+    pub fn register_tdr_scheduler(&mut self, budget_ms: u32) {
+        let scheduler = Arc::new(Mutex::new(TdrScheduler::new(budget_ms)));
+        let sched_ref = scheduler.clone();
+
+        self.graph.program.register(
+            AlphaKey(KEY_DISPATCH_TIMING),
+            move |fact, _store| {
+                if let InferenceFact::DispatchTiming { layer, elapsed_ms, .. } = fact {
+                    let mut s = sched_ref.lock().unwrap();
+                    if let Some(yield_fact) = s.accumulate(*layer, *elapsed_ms) {
+                        // Derive TdrRiskHigh + YieldNow consequent
+                        vec![
+                            InferenceFact::TdrRiskHigh { layer: *layer },
+                            yield_fact,
+                        ]
+                    } else {
+                        vec![InferenceFact::TdrRiskLow { layer: *layer }]
+                    }
+                } else {
+                    vec![]
+                }
+            },
+        );
+
+        // Store the scheduler so the inference loop can read should_yield
+        self.scheduler = Some(TdrScheduler::new(budget_ms));
+        // Keep the Arc-based one as the live state, replace the simple one
+        // with a wrapper that reads from the Arc after saturation
+        self._tdr_sched_arc = Some(scheduler);
+    }
+
+    /// After calling saturate(), check if the fabric decided a yield is needed.
+    /// Returns true if the inference loop should submit+poll the GPU now.
+    pub fn should_yield(&self) -> bool {
+        if let Some(arc) = &self._tdr_sched_arc {
+            arc.lock().unwrap().should_yield
+        } else {
+            false
+        }
+    }
+
+    /// Reset the TDR scheduler after the inference loop has completed a poll.
+    pub fn reset_tdr(&self) {
+        if let Some(arc) = &self._tdr_sched_arc {
+            arc.lock().unwrap().reset();
+        }
+    }
+
+    /// Emit a DispatchTiming fact — the primary input to the TDR scheduler.
+    /// Call this after each GPU kernel dispatch+poll in the inference loop.
+    pub fn emit_dispatch_timing(&mut self, layer: u32, kernel: KernelKind, elapsed_ms: u32) {
+        self.emit(InferenceFact::DispatchTiming { layer, kernel, elapsed_ms });
     }
 
     /// Register the VaultOracleObserver.
