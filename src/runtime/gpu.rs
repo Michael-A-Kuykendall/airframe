@@ -477,9 +477,12 @@ impl GpuRuntime {
                 }
             }
 
-            // Compute next logits
+            // Compute next logits — use the full-model chunked path (same as prefill)
+            // to avoid 22 individual layer readbacks per decode token.
+            // run_dequant_request for embedding + run_full_model_with_cache_state
+            // batches all 22 layers into ~3 submits instead of 22.
             let row_offset = self.embd_weight_offset + (next_token as u64 * self.row_bytes);
-            let mut layer_output = self.pipeline.run_dequant_request(
+            let token_embd = self.pipeline.run_dequant_request(
                 &self.device,
                 &self.queue,
                 &self.model,
@@ -487,48 +490,34 @@ impl GpuRuntime {
                 dim,
             );
 
-            for layer_idx in 0..self.spec.n_layer {
-                let layer_offsets = self
-                    .model
-                    .metadata
-                    .get_layer_offsets(layer_idx, self.spec.arch_string())
-                    .ok_or_else(|| format!("Missing offsets for layer {}", layer_idx))?;
-
-                let mut cache = self.kv_cache.lock().unwrap();
-                layer_output = self.pipeline.run_layer_with_cache(
+            let current_pos = {
+                let cache = self.kv_cache.lock().unwrap();
+                cache.get_seq_len()
+            };
+            let (new_hidden, _l21, new_logits) = {
+                let cache_guard = self.kv_cache.lock().unwrap();
+                self.pipeline.run_full_model_prefill_chunked_with_cache_state(
                     &self.device,
                     &self.queue,
                     &self.model,
-                    &mut cache,
-                    layer_idx,
-                    &layer_output,
-                    layer_offsets,
-                    self.layer_params,
-                );
-            }
+                    &token_embd,
+                    Some(&self.output_head_f32),
+                    current_pos,
+                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                    &self.spec,
+                    1, // single token decode
+                )?
+            };
+            let layer_output = new_hidden;
+            logits_vec = new_logits;
 
             // Increment KV cache
             {
                 let mut cache = self.kv_cache.lock().unwrap();
                 cache.increment()?;
             }
-
-            // Final RMSNorm + output head projection
-            let normed = self.pipeline.run_rmsnorm_test(
-                &self.device,
-                &self.queue,
-                &self.model,
-                &layer_output,
-                self.norm_params,
-            );
-            logits_vec = self.pipeline.run_matmul_f32(
-                &self.device,
-                &self.queue,
-                &self.output_head_f32,
-                &normed,
-                self.spec.n_vocab as u32,
-                dim,
-            );
+            // logits_vec already set above from run_full_model_prefill_chunked_with_cache_state
+            let _ = layer_output; // suppress unused warning
         }
 
         Ok(generated_text)
