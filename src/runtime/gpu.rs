@@ -105,19 +105,42 @@ impl GpuRuntime {
 
         let adapter_limits = adapter.limits();
 
-        // Pre-flight: check that the model file fits within the GPU's storage buffer binding
-        // limit before uploading. Older GPUs (e.g. GTX 1050 Ti on some drivers) may report
-        // a lower limit than the model requires, causing a deferred wgpu validation panic.
+        // Pre-flight: check that the model fits within GPU memory constraints.
+        // The bindless architecture splits the model into up to 3 sub-range bindings
+        // of BLOB_CHUNK_BYTES each, so the per-binding limit only needs to hold one chunk.
+        // The overall buffer just needs to fit within max_buffer_size.
         let model_file_size = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
+        let max_buffer_size = adapter_limits.max_buffer_size;
         let max_binding = adapter_limits.max_storage_buffer_binding_size as u64;
-        if model_file_size > max_binding {
+        let chunk_size = crate::backend::bindless::loader::BLOB_CHUNK_BYTES;
+
+        if model_file_size > max_buffer_size {
             return Err(format!(
-                "Model file ({:.0} MB) exceeds this GPU's storage buffer binding limit \
-                 ({:.0} MB). Try a more quantized model or update your GPU drivers.",
+                "Model file ({:.0} MB) exceeds this GPU's max buffer size ({:.0} MB). \
+                 This model cannot fit in VRAM.",
                 model_file_size as f64 / 1_048_576.0,
-                max_binding as f64 / 1_048_576.0,
+                max_buffer_size as f64 / 1_048_576.0,
             )
             .into());
+        }
+
+        if chunk_size > max_binding {
+            return Err(format!(
+                "GPU storage buffer binding limit ({:.0} MB) is too small for the \
+                 bindless chunk size ({:.0} MB). Update your GPU drivers.",
+                max_binding as f64 / 1_048_576.0,
+                chunk_size as f64 / 1_048_576.0,
+            )
+            .into());
+        }
+
+        // Log if using multi-chunk mode for large models
+        if model_file_size > chunk_size {
+            eprintln!(
+                "[GpuRuntime] Large model ({:.0} MB): using {}-chunk bindless split",
+                model_file_size as f64 / 1_048_576.0,
+                (model_file_size + chunk_size - 1) / chunk_size
+            );
         }
 
         let mut limits = wgpu::Limits::downlevel_defaults();
@@ -351,7 +374,7 @@ impl GpuRuntime {
         let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(64);
+            .unwrap_or(512);
         let temp = params.temperature;
         let top_p_val = params.top_p;
         let rep_penalty = params.repetition_penalty;
@@ -458,6 +481,7 @@ impl GpuRuntime {
         // Then assert PrefillBatchReady directly — the embedding extraction
         // is pure data prep, not a reactive concern.
         eprintln!("[ISF] Pre-batching {} token embeddings...", prompt_tokens.len());
+        let t_embed_start = std::time::Instant::now();
         let mut batched_embd: Vec<f32> = Vec::with_capacity(prompt_tokens.len() * dim as usize);
         let mut embedding_cache: std::collections::HashMap<u32, Vec<f32>> = std::collections::HashMap::new();
         for &token_id in &prompt_tokens {
@@ -466,7 +490,8 @@ impl GpuRuntime {
             });
             batched_embd.extend_from_slice(embd);
         }
-        eprintln!("[ISF] Batched {} embeddings ({} unique tokens)", prompt_tokens.len(), embedding_cache.len());
+        eprintln!("[ISF] Batched {} embeddings ({} unique tokens) in {:.2}s", 
+            prompt_tokens.len(), embedding_cache.len(), t_embed_start.elapsed().as_secs_f32());
 
         // Store batched embeddings in ISF state and assert PrefillBatchReady
         {
@@ -493,7 +518,10 @@ impl GpuRuntime {
         });
 
         // Run to fixpoint — prefill then decode chain drives everything
+        let t_fixpoint = std::time::Instant::now();
+        eprintln!("[ISF] Starting run_to_fixpoint...");
         isf.fabric.run_to_fixpoint(airframe_observe::isf::d0_run_budget());
+        eprintln!("[ISF] run_to_fixpoint done in {:.2}s", t_fixpoint.elapsed().as_secs_f32());
 
         let s = state.lock().unwrap();
         eprintln!("[ISF] Done. Generated {} chars, {} decode steps", s.generated_text.len(), s.decode_step);
@@ -539,7 +567,7 @@ impl GpuRuntime {
         let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(64);
+            .unwrap_or(512);
         let (_final_act, _l21, prefill_logits) = {
             let cache_guard = self.kv_cache.lock().unwrap();
             self.pipeline
