@@ -332,6 +332,10 @@ impl GpuRuntime {
         }
 
         // Run prefill through all layers
+        let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(64);
         let (_final_act, _l21, prefill_logits) = {
             let cache_guard = self.kv_cache.lock().unwrap();
             self.pipeline
@@ -344,7 +348,7 @@ impl GpuRuntime {
                     0,
                     Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                     &self.spec,
-                    8,  // Forced small chunk for TDR safety on Q4_K models (1 of 8 test)
+                    prefill_chunk,
                 )?
         };
 
