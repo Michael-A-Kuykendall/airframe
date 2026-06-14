@@ -9,7 +9,15 @@
 
 use d0_engine::AlphaKey;
 
-/// Which GPU kernel produced a timing measurement.
+/// Why generation halted.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum HaltReason {
+    EosToken,
+    MaxTokensReached,
+    ExtraStopToken,
+}
+
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum KernelKind {
     Qkv,
@@ -94,6 +102,47 @@ pub enum InferenceFact {
     /// Inference loop must submit+poll now.
     YieldNow { layer: u32, reason: YieldReason },
 
+    // ── ISF: Inference Saturation Fabric facts ───────────────────────────
+    // These facts drive the generate() loop via D0 reactive graph.
+    // The loop itself disappears — replaced by fact assertion + saturation.
+
+    // Tier 1: Input stream — one fact per prompt token
+    /// A single token from the input prompt. Emitted by generate() before prefill.
+    PromptToken {
+        position: u32,
+        token_id: u32,
+    },
+
+    // Tier 2: Embedding extracted for a token position
+    /// The embedding vector for a token position is ready (dequanted from VRAM).
+    /// Rules assert this after GPU dequant completes.
+    /// Deduplicated: if token_id appears N times, dequant fires once.
+    EmbeddingReady {
+        position: u32,
+        token_id: u32,
+    },
+
+    // Tier 2: All prompt embeddings collected — prefill can fire
+    PrefillBatchReady { token_count: u32 },
+
+    // Tier 2: Prefill complete — first logits available
+    PrefillComplete { position: u32 },
+
+    // Tier 1: One decode step — self-asserted by the fabric after each token
+    /// Unique per step (step field ensures dedup doesn't block re-assertion).
+    DecodeStep {
+        step: u32,
+        token_id: u32,
+    },
+
+    // Tier 3: Decode step produced logits — sample and emit
+    DecodeLogitsReady {
+        step: u32,
+    },
+
+    // Tier 3: Halt the generation loop (EOS hit or max_tokens reached)
+    GenerationHalt { reason: HaltReason },
+
     // New for model family workshop using Saturation Fabric and vault
     FamilyContext {
         family: String,
@@ -131,6 +180,13 @@ pub const KEY_FAMILY_CONTEXT: u64 = 8;
 pub const KEY_PER_TENSOR_OUTPUT: u64 = 9;
 pub const KEY_DISPATCH_TIMING: u64 = 10;
 pub const KEY_TDR_RISK_HIGH: u64 = 11;
+// ISF: Inference Saturation Fabric keys
+pub const KEY_PROMPT_TOKEN: u64 = 12;
+pub const KEY_EMBEDDING_READY: u64 = 13;
+pub const KEY_PREFILL_BATCH_READY: u64 = 14;
+pub const KEY_PREFILL_COMPLETE: u64 = 15;
+pub const KEY_DECODE_STEP: u64 = 16;
+pub const KEY_DECODE_LOGITS_READY: u64 = 17;
 
 /// Map an InferenceFact to its AlphaKey for d0-engine dispatch.
 ///
@@ -150,10 +206,18 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::TdrRiskHigh { .. } => Some(AlphaKey(KEY_TDR_RISK_HIGH)),
         // Tier 2 derived — no further rules fire on these
         InferenceFact::TdrRiskLow { .. } => None,
+        // ISF facts
+        InferenceFact::PromptToken { .. } => Some(AlphaKey(KEY_PROMPT_TOKEN)),
+        InferenceFact::EmbeddingReady { .. } => Some(AlphaKey(KEY_EMBEDDING_READY)),
+        InferenceFact::PrefillBatchReady { .. } => Some(AlphaKey(KEY_PREFILL_BATCH_READY)),
+        InferenceFact::PrefillComplete { .. } => Some(AlphaKey(KEY_PREFILL_COMPLETE)),
+        InferenceFact::DecodeStep { .. } => Some(AlphaKey(KEY_DECODE_STEP)),
+        InferenceFact::DecodeLogitsReady { .. } => Some(AlphaKey(KEY_DECODE_LOGITS_READY)),
         // Tier 3 consequents — don't trigger further rules
         InferenceFact::WriteOracleRow { .. } => None,
         InferenceFact::TriggerCandleCompare { .. } => None,
         InferenceFact::YieldNow { .. } => None,
+        InferenceFact::GenerationHalt { .. } => None,
     }
 }
 
