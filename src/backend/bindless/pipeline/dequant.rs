@@ -71,7 +71,7 @@ impl BindlessPipeline {
         // Loop poll until mapped
         loop {
             device
-                .poll(wgpu::PollType::Poll)
+                .poll(wgpu::PollType::wait_indefinitely())
                 .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
@@ -162,7 +162,7 @@ impl BindlessPipeline {
 
         loop {
             device
-                .poll(wgpu::PollType::Poll)
+                .poll(wgpu::PollType::wait_indefinitely())
                 .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
@@ -258,7 +258,7 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
         loop {
             device
-                .poll(wgpu::PollType::Poll)
+                .poll(wgpu::PollType::wait_indefinitely())
                 .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.unwrap();
@@ -409,7 +409,7 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
         loop {
             device
-                .poll(wgpu::PollType::Poll)
+                .poll(wgpu::PollType::wait_indefinitely())
                 .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.unwrap();

@@ -313,7 +313,9 @@ impl GpuRuntime {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
 
+        eprintln!("[ISF] generate_isf() called, prompt len={}", prompt.len());
         let prompt_tokens = self.tokenizer.encode(prompt, true)?;
+        eprintln!("[ISF] tokenized: {} tokens", prompt_tokens.len());
         let dim = self.spec.n_embd as u32;
         let prompt_len = prompt_tokens.len() as u32;
 
