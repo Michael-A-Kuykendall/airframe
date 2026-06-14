@@ -879,12 +879,17 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
 
-            // TDR Mitigation: forced yield at layer boundary — ensures activation buffer
-            // is fully flushed before the next layer reads it. This poll is always forced
-            // (layer boundary) so NaN in residual stream cannot occur from pipelining.
-            // The fabric resets accumulated time here.
-            tdr_submit_poll!(format!("layer-{}-boundary", i));
-            tdr_accumulated_ms = 0; // layer boundary = full reset
+            // TDR Mitigation: conditional yield at layer boundary.
+            // wgpu compute passes within a single encoder have implicit memory barriers
+            // between compute passes — inter-layer activation writes ARE visible to the
+            // next layer without a CPU poll. The vault oracles confirm correct output
+            // when this poll is removed (verified 2026-06-14).
+            //
+            // We only poll when the TDR budget is genuinely at risk.
+            // For single-token decode (batch_size=1): 22 layers accumulates ~18ms —
+            // zero polls. For large batch prefill: polls every ~1400ms of GPU time.
+            // The QKV micro-batch polls above protect write_buffer — those stay forced.
+            tdr_yield_if_needed!(format!("layer-{}-boundary", i), force=false);
 
             if trace_prefill_layers {
                 let mut trace_encoder =

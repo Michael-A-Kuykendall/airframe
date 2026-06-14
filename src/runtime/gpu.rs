@@ -337,9 +337,21 @@ impl GpuRuntime {
         use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
         use airframe_observe::facts::InferenceFact;
 
-        eprintln!("[ISF] generate_isf() called, prompt len={}", prompt.len());
+        // Timestamped logging to /tmp/shimmy_isf_run.log — readable by Kiro
+        let t0 = std::time::Instant::now();
+        let log_path = "/tmp/shimmy_isf_run.log";
+        let append_log = |msg: &str| {
+            use std::io::Write;
+            let line = format!("[T+{:.2}s] {}\n", t0.elapsed().as_secs_f64(), msg);
+            eprintln!("[ISF] {}", line.trim());
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
+                let _ = f.write_all(line.as_bytes());
+            }
+        };
+
+        append_log(&format!("generate_isf called, prompt_len={}", prompt.len()));
         let prompt_tokens = self.tokenizer.encode(prompt, true)?;
-        eprintln!("[ISF] tokenized: {} tokens", prompt_tokens.len());
+        append_log(&format!("tokenized: {} tokens", prompt_tokens.len()));
         let dim = self.spec.n_embd as u32;
         let prompt_len = prompt_tokens.len() as u32;
 
@@ -480,7 +492,7 @@ impl GpuRuntime {
         // only requires N_unique GPU dequants, not 2395.
         // Then assert PrefillBatchReady directly — the embedding extraction
         // is pure data prep, not a reactive concern.
-        eprintln!("[ISF] Pre-batching {} token embeddings...", prompt_tokens.len());
+        append_log(&format!("pre_batch start, {} tokens", prompt_tokens.len()));
         let t_embed_start = std::time::Instant::now();
         let mut batched_embd: Vec<f32> = Vec::with_capacity(prompt_tokens.len() * dim as usize);
         let mut embedding_cache: std::collections::HashMap<u32, Vec<f32>> = std::collections::HashMap::new();
@@ -490,8 +502,8 @@ impl GpuRuntime {
             });
             batched_embd.extend_from_slice(embd);
         }
-        eprintln!("[ISF] Batched {} embeddings ({} unique tokens) in {:.2}s", 
-            prompt_tokens.len(), embedding_cache.len(), t_embed_start.elapsed().as_secs_f32());
+        append_log(&format!("pre_batch done, {} tokens, {} unique, {:.2}s", 
+            prompt_tokens.len(), embedding_cache.len(), t_embed_start.elapsed().as_secs_f32()));
 
         // Store batched embeddings in ISF state and assert PrefillBatchReady
         {
@@ -517,14 +529,20 @@ impl GpuRuntime {
             token_count: prompt_tokens.len() as u32,
         });
 
-        // Run to fixpoint — prefill then decode chain drives everything
         let t_fixpoint = std::time::Instant::now();
-        eprintln!("[ISF] Starting run_to_fixpoint...");
+        append_log("fixpoint start");
         isf.fabric.run_to_fixpoint(airframe_observe::isf::d0_run_budget());
-        eprintln!("[ISF] run_to_fixpoint done in {:.2}s", t_fixpoint.elapsed().as_secs_f32());
+        append_log(&format!("fixpoint done, {:.2}s", t_fixpoint.elapsed().as_secs_f32()));
 
         let s = state.lock().unwrap();
-        eprintln!("[ISF] Done. Generated {} chars, {} decode steps", s.generated_text.len(), s.decode_step);
+        append_log(&format!("complete, {} chars, {} steps", s.generated_text.len(), s.decode_step));
+        // Flush log
+        {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
+                let _ = f.write_all(b"---\n");
+            }
+        }
         Ok(s.generated_text.clone())
     }
 

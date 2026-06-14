@@ -16,6 +16,7 @@ name = "airframe"
 version = "0.2.5"
 dependencies = [
  "aho-corasick",
+ "airframe-observe",
  "bytemuck",
  "byteorder",
  "chrono",
@@ -34,6 +35,15 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "wgpu",
+]
+
+[[package]]
+name = "airframe-observe"
+version = "0.1.0"
+dependencies = [
+ "d0-engine",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -455,6 +465,10 @@ dependencies = [
  "generic-array",
  "typenum",
 ]
+
+[[package]]
+name = "d0-engine"
+version = "0.1.0"
 
 [[package]]
 name = "digest"

@@ -64,13 +64,31 @@ struct CacheParams {
 @group(0) @binding(7) var<storage, read_write> kv_cache_k: array<f32>;
 @group(0) @binding(8) var<storage, read_write> kv_cache_v: array<f32>;
 @group(0) @binding(9) var<uniform> cache_params: CacheParams;
+@group(0) @binding(10) var<storage, read> blob_1: array<u32>;
+@group(0) @binding(11) var<storage, read> blob_2: array<u32>;
+
+// Multi-chunk blob split constants (matches sh_layer_v1.wgsl and sh_rmsnorm.wgsl).
+// BLOB_CHUNK_BYTES = 2_000_000_000; words = bytes / 4.
+const BLOB_SPLIT_0: u32 = 500000000u;  // 2,000,000,000 bytes / 4 = 500M words
+const BLOB_SPLIT_1: u32 = 1000000000u; // 4,000,000,000 bytes / 4 = 1B words
+
+// Read one u32 word from the correct chunk of the split blob.
+fn read_blob_word(word_idx: u32) -> u32 {
+    if word_idx < BLOB_SPLIT_0 {
+        return gguf_blob[word_idx];
+    } else if word_idx < BLOB_SPLIT_1 {
+        return blob_1[word_idx - BLOB_SPLIT_0];
+    } else {
+        return blob_2[word_idx - BLOB_SPLIT_1];
+    }
+}
 
 // -------------------------------------------------------------------------
 // Q4_K helper functions
 // -------------------------------------------------------------------------
-// Read one byte from the gguf_blob u32 array.
+// Read one byte from the gguf_blob u32 array (multi-chunk aware).
 fn get_byte(byte_pos: u32) -> u32 {
-    let word = gguf_blob[byte_pos / 4u];
+    let word = read_blob_word(byte_pos / 4u);
     return (word >> ((byte_pos % 4u) * 8u)) & 0xFFu;
 }
 
@@ -78,7 +96,7 @@ fn get_byte(byte_pos: u32) -> u32 {
 // byte_pos must be within a single u32 word (i.e. byte_pos % 4 <= 2).
 // This holds for Q4_K block starts (144-byte blocks are 4-byte aligned).
 fn get_f16_at(byte_pos: u32) -> f32 {
-    let word = gguf_blob[byte_pos / 4u];
+    let word = read_blob_word(byte_pos / 4u);
     let bits16 = (word >> ((byte_pos % 4u) * 8u)) & 0xFFFFu;
     return unpack2x16float(bits16).x;
 }
@@ -86,7 +104,7 @@ fn get_f16_at(byte_pos: u32) -> f32 {
 // Read one F32 (4 bytes) from gguf_blob at a 4-byte aligned byte offset.
 // Used for F32 norm weights stored in the GGUF blob.
 fn get_f32_at(byte_pos: u32) -> f32 {
-    return bitcast<f32>(gguf_blob[byte_pos / 4u]);
+    return bitcast<f32>(read_blob_word(byte_pos / 4u));
 }
 
 // Extract the 6-bit scale for sub-block j (0..7) from the 12-byte scale array.
@@ -199,7 +217,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let weight_byte_offset = weight_off_roots[target_stage];
     let layer_idx = offsets.layer_idx;
-    let norm_base = layer_idx * 2u * params.dim; // AttnNorm is first
+    let norm_base = layer_idx * 4u * params.dim; // AttnNorm is slot 0 in 4-slot per-layer layout (attn, ffn, post_attn, post_ffn)
 
     // Dispatch Q4_K matmul for attn_q and attn_k; Q6_K for attn_v
     var dot = 0.0;
@@ -493,10 +511,14 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    // Store attention output to scratch area.
-    // The post-attention norm kernel (main_post_attn_norm) will apply RMS norm
-    // and add the result to the residual.
-    temp_state[temp_base + params.ffn_dim * 2u + idx] = dot;
+    // Add attention output to residual stream.
+    // Gemma-2: store to scratch area — main_post_attn_norm will apply post-norm then add.
+    // All other models: add directly to residual (no post-norm).
+    if (params.post_norm_enabled != 0u) {
+        temp_state[temp_base + params.ffn_dim * 2u + idx] = dot;
+    } else {
+        activation_in[act_base + idx] += dot;
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -734,9 +756,14 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
     }
-    // The post-FFN norm kernel (main_post_ffn_norm) will apply RMS norm
-    // and add the result to the residual.
-    temp_state[temp_base + params.ffn_dim * 2u + idx] = dot;
+    // Add FFN output to residual stream.
+    // Gemma-2: store to scratch area — main_post_ffn_norm will apply post-norm then add.
+    // All other models: add directly to residual (no post-norm).
+    if (params.post_norm_enabled != 0u) {
+        temp_state[temp_base + params.ffn_dim * 2u + idx] = dot;
+    } else {
+        activation_in[act_base + idx] += dot;
+    }
 }
 
 // -------------------------------------------------------------------------

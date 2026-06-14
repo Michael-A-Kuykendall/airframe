@@ -187,7 +187,16 @@ impl InferenceSaturationFabric {
                         let s = state_ref.lock().unwrap();
                         s.batched_embeddings()
                     };
-                    let (_hidden, logits) = prefill(batched, *token_count);
+                    let t_prefill = std::time::Instant::now();
+                    eprintln!("[ISF-RULE] PrefillBatchReady: {} tokens → GPU prefill starting", token_count);
+                    let (hidden, logits) = prefill(batched, *token_count);
+                    let hidden_rms: f32 = if hidden.is_empty() { 0.0 } else {
+                        (hidden.iter().map(|x| x*x).sum::<f32>() / hidden.len() as f32).sqrt()
+                    };
+                    let logits_max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    let logits_nans = logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
+                    eprintln!("[ISF-RULE] GPU prefill done in {:.2}s — hidden_rms={:.4} logits_max={:.3} logits_nans={}/{}", 
+                        t_prefill.elapsed().as_secs_f32(), hidden_rms, logits_max, logits_nans, logits.len());
                     // Increment KV cache once per prompt token
                     for _ in 0..*token_count {
                         kv_inc();
@@ -210,21 +219,29 @@ impl InferenceSaturationFabric {
             let sample = sample_fn.clone();
             let decode = decode_fn.clone();
             program.register(AlphaKey(KEY_PREFILL_COMPLETE), move |_fact, _store| {
-                let (token_id, halt) = {
+                let (token_id, halt, logits_len, logits_max, logits_nans) = {
                     let mut s = state_ref.lock().unwrap();
+                    let logits_len = s.logits.len();
+                    let logits_max = s.logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    let logits_nans = s.logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
                     let token_id = sample(&mut s.logits);
                     let halt = token_id == s.eos_token
                         || s.extra_stop_ids.contains(&token_id);
-                    (token_id, halt)
+                    (token_id, halt, logits_len, logits_max, logits_nans)
                 };
 
+                eprintln!("[ISF-R4] PrefillComplete: logits_len={} max={:.3} nans={} first_token_id={} halt={}",
+                    logits_len, logits_max, logits_nans, token_id, halt);
+
                 if halt {
+                    eprintln!("[ISF-R4] HALT at first token (EOS/stop token)");
                     return vec![InferenceFact::GenerationHalt {
                         reason: HaltReason::EosToken,
                     }];
                 }
 
                 let piece = decode(token_id);
+                eprintln!("[ISF-R4] first token piece={:?} (len={})", piece, piece.len());
                 {
                     let mut s = state_ref.lock().unwrap();
                     s.generated_text.push_str(&piece);
@@ -252,6 +269,7 @@ impl InferenceSaturationFabric {
             let kv_inc = kv_increment_fn.clone();
             program.register(AlphaKey(KEY_DECODE_STEP), move |fact, _store| {
                 if let InferenceFact::DecodeStep { step, token_id } = fact {
+                    let t_decode = std::time::Instant::now();
                     // Get current KV position
                     let current_pos = {
                         let s = state_ref.lock().unwrap();
@@ -259,10 +277,22 @@ impl InferenceSaturationFabric {
                     };
 
                     // Dequant embedding for this token — forward pass
-                    // (In full ISF this also goes through EmbeddingReady,
-                    //  but for decode we call forward directly for now)
                     let (_hidden, mut logits) = forward(vec![*token_id as f32], current_pos);
                     kv_inc();
+
+                    let logits_max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    let logits_nans = logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
+                    let is_empty = logits.is_empty();
+
+                    if *step % 10 == 0 || *step < 3 {
+                        eprintln!("[ISF-DECODE] step={} gpu_forward={:.2}s logits_len={} max={:.3} nans={} in_token={}",
+                            step, t_decode.elapsed().as_secs_f32(), logits.len(), logits_max, logits_nans, token_id);
+                    }
+
+                    if is_empty {
+                        eprintln!("[ISF-DECODE] step={} EMPTY LOGITS — forward pass failed, halting", step);
+                        return vec![InferenceFact::GenerationHalt { reason: HaltReason::MaxTokensReached }];
+                    }
 
                     // Sample next token
                     let next_token = sample(&mut logits);
@@ -288,6 +318,9 @@ impl InferenceSaturationFabric {
 
                     // Decode and emit
                     let piece = decode(next_token);
+                    if *step < 5 {
+                        eprintln!("[ISF-DECODE] step={} next_token={} piece={:?}", step, next_token, piece);
+                    }
                     {
                         let mut s = state_ref.lock().unwrap();
                         s.generated_text.push_str(&piece);

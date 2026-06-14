@@ -75,3 +75,12 @@ fixtures/oracle_*.csv
 # Windows reserved device name artifact (from bad command redirect)
 nul
 .aider*
+
+# Root-level internal dev docs — never committed
+internal/
+
+# VS Code chat chronicle
+.vscode/chat-chronicle.json
+
+# Scratch files
+console-functional-review.md

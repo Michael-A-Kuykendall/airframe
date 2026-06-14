@@ -1,6 +1,20 @@
 # Terminal & Process Discipline
 
-## The Rule
+## CRITICAL: Shell Environment
+
+**The user ALWAYS uses bash (Cygwin/Git Bash on Windows). NEVER use PowerShell syntax.**
+
+- All paths use forward slashes: `/c/Users/micha/repos/...` NOT `C:\Users\micha\repos\...`
+- All commands are bash commands: `cd`, `ls`, `cat`, NOT `Set-Location`, `Get-ChildItem`
+- Path separators are `/` NOT `\`
+- `execute_pwsh` still works but receives bash commands — always write bash syntax
+- When giving the user commands to run in their terminal, use bash syntax always
+
+Examples:
+- CORRECT: `cd /c/Users/micha/repos/shimmy && ./target/release/shimmy.exe serve ...`
+- WRONG: `C:\Users\micha\repos\shimmy\target\release\shimmy.exe serve ...`
+- CORRECT: `cargo build --release --bin shimmy`
+- WRONG: `cargo build --release --bin shimmy` (this one is fine, it's the paths that break)
 
 Before starting ANY background process, call `list_processes` to see what is already running.
 Never start a duplicate. Stop what you don't need immediately after it completes.
