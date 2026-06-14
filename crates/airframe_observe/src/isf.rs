@@ -23,6 +23,11 @@ use d0_engine::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
+/// Re-export RunBudget::default() so callers don't need d0_engine directly.
+pub fn d0_run_budget() -> RunBudget {
+    RunBudget::default()
+}
+
 /// Output from one generate() call.
 #[derive(Debug)]
 pub struct GenerateOutput {

@@ -312,6 +312,7 @@ impl GpuRuntime {
         on_token: Option<Box<dyn FnMut(&str) + Send>>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
+        use airframe_observe::facts::InferenceFact;
 
         eprintln!("[ISF] generate_isf() called, prompt len={}", prompt.len());
         let prompt_tokens = self.tokenizer.encode(prompt, true)?;
@@ -451,6 +452,30 @@ impl GpuRuntime {
             });
 
         // ── Build and run the ISF ─────────────────────────────────────────
+        // Pre-batch all embeddings CPU-side (one dequant per unique token_id).
+        // This is the FSE selector-dedup win: 2395 tokens with many repeats
+        // only requires N_unique GPU dequants, not 2395.
+        // Then assert PrefillBatchReady directly — the embedding extraction
+        // is pure data prep, not a reactive concern.
+        eprintln!("[ISF] Pre-batching {} token embeddings...", prompt_tokens.len());
+        let mut batched_embd: Vec<f32> = Vec::with_capacity(prompt_tokens.len() * dim as usize);
+        let mut embedding_cache: std::collections::HashMap<u32, Vec<f32>> = std::collections::HashMap::new();
+        for &token_id in &prompt_tokens {
+            let embd = embedding_cache.entry(token_id).or_insert_with(|| {
+                dequant_fn(token_id, dim)
+            });
+            batched_embd.extend_from_slice(embd);
+        }
+        eprintln!("[ISF] Batched {} embeddings ({} unique tokens)", prompt_tokens.len(), embedding_cache.len());
+
+        // Store batched embeddings in ISF state and assert PrefillBatchReady
+        {
+            let mut s = state.lock().unwrap();
+            s.embeddings = batched_embd.chunks(dim as usize)
+                .map(|chunk| Some(chunk.to_vec()))
+                .collect();
+        }
+
         let mut isf = InferenceSaturationFabric::new(
             state.clone(),
             dequant_fn,
@@ -462,8 +487,17 @@ impl GpuRuntime {
             dim,
         );
 
-        let output = isf.generate(&prompt_tokens);
-        Ok(output.text)
+        // Assert PrefillBatchReady directly — skip the per-token PromptToken chain
+        isf.fabric.assert(InferenceFact::PrefillBatchReady {
+            token_count: prompt_tokens.len() as u32,
+        });
+
+        // Run to fixpoint — prefill then decode chain drives everything
+        isf.fabric.run_to_fixpoint(airframe_observe::isf::d0_run_budget());
+
+        let s = state.lock().unwrap();
+        eprintln!("[ISF] Done. Generated {} chars, {} decode steps", s.generated_text.len(), s.decode_step);
+        Ok(s.generated_text.clone())
     }
 
 
