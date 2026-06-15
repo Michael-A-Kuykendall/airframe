@@ -122,6 +122,13 @@ pub enum InferenceFact {
         token_id: u32,
     },
 
+    // Tier 1: Embedding dequant request — one per UNIQUE token_id (FSE selector dedup)
+    /// Requests GPU dequantization of the embedding for token_id.
+    /// The FactStore's structural dedup ensures this fires exactly once per token_id,
+    /// regardless of how many positions share that token_id.
+    /// This is the FSE selector-dedup win: N_unique dequants instead of N_total.
+    EmbeddingRequest { token_id: u32 },
+
     // Tier 2: Embedding extracted for a token position
     /// The embedding vector for a token position is ready (dequanted from VRAM).
     /// Rules assert this after GPU dequant completes.
@@ -193,6 +200,7 @@ pub const KEY_DISPATCH_COMPLETED: u64 = 18;
 // ISF: Inference Saturation Fabric keys
 pub const KEY_PROMPT_TOKEN: u64 = 12;
 pub const KEY_EMBEDDING_READY: u64 = 13;
+pub const KEY_EMBEDDING_REQUEST: u64 = 19; // FSE selector: one per unique token_id
 pub const KEY_PREFILL_BATCH_READY: u64 = 14;
 pub const KEY_PREFILL_COMPLETE: u64 = 15;
 pub const KEY_DECODE_STEP: u64 = 16;
@@ -219,6 +227,7 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::TdrRiskLow { .. } => None,
         // ISF facts
         InferenceFact::PromptToken { .. } => Some(AlphaKey(KEY_PROMPT_TOKEN)),
+        InferenceFact::EmbeddingRequest { .. } => Some(AlphaKey(KEY_EMBEDDING_REQUEST)),
         InferenceFact::EmbeddingReady { .. } => Some(AlphaKey(KEY_EMBEDDING_READY)),
         InferenceFact::PrefillBatchReady { .. } => Some(AlphaKey(KEY_PREFILL_BATCH_READY)),
         InferenceFact::PrefillComplete { .. } => Some(AlphaKey(KEY_PREFILL_COMPLETE)),

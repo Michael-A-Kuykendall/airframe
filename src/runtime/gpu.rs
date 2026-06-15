@@ -516,41 +516,20 @@ impl GpuRuntime {
                 let _ = cache.increment();
             });
 
-        // ── Build and run the ISF ─────────────────────────────────────────
-        // Pre-batch all embeddings CPU-side (one dequant per unique token_id).
-        // This is the FSE selector-dedup win: 2395 tokens with many repeats
-        // only requires N_unique GPU dequants, not 2395.
-        // Then assert PrefillBatchReady directly — the embedding extraction
-        // is pure data prep, not a reactive concern.
+        // ── Build and run the ISF (Phase 3: reactive embedding via PromptToken facts) ─
+        // Set prompt_token_ids in state so Rule 2 can check all_embeddings_cached.
+        // Then assert PromptToken facts — Rule 1a derives EmbeddingRequest (unique per token_id),
+        // Rule 1b dequants (exactly once per unique token_id via FactStore dedup),
+        // Rule 2 detects all-ready and asserts PrefillBatchReady.
+        // FSE invariant: N_unique dequants regardless of N_total tokens.
         append_log(&format!("pre_batch start, {} tokens", prompt_tokens.len()));
         let t_embed_start = std::time::Instant::now();
-        let mut batched_embd: Vec<f32> = Vec::with_capacity(prompt_tokens.len() * dim as usize);
-        let mut embedding_cache: std::collections::HashMap<u32, Vec<f32>> = std::collections::HashMap::new();
-        for &token_id in &prompt_tokens {
-            let embd = embedding_cache.entry(token_id).or_insert_with(|| {
-                dequant_fn(token_id, dim)
-            });
-            batched_embd.extend_from_slice(embd);
-        }
-        append_log(&format!("pre_batch done, {} tokens, {} unique, {:.2}s", 
-            prompt_tokens.len(), embedding_cache.len(), t_embed_start.elapsed().as_secs_f32()));
-
-        // Embedding quality check — log first 8 values of first token embedding.
-        // NaN here = wrong dequant shader or bad offset. Non-zero finite = good.
-        if !batched_embd.is_empty() {
-            let first8: Vec<f32> = batched_embd.iter().take(8).cloned().collect();
-            let nan_count = batched_embd[..dim.min(batched_embd.len() as u32) as usize]
-                .iter().filter(|v| v.is_nan() || v.is_infinite()).count();
-            append_log(&format!("embd_check: first8={:?} nan_in_row0={}", first8, nan_count));
-        }
-
-        // Store batched embeddings in ISF state and assert PrefillBatchReady
-        {
+        let unique_count = {
             let mut s = state.lock().unwrap();
-            s.embeddings = batched_embd.chunks(dim as usize)
-                .map(|chunk| Some(chunk.to_vec()))
-                .collect();
-        }
+            s.prompt_token_ids = prompt_tokens.clone();
+            let unique: std::collections::HashSet<u32> = prompt_tokens.iter().cloned().collect();
+            unique.len()
+        };
 
         let mut isf = InferenceSaturationFabric::new(
             state.clone(),
@@ -563,10 +542,17 @@ impl GpuRuntime {
             dim,
         );
 
-        // Assert PrefillBatchReady directly — skip the per-token PromptToken chain
-        isf.fabric.assert(InferenceFact::PrefillBatchReady {
-            token_count: prompt_tokens.len() as u32,
-        });
+        // Assert PromptToken facts — fabric drives embedding dequant reactively.
+        // FactStore dedup ensures EmbeddingRequest fires exactly once per unique token_id.
+        for (pos, &token_id) in prompt_tokens.iter().enumerate() {
+            isf.fabric.assert(InferenceFact::PromptToken {
+                position: pos as u32,
+                token_id,
+            });
+        }
+        append_log(&format!("pre_batch: {} tokens, {} unique, asserted PromptToken facts", 
+            prompt_tokens.len(), unique_count));
+        let _ = t_embed_start; // timing logged after fixpoint
 
         let t_fixpoint = std::time::Instant::now();
         append_log("fixpoint start");

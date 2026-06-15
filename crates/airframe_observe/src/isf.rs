@@ -18,6 +18,7 @@ use crate::facts::{
     alpha_key_of, HaltReason, InferenceFact,
     KEY_DECODE_STEP, KEY_EMBEDDING_READY, KEY_PREFILL_BATCH_READY,
     KEY_PREFILL_COMPLETE, KEY_PROMPT_TOKEN, KEY_DISPATCH_COMPLETED, KEY_TDR_RISK_HIGH,
+    KEY_EMBEDDING_REQUEST,
 };
 use d0_engine::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric};
 use std::collections::HashSet;
@@ -67,6 +68,13 @@ pub struct ISFState {
     pub tdr_budget_ms: u128,
     /// Number of yields performed this generation (for diagnostics).
     pub tdr_yield_count: u32,
+    /// FSE embedding cache: token_id → dequanted f32 embedding.
+    /// Rule 1b (EmbeddingRequest) populates this — exactly one GPU dequant per unique token_id.
+    /// Rule 2 (EmbeddingReady) reads from this to assemble the batched embedding matrix.
+    pub embedding_cache: std::collections::HashMap<u32, Vec<f32>>,
+    /// Token IDs for each prompt position — set by generate_isf before asserting PromptToken facts.
+    /// Needed by Rule 2 to assemble batched_embd from the embedding_cache.
+    pub prompt_token_ids: Vec<u32>,
 }
 
 impl ISFState {
@@ -102,6 +110,8 @@ impl ISFState {
                 budget
             },
             tdr_yield_count: 0,
+            embedding_cache: std::collections::HashMap::new(),
+            prompt_token_ids: Vec::new(),
         }
     }
 
@@ -110,10 +120,31 @@ impl ISFState {
     }
 
     pub fn batched_embeddings(&self) -> Vec<f32> {
-        self.embeddings
-            .iter()
-            .flat_map(|e| e.as_ref().unwrap().iter().cloned())
-            .collect()
+        // If prompt_token_ids is populated (Phase 3 reactive path), assemble from cache.
+        // Otherwise fall back to the pre-filled embeddings Vec (legacy path).
+        if !self.prompt_token_ids.is_empty() && !self.embedding_cache.is_empty() {
+            self.prompt_token_ids
+                .iter()
+                .flat_map(|token_id| {
+                    self.embedding_cache
+                        .get(token_id)
+                        .map(|v| v.iter().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default()
+                })
+                .collect()
+        } else {
+            // Legacy: pre-filled embeddings Vec
+            self.embeddings
+                .iter()
+                .flat_map(|e| e.as_ref().unwrap().iter().cloned())
+                .collect()
+        }
+    }
+
+    /// Returns true when all unique token_ids have been dequanted into embedding_cache.
+    pub fn all_embeddings_cached(&self, token_ids: &[u32]) -> bool {
+        let unique: std::collections::HashSet<u32> = token_ids.iter().cloned().collect();
+        unique.iter().all(|id| self.embedding_cache.contains_key(id))
     }
 }
 
@@ -154,25 +185,66 @@ impl InferenceSaturationFabric {
     ) -> Self {
         let mut program = ClosureProgram::new();
 
-        // ── Rule 1: PromptToken → EmbeddingReady ─────────────────────────
-        // Selector: PromptToken. Deduplicated by token_id via FactStore dedup.
-        // Each unique token_id triggers one GPU dequant; result broadcast to
-        // all positions sharing that token_id.
+        // ── Rule 1a: PromptToken → EmbeddingRequest (per position) ──────────
+        // Each prompt token asserts an EmbeddingRequest for its token_id.
+        // The FactStore's structural dedup ensures EmbeddingRequest { token_id: X }
+        // is only inserted ONCE even if token X appears at 100 positions.
+        // This is the FSE selector-dedup invariant: ∂dequant_cost / ∂duplicate_tokens ≈ 0.
         {
             let state_ref = state.clone();
-            let dequant = dequant_fn.clone();
             program.register(AlphaKey(KEY_PROMPT_TOKEN), move |fact, _store| {
                 if let InferenceFact::PromptToken { position, token_id } = fact {
-                    let embedding = dequant(*token_id, dim);
+                    // Record the position→token_id mapping in state for batch assembly
                     {
                         let mut s = state_ref.lock().unwrap();
                         let pos = *position as usize;
-                        if pos < s.embeddings.len() {
-                            s.embeddings[pos] = Some(embedding);
+                        if pos < s.embeddings.len() && s.embeddings[pos].is_none() {
+                            // Mark position as pending — will be filled by EmbeddingRequest rule
+                            // (leave as None for now; EmbeddingRequest fills by token_id)
                         }
                     }
+                    // Assert EmbeddingRequest — FactStore dedup fires Rule 1b exactly once per token_id
+                    vec![InferenceFact::EmbeddingRequest { token_id: *token_id }]
+                } else {
+                    vec![]
+                }
+            });
+        }
+
+        // ── Rule 1b: EmbeddingRequest → EmbeddingReady (one dequant per unique token_id) ──
+        // Fires exactly once per unique token_id (FactStore dedup blocks duplicates).
+        // This is where the GPU dequant happens — the FSE selector extraction.
+        {
+            let state_ref = state.clone();
+            let dequant = dequant_fn.clone();
+            program.register(AlphaKey(KEY_EMBEDDING_REQUEST), move |fact, _store| {
+                if let InferenceFact::EmbeddingRequest { token_id } = fact {
+                    let embedding = dequant(*token_id, dim);
+                    // Embedding quality check on first token dequanted (diagnostic)
+                    {
+                        let embedding_ref = &embedding;
+                        let nan_count = embedding_ref.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
+                        if nan_count > 0 || embedding_ref.iter().take(4).all(|v| *v == 0.0) {
+                            eprintln!("[ISF-R1b] WARNING token_id={} nan_count={} first4={:?}",
+                                token_id, nan_count, &embedding_ref[..4.min(embedding_ref.len())]);
+                        }
+                    }
+                    // Broadcast: fill ALL positions that have this token_id
+                    {
+                        let mut s = state_ref.lock().unwrap();
+                        for i in 0..s.embeddings.len() {
+                            // We need to know which positions have this token_id.
+                            // ISFState stores embeddings by position but not the reverse map.
+                            // For now: we store the embedding keyed by token_id and let
+                            // the batch assembly step fill positions from it.
+                            // The embeddings Vec is filled by position in the pre-assert step.
+                            let _ = i;
+                        }
+                        // Store embedding in a token_id-keyed cache via a new ISFState field
+                        s.embedding_cache.insert(*token_id, embedding);
+                    }
                     vec![InferenceFact::EmbeddingReady {
-                        position: *position,
+                        position: 0, // sentinel — actual positions filled in Rule 2
                         token_id: *token_id,
                     }]
                 } else {
@@ -181,13 +253,21 @@ impl InferenceSaturationFabric {
             });
         }
 
-        // ── Rule 2: EmbeddingReady → PrefillBatchReady (when all collected) ─
-        // Selector: EmbeddingReady. Each fires; last one triggers batch.
+        // ── Rule 2: EmbeddingReady → PrefillBatchReady (when all unique tokens dequanted) ─
+        // Fires after each EmbeddingReady. When all unique token_ids are in the cache,
+        // asserts PrefillBatchReady. The FSE dedup in Rule 1b ensures this fires at most
+        // N_unique times instead of N_total times.
         {
             let state_ref = state.clone();
             program.register(AlphaKey(KEY_EMBEDDING_READY), move |_fact, _store| {
                 let s = state_ref.lock().unwrap();
-                if s.all_embeddings_ready() {
+                // Check via both paths: reactive (embedding_cache) or legacy (embeddings vec)
+                let all_ready = if !s.prompt_token_ids.is_empty() {
+                    s.all_embeddings_cached(&s.prompt_token_ids.clone())
+                } else {
+                    s.all_embeddings_ready()
+                };
+                if all_ready {
                     vec![InferenceFact::PrefillBatchReady {
                         token_count: s.prompt_len,
                     }]
