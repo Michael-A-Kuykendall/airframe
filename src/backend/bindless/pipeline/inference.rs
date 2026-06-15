@@ -157,6 +157,12 @@ impl BindlessPipeline {
         let ffn_dim = spec.ff_dim as u32;
         let temp_stride = spec.temp_buffer_size as u32;
 
+        // Phase 4a escape hatch: set AIRFRAME_PINGPONG_ACTIVATION=1 to enable ping-pong.
+        // Default off until Steps 3-4 are verified.
+        let use_pingpong = std::env::var("AIRFRAME_PINGPONG_ACTIVATION")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
         let weight_quant_type = model
             .metadata
             .get_tensor_type("blk.0.attn_q.weight")
@@ -179,12 +185,34 @@ impl BindlessPipeline {
         let batch_size = (input_embd.len() as u32) / dim;
         // A. Activation (Residual Stream) - Init with Embeddings
         let activation_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Activation"),
+            label: Some("Activation A"),
             contents: bytemuck::cast_slice(input_embd),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
         });
+
+        // A2. Activation B (Ping-Pong partner).
+        // Only created when ping-pong is active to avoid wasting VRAM on the old path.
+        // When use_pingpong=false, activation_buffer_b is a dummy zero-byte buffer
+        // that is never actually bound or used.
+        let activation_buffer_b = if use_pingpong {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Activation B (Ping-Pong)"),
+                contents: bytemuck::cast_slice(input_embd), // same initial residual
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            })
+        } else {
+            // Dummy 1-byte buffer — never bound, just satisfies the type system.
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Activation B (disabled)"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            })
+        };
 
         // B. Temp Buffer
         // Needs to hold FFN Gate + Up + scratch space per token
@@ -259,6 +287,9 @@ impl BindlessPipeline {
         // Patent Notice: FSE + D0 Saturation Fabric scheduling.
         // Pending patent by Michael A. Kuykendall. All rights reserved.
         let mut tdr = TdrScheduler::new(device, queue, "Full Model");
+        let tdr_log = std::env::var("AIRFRAME_LOG_TDR_POLLS")
+            .map(|v| v == "1")
+            .unwrap_or(false);
 
         // D. Output Logits
         // Only computed for the LAST token in the sequence (usually).
@@ -332,7 +363,11 @@ impl BindlessPipeline {
         });
 
         // 2. Prepare Layers (Offsets & BindGroups)
-        let mut layer_bind_groups = Vec::new();
+        // For ping-pong: two bind group arrays — one with activation_buffer (A) at binding 1,
+        // one with activation_buffer_b (B). Layer i uses set_a when i%2==0, set_b when i%2==1.
+        // For the old path (use_pingpong=false): only set_a is used; set_b is empty.
+        let mut layer_bind_groups = Vec::new();   // set A: activation_buffer at binding 1
+        let mut layer_bind_groups_b = Vec::new(); // set B: activation_buffer_b at binding 1
         let mut _offset_buffers = Vec::new(); // Keep alive
         let mut _params_buffers: Vec<wgpu::Buffer> = Vec::new(); // Keep alive
         let mut _layer_params: Vec<LayerParams> = Vec::new(); // Per-layer params for QKV chunking
@@ -344,8 +379,6 @@ impl BindlessPipeline {
                 ..params_base
             };
             if spec.arch_string() == "qwen3" {
-                // For Qwen3 GGUF in the test collection, attn_q.weight (and k) tensors have dim1 = 2 * n_embd (packed Q/K layout).
-                // Pass the stored K so Q4K qkv uses correct blocks_per_row/row stride for the stored tensor (fixes q=0 rms, post nonfin).
                 let packed_k = 2 * dim;
                 layer_params_i.q_weight_k = packed_k;
                 layer_params_i.k_weight_k = packed_k;
@@ -372,75 +405,88 @@ impl BindlessPipeline {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("Layer {} BindGroup", i)),
-                layout: &self.layer_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: model.blob_binding_0(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: activation_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: temp_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: params_buffer_i.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: model
-                            .preflight
-                            .as_ref()
-                            .unwrap()
-                            .norm_bank_buffer
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: model
-                            .preflight
-                            .as_ref()
-                            .unwrap()
-                            .rope_cache_buffer
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: kv_buffer_k_ref.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: kv_buffer_v_ref.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: cache_params_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: model.blob_binding_1(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 11,
-                        resource: model.blob_binding_2(),
-                    },
-                ],
-            });
+            // Build bind group with a specific activation buffer at binding 1.
+            // This closure lets us create both A and B sets without duplicating all entries.
+            let make_bg = |act_buf: &wgpu::Buffer, label: &str| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(label),
+                    layout: &self.layer_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: model.blob_binding_0(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: act_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: temp_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: params_buffer_i.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .norm_bank_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .rope_cache_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: kv_buffer_k_ref.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: kv_buffer_v_ref.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 9,
+                            resource: cache_params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 10,
+                            resource: model.blob_binding_1(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 11,
+                            resource: model.blob_binding_2(),
+                        },
+                    ],
+                })
+            };
+
+            // Set A: activation_buffer (always built — used by old path + even layers in pingpong)
+            let bg_a = make_bg(&activation_buffer, &format!("Layer {} BG-A", i));
+
+            // Set B: activation_buffer_b (only built when pingpong is active)
+            if use_pingpong {
+                let bg_b = make_bg(&activation_buffer_b, &format!("Layer {} BG-B", i));
+                layer_bind_groups_b.push(bg_b);
+            }
 
             _offset_buffers.push(buf);
             _params_buffers.push(params_buffer_i);
             _layer_params.push(layer_params_i);
-            layer_bind_groups.push(bg);
+            layer_bind_groups.push(bg_a);
         }
 
         // 3. Final Norm
@@ -838,6 +884,12 @@ impl BindlessPipeline {
             }
 
             // TDR: conditional yield at layer boundary.
+            // NOTE: this yield is still required even with ping-pong because the WGSL shaders
+            // do in-place residual adds (read_write activation_in) — the ping-pong swap
+            // happens at the bind group level but within a single encoder, wgpu on D3D12
+            // may not emit UAV barriers between passes on the same read_write buffer.
+            // Step 4 (remove this yield) requires the WGSL to use separate read/write bindings.
+            // Until then, keep this yield for correctness on DeepSeek Q4K.
             {
                 let label = format!("layer-{}-boundary", i);
                 tdr.yield_if_needed(&label)?;
@@ -897,6 +949,11 @@ impl BindlessPipeline {
         }
 
         // Snapshot h20 (post-layer-loop, pre-final-norm)
+        if tdr_log {
+            eprintln!("[TDR-STATS] batch_size={} layers={} total_yields={} forced_per_layer_min={}",
+                batch_size, layer_count, tdr.yield_count,
+                if layer_count > 0 { tdr.yield_count / layer_count as u32 } else { 0 });
+        }
         tdr.encoder.copy_buffer_to_buffer(
             &activation_buffer,
             last_token_offset,
