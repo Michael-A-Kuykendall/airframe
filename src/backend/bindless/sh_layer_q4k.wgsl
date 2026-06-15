@@ -461,6 +461,13 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (running_sum > 0.0) { context_val /= running_sum; }
     temp_state[temp_base + idx] = context_val;
+    if (global_id.x == 0u && global_id.y == 0u) {
+        let s0 = temp_state[temp_base + 0];
+        let s1 = temp_state[temp_base + 1];
+        let s2 = temp_state[temp_base + 2];
+        let s3 = temp_state[temp_base + 3];
+        /* DIAG attn_out via temp_state */
+    }
 }
 
 // -------------------------------------------------------------------------
