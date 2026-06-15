@@ -496,7 +496,8 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // row_idx = head * head_dim + dim_in_head (0..255 for 4 heads * 64 dims)
         let head = row_idx / params.head_dim;
         let dim_in_head = row_idx % params.head_dim;
-        let cache_idx = ((cache_params.current_pos + token_idx) * params.head_count_kv * params.head_dim)
+        // batch_offset positions this chunk correctly within the prefill sequence.
+        let cache_idx = ((cache_params.current_pos + params.batch_offset + token_idx) * params.head_count_kv * params.head_dim)
                       + (head * params.head_dim)
                       + dim_in_head;
         kv_cache_k[cache_idx] = dot; 
@@ -504,7 +505,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // V -> V cache
         let head = row_idx / params.head_dim;
         let dim_in_head = row_idx % params.head_dim;
-        let cache_idx = ((cache_params.current_pos + token_idx) * params.head_count_kv * params.head_dim)
+        let cache_idx = ((cache_params.current_pos + params.batch_offset + token_idx) * params.head_count_kv * params.head_dim)
                       + (head * params.head_dim)
                       + dim_in_head;
         kv_cache_v[cache_idx] = dot;
