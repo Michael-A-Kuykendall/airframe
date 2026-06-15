@@ -2,6 +2,7 @@
 // TODO: break run_full_model_prefill_chunked_with_cache_state into a separate chunking helper once prefill chunking is the default path.
 use super::super::loader::BindlessModel;
 use super::*;
+use crate::backend::tdr::TdrScheduler;
 use crate::core::routing::ModelRoutePlan;
 use wgpu::util::DeviceExt;
 
@@ -249,20 +250,15 @@ impl BindlessPipeline {
             .unwrap_or(1)
             .clamp(1, batch_size.max(1));
 
-        // ── Saturation Fabric TDR accumulator ────────────────────────────────
-        // Implements the saturation fabric scheduling invariant for GPU dispatch:
-        // accumulated CPU-side time drives yield decisions, not layer count.
-        // Budget: SHIMMY_TDR_BUDGET_MS env var (default 1400ms, conservative for
-        // Windows TDR ~2s watchdog). Accumulates across kernels; resets on yield.
+        // ── TDR Scheduler ────────────────────────────────────────────────────
+        // TdrScheduler owns the command encoder and tracks accumulated GPU time.
+        // It replaces the scattered tdr_submit_poll! / tdr_yield_if_needed! macros
+        // with clean, testable methods. Platform-aware budget (1400ms Windows,
+        // 30000ms Linux/macOS). Override with SHIMMY_TDR_BUDGET_MS.
         //
-        // Patent Notice: This scheduling model implements Fused Semantic Execution
-        // (FSE) and D0 Saturation Fabric — selector-first, single-pass, reactive.
+        // Patent Notice: FSE + D0 Saturation Fabric scheduling.
         // Pending patent by Michael A. Kuykendall. All rights reserved.
-        let tdr_budget_ms: u128 = std::env::var("SHIMMY_TDR_BUDGET_MS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1400u128);
-        let mut tdr_accumulated_ms: u128 = 0;
+        let mut tdr = TdrScheduler::new(device, queue, "Full Model");
 
         // D. Output Logits
         // Only computed for the LAST token in the sequence (usually).
@@ -633,44 +629,8 @@ impl BindlessPipeline {
             }))
         };
 
-        // 5. Command Encoding
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Full Model"),
-        });
-
-        // ── Saturation Fabric TDR macros ─────────────────────────────────────
-        // Defined here so they can capture `encoder` (mutable, moved on finish()).
-        // tdr_budget_ms and tdr_accumulated_ms are declared earlier in this fn.
-
-        /// Submit the current encoder, poll GPU, time the round-trip, create new encoder.
-        macro_rules! tdr_submit_poll {
-            ($label:expr) => {{
-                let t0 = std::time::Instant::now();
-                queue.submit(Some(encoder.finish()));
-                device
-                    .poll(wgpu::PollType::wait_indefinitely())
-                    .map_err(|_| format!("GPU TDR during {}", $label))?;
-                let elapsed = t0.elapsed().as_millis();
-                tdr_accumulated_ms += elapsed;
-                encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some(&format!("post-{}", $label)),
-                });
-                elapsed
-            }};
-        }
-
-        /// Yield only if accumulated time >= TDR budget. Always yields on force=true.
-        macro_rules! tdr_yield_if_needed {
-            ($label:expr, force=$force:expr) => {{
-                if $force || tdr_accumulated_ms >= tdr_budget_ms {
-                    let _elapsed = tdr_submit_poll!($label);
-                    tdr_accumulated_ms = 0; // reset after any yield
-                    true
-                } else {
-                    false
-                }
-            }};
-        }
+        // 5. Command Encoding — managed by TdrScheduler (see tdr above).
+        // The initial encoder was created by TdrScheduler::new().
 
         let wg_dim = dim.div_ceil(256);
         let ffn_total = ffn_dim * 2; // Gate + Up need this many threads
@@ -748,7 +708,7 @@ impl BindlessPipeline {
             };
 
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - AttnNorm", i)),
                     timestamp_writes: None,
                 });
@@ -770,16 +730,13 @@ impl BindlessPipeline {
                         batch_count: this_chunk,
                         ..params_layer
                     };
-                    // Submit all pending work in the current encoder first
-                    let _e1 = tdr_submit_poll!(format!("Layer {} QKV pre-chunk {}", i, qkv_offset));
+                    // Submit all pending work before write_buffer (required ordering)
+                    let label_pre = format!("Layer {} QKV pre-chunk {}", i, qkv_offset);
+                    tdr.force_yield(&label_pre)?;
                     // Update the params buffer in place
                     queue.write_buffer(params_buf_i, 0, bytemuck::bytes_of(&params_chunk));
-                    // New encoder for this chunk
-                    encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some(&format!("Layer {} QKV chunk {}", i, qkv_offset)),
-                    });
                     {
-                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                             label: Some(&format!("Layer {} QKV [{}/{}]", i, qkv_offset, batch_size)),
                             timestamp_writes: None,
                         });
@@ -787,17 +744,15 @@ impl BindlessPipeline {
                         cpass.set_pipeline(pipe_qkv);
                         cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
                     }
-                    let _e2 = tdr_submit_poll!(format!("Layer {} QKV chunk {}", i, qkv_offset));
+                    let label_chunk = format!("Layer {} QKV chunk {}", i, qkv_offset);
+                    tdr.force_yield(&label_chunk)?;
                     // Restore full params for remaining kernels
                     queue.write_buffer(params_buf_i, 0, bytemuck::bytes_of(&params_layer));
-                    encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some(&format!("Layer {} post-QKV chunk {}", i, qkv_offset)),
-                    });
                     qkv_offset += this_chunk;
                 }
             }
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - QKNorm", i)),
                     timestamp_writes: None,
                 });
@@ -806,7 +761,7 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_qknorm, batch_size, 1);
             }
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - AttnOut", i)),
                     timestamp_writes: None,
                 });
@@ -814,11 +769,13 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_attn_out);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            // Fabric TDR: yield after attn_out only if accumulated budget exceeded.
-            // attn_out is the heaviest per-layer kernel for Q4_K_M.
-            tdr_yield_if_needed!(format!("layer-{}-attn_out", i), force=false);
+            // TDR: yield after attn_out only if accumulated budget exceeded.
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let label = format!("layer-{}-attn_out", i);
+                tdr.yield_if_needed(&label)?;
+            }
+            {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - AttnProj", i)),
                     timestamp_writes: None,
                 });
@@ -828,7 +785,7 @@ impl BindlessPipeline {
             }
             {
                 // Post-attention norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - PostAttnNorm", i)),
                     timestamp_writes: None,
                 });
@@ -838,18 +795,16 @@ impl BindlessPipeline {
             }
             if params_layer.quant_type != 12u32 {
                 // For Q4K, ffn_norm is inside the Q4K ffn_proj kernel; skip V1 to avoid double norm.
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - FFNNorm", i)),
                     timestamp_writes: None,
                 });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_ffn_norm);
-                // One workgroup per token: cooperative reduction inside the workgroup.
-                // X=1 because all 256 threads share one token via local_invocation_id.
                 cpass.dispatch_workgroups(1, batch_size, 1);
             }
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - FFNProj", i)),
                     timestamp_writes: None,
                 });
@@ -858,7 +813,7 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_ffn, batch_size, 1);
             }
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - FFNDown", i)),
                     timestamp_writes: None,
                 });
@@ -866,11 +821,14 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_ffn_down);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            // Fabric TDR: yield after ffn_down only if accumulated budget exceeded.
-            tdr_yield_if_needed!(format!("layer-{}-ffn_down", i), force=false);
+            // TDR: yield after ffn_down only if accumulated budget exceeded.
+            {
+                let label = format!("layer-{}-ffn_down", i);
+                tdr.yield_if_needed(&label)?;
+            }
             {
                 // Post-FFW norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - PostFfwNorm", i)),
                     timestamp_writes: None,
                 });
@@ -879,19 +837,14 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
 
-            // TDR Mitigation: conditional yield at layer boundary.
-            // wgpu compute passes within a single encoder have implicit memory barriers
-            // between compute passes — inter-layer activation writes ARE visible to the
-            // next layer without a CPU poll. The vault oracles confirm correct output
-            // when this poll is removed (verified 2026-06-14).
-            //
-            // We only poll when the TDR budget is genuinely at risk.
-            // For single-token decode (batch_size=1): 22 layers accumulates ~18ms —
-            // zero polls. For large batch prefill: polls every ~1400ms of GPU time.
-            // The QKV micro-batch polls above protect write_buffer — those stay forced.
-            tdr_yield_if_needed!(format!("layer-{}-boundary", i), force=false);
+            // TDR: conditional yield at layer boundary.
+            {
+                let label = format!("layer-{}-boundary", i);
+                tdr.yield_if_needed(&label)?;
+            }
 
             if trace_prefill_layers {
+                // Layer trace readback — uses its own encoder, separate from tdr.
                 let mut trace_encoder =
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some(&format!("Layer {} Trace Readback", i)),
@@ -909,6 +862,7 @@ impl BindlessPipeline {
                     .map_err(|_| {
                         "GPU device lost or TDR timeout during layer trace readback".to_string()
                     })?;
+                tdr.reset_accumulator(); // readback did its own submit+poll
 
                 let trace_slice = pre_norm_buffer.slice(..);
                 let (tx_trace, rx_trace) = std::sync::mpsc::channel();
@@ -937,18 +891,13 @@ impl BindlessPipeline {
                 pre_norm_buffer.unmap();
             }
 
-            encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some(&format!("Layer {} Cont", i)),
-            });
-
             if trace_prefill_layers {
                 eprintln!("[PREFILL-LAYER] complete layer={}", i);
             }
         }
 
         // Snapshot h20 (post-layer-loop, pre-final-norm)
-        // Copy only the LAST token's state for validation
-        encoder.copy_buffer_to_buffer(
+        tdr.encoder.copy_buffer_to_buffer(
             &activation_buffer,
             last_token_offset,
             &pre_norm_buffer,
@@ -959,8 +908,7 @@ impl BindlessPipeline {
         // Final Norm — separate pass so wgpu inserts a memory barrier before the
         // LM Head pass reads from temp_buffer (same region that norm writes).
         if disable_output_norm {
-            // Diagnostic mode: feed LM head directly from the last-token activation.
-            encoder.copy_buffer_to_buffer(
+            tdr.encoder.copy_buffer_to_buffer(
                 &activation_buffer,
                 last_token_offset,
                 &temp_buffer,
@@ -968,7 +916,7 @@ impl BindlessPipeline {
                 (dim as u64) * 4u64,
             );
         } else {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Final Norm"),
                 timestamp_writes: None,
             });
@@ -976,9 +924,9 @@ impl BindlessPipeline {
             cpass.set_pipeline(&self.rmsnorm_pipeline);
             cpass.dispatch_workgroups(wg_norm, 1, 1);
         }
-        // LM Head — begins a new compute pass, guaranteeing visibility of the norm output.
+        // LM Head
         {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("LM Head"),
                 timestamp_writes: None,
             });
@@ -1005,9 +953,9 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
 
-        encoder.copy_buffer_to_buffer(&temp_buffer, 0, &l21_buffer, 0, (dim as u64) * 4);
-        encoder.copy_buffer_to_buffer(&logits_buffer, 0, &staging_buffer, 0, output_size);
-        queue.submit(Some(encoder.finish()));
+        tdr.encoder.copy_buffer_to_buffer(&temp_buffer, 0, &l21_buffer, 0, (dim as u64) * 4);
+        tdr.encoder.copy_buffer_to_buffer(&logits_buffer, 0, &staging_buffer, 0, output_size);
+        queue.submit(Some(tdr.encoder.finish()));
 
         let pre_norm_slice = pre_norm_buffer.slice(..);
         let (tx_pre, rx_pre) = std::sync::mpsc::channel();
