@@ -489,6 +489,80 @@ impl BindlessPipeline {
             layer_bind_groups.push(bg_a);
         }
 
+        // 2b. Pre-build QKV chunk bind groups (Step 5: eliminate QKV forced polls).
+        //
+        // The QKV micro-batch loop currently patches `params_buffer_i` via write_buffer
+        // for each chunk's batch_offset/batch_count, requiring 2 forced yields per chunk.
+        // Instead: pre-build one params buffer + bind group per (layer, chunk_offset).
+        // The layer loop then just selects the right pre-built bind group — no write_buffer,
+        // no forced yields for QKV.
+        //
+        // _qkv_chunk_params_buffers[layer][chunk_idx] = pre-built params buffer
+        // _qkv_chunk_bind_groups[layer][chunk_idx]   = pre-built bind group for that chunk
+        //
+        // For decode (batch_size=1, qkv_chunk=1): 1 chunk per layer = N_layers entries.
+        // For prefill (batch_size=N, qkv_chunk=512): ceil(N/512) chunks per layer.
+        let n_qkv_chunks = ((batch_size + qkv_chunk - 1) / qkv_chunk) as usize;
+        let mut _qkv_chunk_params_buffers: Vec<Vec<wgpu::Buffer>> = Vec::with_capacity(layer_count);
+        let mut _qkv_chunk_bind_groups: Vec<Vec<wgpu::BindGroup>> = Vec::with_capacity(layer_count);
+
+        for i in 0..layer_count {
+            let compiled = &model.metadata.compiled_layers[i];
+            let layer_params_base = _layer_params[i];
+            let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
+                if let Some((kv_k_layers, kv_v_layers)) = kv_state {
+                    (&kv_k_layers[i], &kv_v_layers[i])
+                } else {
+                    let (local_k, local_v) = &local_kv_storage_per_layer
+                        .as_ref()
+                        .expect("local KV storage missing")[i];
+                    (local_k, local_v)
+                };
+            let offsets_buf = &_offset_buffers[i];
+
+            let mut layer_chunk_params: Vec<wgpu::Buffer> = Vec::with_capacity(n_qkv_chunks);
+            let mut layer_chunk_bgs: Vec<wgpu::BindGroup> = Vec::with_capacity(n_qkv_chunks);
+
+            let mut qkv_offset: u32 = 0;
+            while qkv_offset < batch_size {
+                let this_chunk = (batch_size - qkv_offset).min(qkv_chunk);
+                let chunk_params = LayerParams {
+                    batch_offset: qkv_offset,
+                    batch_count: this_chunk,
+                    ..layer_params_base
+                };
+                let chunk_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("L{}-QKV-chunk{}-Params", i, qkv_offset)),
+                    contents: bytemuck::bytes_of(&chunk_params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let chunk_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("L{}-QKV-chunk{}-BG", i, qkv_offset)),
+                    layout: &self.layer_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: model.blob_binding_0() },
+                        wgpu::BindGroupEntry { binding: 1, resource: activation_buffer.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: temp_buffer.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 3, resource: offsets_buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 4, resource: chunk_params_buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 5, resource: model.preflight.as_ref().unwrap().norm_bank_buffer.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 7, resource: kv_buffer_k_ref.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 8, resource: kv_buffer_v_ref.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 9, resource: cache_params_buffer.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 10, resource: model.blob_binding_1() },
+                        wgpu::BindGroupEntry { binding: 11, resource: model.blob_binding_2() },
+                    ],
+                });
+                layer_chunk_params.push(chunk_params_buf);
+                layer_chunk_bgs.push(chunk_bg);
+                qkv_offset += this_chunk;
+            }
+            let _ = compiled; // used above in outer loop
+            _qkv_chunk_params_buffers.push(layer_chunk_params);
+            _qkv_chunk_bind_groups.push(layer_chunk_bgs);
+        }
+
         // 3. Final Norm
         let norm_weight = model
             .metadata
@@ -762,39 +836,31 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            // QKV: micro-batched to avoid Windows TDR on Q4_K_M models.
-            // Each chunk dispatches `qkv_chunk` tokens, submits, and polls before the next.
-            // The params buffer is updated via write_buffer — no new bind group needed.
+            // QKV: micro-batched to avoid TDR on large batch prefill.
+            // Step 5: uses pre-built per-chunk bind groups — no write_buffer, no forced yields.
             {
-                let params_buf_i = &_params_buffers[i];
+                let chunk_bgs = &_qkv_chunk_bind_groups[i];
                 let mut qkv_offset: u32 = 0;
+                let mut chunk_idx: usize = 0;
                 while qkv_offset < batch_size {
                     let this_chunk = (batch_size - qkv_offset).min(qkv_chunk);
-                    // Patch batch_offset + batch_count into the layer params buffer
-                    let params_chunk = LayerParams {
-                        batch_offset: qkv_offset,
-                        batch_count: this_chunk,
-                        ..params_layer
-                    };
-                    // Submit all pending work before write_buffer (required ordering)
-                    let label_pre = format!("Layer {} QKV pre-chunk {}", i, qkv_offset);
-                    tdr.force_yield(&label_pre)?;
-                    // Update the params buffer in place
-                    queue.write_buffer(params_buf_i, 0, bytemuck::bytes_of(&params_chunk));
+                    // Use pre-built bind group — no write_buffer, no forced yield needed.
                     {
                         let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                             label: Some(&format!("Layer {} QKV [{}/{}]", i, qkv_offset, batch_size)),
                             timestamp_writes: None,
                         });
-                        cpass.set_bind_group(0, bg, &[]);
+                        cpass.set_bind_group(0, &chunk_bgs[chunk_idx], &[]);
                         cpass.set_pipeline(pipe_qkv);
                         cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
                     }
-                    let label_chunk = format!("Layer {} QKV chunk {}", i, qkv_offset);
-                    tdr.force_yield(&label_chunk)?;
-                    // Restore full params for remaining kernels
-                    queue.write_buffer(params_buf_i, 0, bytemuck::bytes_of(&params_layer));
+                    // TDR yield between chunks — only if budget exceeded (no longer forced).
+                    {
+                        let label = format!("layer-{}-qkv-chunk-{}", i, qkv_offset);
+                        tdr.yield_if_needed(&label)?;
+                    }
                     qkv_offset += this_chunk;
+                    chunk_idx += 1;
                 }
             }
             {
