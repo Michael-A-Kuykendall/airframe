@@ -63,9 +63,14 @@ impl BindlessMetadata {
                 GgufValue::String(v)
                     if key.contains("architecture")
                         || key.contains("name")
-                        || key.contains("model") =>
+                        || key.contains("model")
+                        || key == "tokenizer.chat_template" =>
                 {
-                    println!("[Metadata] {} = {}", key, v);
+                    if key == "tokenizer.chat_template" {
+                        println!("[Metadata] {} present ({} chars)", key, v.len());
+                    } else {
+                        println!("[Metadata] {} = {}", key, v);
+                    }
                 }
                 _ => {}
             }

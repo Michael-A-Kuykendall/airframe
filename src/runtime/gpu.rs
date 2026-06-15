@@ -818,6 +818,12 @@ impl GpuRuntime {
         &self.spec
     }
 
+    /// Returns the Jinja2 chat template from the model's GGUF metadata, if present.
+    /// Use shimmyjinja::render_chat_template() to apply it.
+    pub fn chat_template(&self) -> Option<&str> {
+        self.spec.chat_template.as_deref()
+    }
+
     fn load_output_head_f32(
         model_path: &str,
         gpu_model: &BindlessModel,

@@ -110,6 +110,10 @@ pub struct ModelSpec {
     pub arch: ModelArch,
     pub file_type: GgufFileType,
     pub model_name: String,
+    /// Jinja2 chat template string from GGUF metadata (tokenizer.chat_template).
+    /// Present on most instruct-tuned models. None for base models.
+    /// Use shimmyjinja::render_chat_template() to apply it.
+    pub chat_template: Option<String>,
 
     // Buffer sizing (computed from dims)
     pub temp_buffer_size: usize, // max(n_embd, ff_dim*2 + n_embd) rounded up
@@ -175,6 +179,7 @@ impl ModelSpec {
         let mut attn_softcap: Option<f32> = None;
         let mut final_softcap: Option<f32> = None;
         let mut head_dim_expl: Option<usize> = None;
+        let mut chat_template: Option<String> = None;
 
         // Single pass: dispatch on exact key for `general.*` / `tokenizer.*`,
         // or on the suffix after the first `.` for arch-prefixed keys.
@@ -198,6 +203,11 @@ impl ModelSpec {
                 "tokenizer.ggml.tokens" => {
                     if let GgufValue::ArrayLen(len) = value {
                         n_vocab = Some(*len);
+                    }
+                }
+                "tokenizer.chat_template" => {
+                    if let GgufValue::String(s) = value {
+                        chat_template = Some(s.clone());
                     }
                 }
                 _ => {
@@ -317,6 +327,7 @@ impl ModelSpec {
             arch,
             file_type,
             model_name,
+            chat_template,
             temp_buffer_size: 0,
             kv_cache_size_per_layer: 0,
         }
@@ -348,6 +359,7 @@ impl ModelSpec {
             arch: ModelArch::Llama,
             file_type: GgufFileType::Q4_0,
             model_name: "tinyllama_tinyllama-1.1b-chat-v1.0".to_string(),
+            chat_template: None,
             temp_buffer_size: 0,
             kv_cache_size_per_layer: 0,
         }
@@ -629,6 +641,7 @@ mod tests {
             arch: ModelArch::Llama,
             file_type: GgufFileType::F32,
             model_name: "test".to_string(),
+            chat_template: None,
             temp_buffer_size: 0,
             kv_cache_size_per_layer: 0,
         }

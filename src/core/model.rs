@@ -832,6 +832,7 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
         arch,
         file_type: file_type_val,
         model_name,
+        chat_template: None,
         temp_buffer_size: 0,
         kv_cache_size_per_layer: 0,
     }
