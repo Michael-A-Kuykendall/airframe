@@ -154,6 +154,22 @@ impl<'d> TdrScheduler<'d> {
     pub fn reset_accumulator(&mut self) {
         self.accumulated_ms = 0;
     }
+
+    /// Start a wall-clock timer for a GPU dispatch segment.
+    /// Call `record_wall_elapsed(start)` after the segment to accumulate
+    /// CPU-side elapsed time without doing a GPU round-trip.
+    /// This feeds the TDR budget check without requiring TIMESTAMP_QUERY.
+    pub fn wall_start() -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    /// Record the wall-clock time since `start` into the accumulator.
+    /// Returns true if a yield is now needed (accumulated >= budget).
+    pub fn record_wall_elapsed(&mut self, start: std::time::Instant) -> bool {
+        let elapsed = start.elapsed().as_millis();
+        self.accumulated_ms += elapsed;
+        self.accumulated_ms >= self.budget_ms
+    }
 }
 
 #[cfg(test)]

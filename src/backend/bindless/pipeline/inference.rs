@@ -838,13 +838,17 @@ impl BindlessPipeline {
             }
             // QKV: micro-batched to avoid TDR on large batch prefill.
             // Step 5: uses pre-built per-chunk bind groups — no write_buffer, no forced yields.
+            // For correctness, yield at layer boundary handles TDR protection.
+            // For large batches, also yield every TDR_QKV_YIELD_INTERVAL chunks to prevent
+            // the GPU accumulating >2s of work inside the QKV dispatch loop.
             {
                 let chunk_bgs = &_qkv_chunk_bind_groups[i];
                 let mut qkv_offset: u32 = 0;
                 let mut chunk_idx: usize = 0;
+                // Yield every 16 chunks for large batches (prevents TDR inside QKV loop)
+                const QKV_YIELD_INTERVAL: usize = 16;
                 while qkv_offset < batch_size {
                     let this_chunk = (batch_size - qkv_offset).min(qkv_chunk);
-                    // Use pre-built bind group — no write_buffer, no forced yield needed.
                     {
                         let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                             label: Some(&format!("Layer {} QKV [{}/{}]", i, qkv_offset, batch_size)),
@@ -854,10 +858,10 @@ impl BindlessPipeline {
                         cpass.set_pipeline(pipe_qkv);
                         cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
                     }
-                    // TDR yield between chunks — only if budget exceeded (no longer forced).
-                    {
-                        let label = format!("layer-{}-qkv-chunk-{}", i, qkv_offset);
-                        tdr.yield_if_needed(&label)?;
+                    // Yield every QKV_YIELD_INTERVAL chunks for large batches to prevent TDR
+                    if batch_size > 1 && chunk_idx > 0 && chunk_idx % QKV_YIELD_INTERVAL == 0 {
+                        let label = format!("layer-{}-qkv-interval-{}", i, chunk_idx);
+                        tdr.force_yield(&label)?;
                     }
                     qkv_offset += this_chunk;
                     chunk_idx += 1;
@@ -882,11 +886,15 @@ impl BindlessPipeline {
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             // TDR: yield after attn_out only if accumulated budget exceeded.
+            // For large batch prefill: force yield after attn_out to prevent TDR.
             {
                 let label = format!("layer-{}-attn_out", i);
-                tdr.yield_if_needed(&label)?;
-            }
-            {
+                if batch_size > 8 {
+                    tdr.force_yield(&label)?;
+                } else {
+                    tdr.yield_if_needed(&label)?;
+                }
+            }            {
                 let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some(&format!("Loop Layer {} - AttnProj", i)),
                     timestamp_writes: None,
@@ -950,15 +958,19 @@ impl BindlessPipeline {
             }
 
             // TDR: conditional yield at layer boundary.
-            // NOTE: this yield is still required even with ping-pong because the WGSL shaders
-            // do in-place residual adds (read_write activation_in) — the ping-pong swap
-            // happens at the bind group level but within a single encoder, wgpu on D3D12
-            // may not emit UAV barriers between passes on the same read_write buffer.
-            // Step 4 (remove this yield) requires the WGSL to use separate read/write bindings.
-            // Until then, keep this yield for correctness on DeepSeek Q4K.
+            // NOTE: this yield is required for correctness on DeepSeek Q4K (UAV barrier).
+            // For large batch prefill, always force a yield every layer to prevent TDR.
+            // For decode (batch_size=1), only yield if budget exceeded (usually never).
             {
                 let label = format!("layer-{}-boundary", i);
-                tdr.yield_if_needed(&label)?;
+                if batch_size > 1 {
+                    // Prefill: force yield every layer — GPU work per layer is ~0.5s on RTX 3060
+                    // with 32-layer Q4K_M × large batch. Without this, TDR fires.
+                    tdr.force_yield(&label)?;
+                } else {
+                    // Decode (single token): conditional only — budget rarely exceeded at 0.03s/step
+                    tdr.yield_if_needed(&label)?;
+                }
             }
 
             if trace_prefill_layers {

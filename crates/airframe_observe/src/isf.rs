@@ -60,6 +60,8 @@ pub struct ISFState {
     pub extra_stop_ids: Vec<u32>,
     /// Streaming callback — called with each decoded token piece
     pub on_token: Option<Box<dyn FnMut(&str) + Send>>,
+    /// Recent tokens for repetition penalty (last 64 tokens generated)
+    pub recent_tokens: Vec<u32>,
     /// TDR budget state — accumulated GPU time since last yield (ms).
     /// Rules emit DispatchTiming facts; when accumulated >= budget, a yield is needed.
     /// The actual yield (wgpu submit+poll) happens in the closure that emits the fact.
@@ -112,6 +114,7 @@ impl ISFState {
             tdr_yield_count: 0,
             embedding_cache: std::collections::HashMap::new(),
             prompt_token_ids: Vec::new(),
+            recent_tokens: Vec::new(),
         }
     }
 
@@ -178,7 +181,7 @@ impl InferenceSaturationFabric {
         dequant_fn: Arc<dyn Fn(u32, u32) -> Vec<f32> + Send + Sync>,
         prefill_fn: Arc<dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync>,
         forward_fn: Arc<dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync>,
-        sample_fn: Arc<dyn Fn(&mut Vec<f32>) -> u32 + Send + Sync>,
+        sample_fn: Arc<dyn Fn(&mut Vec<f32>, &[u32]) -> u32 + Send + Sync>,
         decode_fn: Arc<dyn Fn(u32) -> String + Send + Sync>,
         kv_increment_fn: Arc<dyn Fn() + Send + Sync>,
         dim: u32,
@@ -304,6 +307,7 @@ impl InferenceSaturationFabric {
                     for _ in 0..*token_count {
                         kv_inc();
                     }
+                    eprintln!("[DIAG] after prefill kv_inc called {} times", token_count);
                     {
                         let mut s = state_ref.lock().unwrap();
                         s.logits = logits;
@@ -335,7 +339,11 @@ impl InferenceSaturationFabric {
                     let logits_len = s.logits.len();
                     let logits_max = s.logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
                     let logits_nans = s.logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
-                    let token_id = sample(&mut s.logits);
+                    let recent = s.recent_tokens.clone();
+                    let token_id = sample(&mut s.logits, &recent);
+                    // Track for repetition penalty
+                    s.recent_tokens.push(token_id);
+                    if s.recent_tokens.len() > 64 { s.recent_tokens.remove(0); }
                     let halt = token_id == s.eos_token
                         || s.extra_stop_ids.contains(&token_id);
                     (token_id, halt, logits_len, logits_max, logits_nans)
@@ -406,8 +414,14 @@ impl InferenceSaturationFabric {
                         return vec![InferenceFact::GenerationHalt { reason: HaltReason::MaxTokensReached }];
                     }
 
-                    // Sample next token
-                    let next_token = sample(&mut logits);
+                    // Sample next token with repetition penalty from recent history
+                    let next_token = {
+                        let recent = {
+                            let s = state_ref.lock().unwrap();
+                            s.recent_tokens.clone()
+                        };
+                        sample(&mut logits, &recent)
+                    };
 
                     // Check halt conditions
                     let (halt, halt_reason) = {
@@ -437,6 +451,9 @@ impl InferenceSaturationFabric {
                         let mut s = state_ref.lock().unwrap();
                         s.generated_text.push_str(&piece);
                         s.logits = logits;
+                        // Track recent tokens for repetition penalty
+                        s.recent_tokens.push(next_token);
+                        if s.recent_tokens.len() > 64 { s.recent_tokens.remove(0); }
                         if let Some(cb) = s.on_token.as_mut() {
                             cb(&piece);
                         }

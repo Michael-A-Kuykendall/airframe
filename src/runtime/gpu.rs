@@ -472,6 +472,7 @@ impl GpuRuntime {
         let spec_for_forward = spec_isf.clone();
         let forward_fn: std::sync::Arc<dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync> =
             std::sync::Arc::new(move |token_data: Vec<f32>, current_pos: u32| {
+                eprintln!("[DIAG] decode forward current_pos={} prompt_len={}", current_pos, prompt_len);
                 let token_id = token_data[0] as u32;
                 let row_offset = embd_offset + (token_id as u64 * row_bytes_val);
                 let token_embd = pipeline_ref.run_dequant_any_hot(
@@ -493,12 +494,15 @@ impl GpuRuntime {
             });
 
         // ── Closure: sampling ─────────────────────────────────────────────
+        // NOTE: recent_tokens for repetition penalty are tracked in ISFState.recent_tokens
+        // and passed to sample_token on each call via a snapshot. This fixes the
+        // repetition loop issue where &[] was being passed (no penalty applied).
         let rng_cell = std::sync::Arc::new(std::sync::Mutex::new(Rng::new(seed)));
-        let sample_fn: std::sync::Arc<dyn Fn(&mut Vec<f32>) -> u32 + Send + Sync> = {
+        let sample_fn: std::sync::Arc<dyn Fn(&mut Vec<f32>, &[u32]) -> u32 + Send + Sync> = {
             let rc = rng_cell.clone();
-            std::sync::Arc::new(move |logits: &mut Vec<f32>| {
+            std::sync::Arc::new(move |logits: &mut Vec<f32>, recent: &[u32]| {
                 let mut rng = rc.lock().unwrap();
-                sample_token(logits, temp, top_p_val, rep_penalty, &[], &mut rng)
+                sample_token(logits, temp, top_p_val, rep_penalty, recent, &mut rng)
             })
         };
 
