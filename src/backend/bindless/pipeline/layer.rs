@@ -1384,11 +1384,6 @@ impl BindlessPipeline {
             label: Some(&format!("Layer {} Encoder (Debug)", layer_idx)),
         });
 
-        // Q4K pipeline selection — use V1 shaders for QKV and ffn_proj (Q4K-specific variants
-        // produce 7-200x wrong values; V1 handles Q4_K via dequant_q4k_elem). Q4K ffn_down
-        // and attn_proj are kept since they work correctly.
-        let use_q4k = (params.quant_type & 0xFF) == 12;
-
         // Kernel 1: Attention normalization provider
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1481,11 +1476,7 @@ impl BindlessPipeline {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.set_pipeline(if use_q4k {
-                &self.layer_pipeline_q4k_attn_out
-            } else {
-                &self.layer_pipeline_attn_out
-            });
+            cpass.set_pipeline(&self.layer_pipeline_attn_out);
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 
@@ -1495,11 +1486,7 @@ impl BindlessPipeline {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.set_pipeline(if use_q4k {
-                &self.layer_pipeline_q4k_attn_proj
-            } else {
-                &self.layer_pipeline_attn_proj
-            });
+            cpass.set_pipeline(&self.layer_pipeline_attn_proj);
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 
@@ -1552,11 +1539,7 @@ impl BindlessPipeline {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.set_pipeline(if use_q4k {
-                &self.layer_pipeline_q4k_ffn_down
-            } else {
-                &self.layer_pipeline_ffn_down
-            });
+            cpass.set_pipeline(&self.layer_pipeline_ffn_down);
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 

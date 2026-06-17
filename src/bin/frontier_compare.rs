@@ -326,7 +326,7 @@ async fn async_main() -> Result<()> {
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
         batch_offset: 0,
-        batch_count: 0,
+        batch_count: 1, // single decode token
         q_weight_k: 0,
         k_weight_k: 0,
     };

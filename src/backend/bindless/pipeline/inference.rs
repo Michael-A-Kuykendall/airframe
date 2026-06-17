@@ -176,9 +176,6 @@ impl BindlessPipeline {
             .get_tensor_type("blk.0.ffn_down.weight")
             .unwrap_or(weight_quant_type);
         let packed_quant_type = weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
-
-        // Q4_K uses different shader pipelines (type 12)
-        let use_q4k_pipeline = weight_quant_type == 12;
         let _ = packed_quant_type; // per-layer quant is computed in the loop below
 
         // 1. Buffers
@@ -782,12 +779,9 @@ impl BindlessPipeline {
                     i, batch_size, current_pos, seq_len
                 );
             }
-            // Each kernel in its own compute pass to guarantee memory barriers
-            // (matches layer.rs ordering). PostAttnNorm and PostFfwNorm are no-ops
-            // when params.post_norm_enabled == 0 (non-Gemma models).
-            // Select pipeline based on quantization type (Q4_K vs Q4_0/F16)
-            // Note: Q4_K shader only has qkv, attn_out, attn_proj, post_attn_norm, ffn_proj, ffn_down, post_ffn_norm
-            //       It does NOT have: attn_norm, qk_norm, ffn_norm, post_ffw_norm - use V1 for those
+            // All models use V1 pipelines. V1 handles all quant types (Q4_0, Q4_K, Q5_K,
+            // Q6_K, F16, F32) via per-kernel quant_type branch checks and proven-correct
+            // dequant helpers. The Q4K-specific shader family has been removed.
             let (
                 pipe_attn_norm,
                 pipe_qkv,
@@ -799,33 +793,18 @@ impl BindlessPipeline {
                 pipe_ffn_proj,
                 pipe_ffn_down,
                 pipe_post_ffw_norm,
-            ) = if use_q4k_pipeline {
-                (
-                    &self.layer_pipeline_attn_norm, // Q4K: Use V1 (no main_attn_norm in Q4K shader)
-                    &self.layer_pipeline_qkv,       // TEMP DIAG: Use V1 QKV to test if Q4K QKV is buggy
-                    &self.layer_pipeline_qk_norm,
-                    &self.layer_pipeline_q4k_attn_out,
-                    &self.layer_pipeline_q4k_attn_proj,
-                    &self.layer_pipeline_post_attn_norm,
-                    &self.layer_pipeline_ffn_norm,
-                    &self.layer_pipeline_ffn_proj,  // V1 ffn_proj (Q4K ffn_proj produces 200x-too-large gate)
-                    &self.layer_pipeline_q4k_ffn_down,
-                    &self.layer_pipeline_post_ffw_norm,
-                )
-            } else {
-                (
-                    &self.layer_pipeline_attn_norm,
-                    &self.layer_pipeline_qkv,
-                    &self.layer_pipeline_qk_norm,
-                    &self.layer_pipeline_attn_out,
-                    &self.layer_pipeline_attn_proj,
-                    &self.layer_pipeline_post_attn_norm,
-                    &self.layer_pipeline_ffn_norm,
-                    &self.layer_pipeline_ffn_proj,
-                    &self.layer_pipeline_ffn_down,
-                    &self.layer_pipeline_post_ffw_norm,
-                )
-            };
+            ) = (
+                &self.layer_pipeline_attn_norm,
+                &self.layer_pipeline_qkv,
+                &self.layer_pipeline_qk_norm,
+                &self.layer_pipeline_attn_out,
+                &self.layer_pipeline_attn_proj,
+                &self.layer_pipeline_post_attn_norm,
+                &self.layer_pipeline_ffn_norm,
+                &self.layer_pipeline_ffn_proj,
+                &self.layer_pipeline_ffn_down,
+                &self.layer_pipeline_post_ffw_norm,
+            );
 
             {
                 let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
