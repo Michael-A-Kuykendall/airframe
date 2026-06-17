@@ -280,6 +280,10 @@ impl BindlessMetadata {
                     ffn_norm_bias_off = attn_norm_bias_off;
                 }
 
+                // Cache ffn_down quant type so the LayerOffsets builder below can read it.
+                // (lqt_v comes from the QKV/separate-V branch above; lqt_main comes from the same.)
+                let lqt_down = t(&tensor_types, layer_idx, "ffn_down.weight");
+
                 let offsets = super::pipeline::LayerOffsets {
                     attn_norm: attn_norm_off,
                     attn_norm_bias: attn_norm_bias_off,
@@ -293,25 +297,14 @@ impl BindlessMetadata {
                     ffn_down: p(&absolute_offsets, layer_idx, "ffn_down.weight"),
                     ffn_up: p(&absolute_offsets, layer_idx, "ffn_up.weight"),
                     layer_idx: layer_idx as u32,
+                    v_is_q4k:       if lqt_v    == 12 { 1 } else { 0 },
+                    ffn_down_is_q4k: if lqt_down == 12 { 1 } else { 0 },
                     attn_q_norm: opt(&absolute_offsets, layer_idx, "attn_q_norm.weight"),
                     attn_k_norm: opt(&absolute_offsets, layer_idx, "attn_k_norm.weight"),
                     attn_q_bias: attn_q_bias_off,
                     attn_k_bias: attn_k_bias_off,
                     attn_v_bias: attn_v_bias_off,
-                    // For Q4_K_M mixed quantization: determine if V and ffn_down are Q4_K or Q6_K
-                    // Q4_K = type 12, Q6_K = type 14
-                    v_is_q4k: if t(&tensor_types, layer_idx, "attn_v.weight") == 12 {
-                        1
-                    } else {
-                        0
-                    },
-                    ffn_down_is_q4k: if t(&tensor_types, layer_idx, "ffn_down.weight") == 12 {
-                        1
-                    } else {
-                        0
-                    },
                 };
-                let lqt_down = t(&tensor_types, layer_idx, "ffn_down.weight");
                 // bits 24-31: attn_output.weight type — used by main_attn_proj and main_ffn_proj.
                 // For models with fused QKV (phi-2, starcoder2), lqt_main = fused QKV type, but
                 // attn_output.weight and ffn_up/gate have a different (usually lower) quant type.
