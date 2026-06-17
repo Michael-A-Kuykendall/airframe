@@ -802,15 +802,15 @@ impl BindlessPipeline {
             ) = if use_q4k_pipeline {
                 (
                     &self.layer_pipeline_attn_norm, // Q4K: Use V1 (no main_attn_norm in Q4K shader)
-                    &self.layer_pipeline_q4k_qkv,
-                    &self.layer_pipeline_qk_norm, // Q4K: now has real main_qk_norm in sh_layer_q4k.wgsl (self-contained for Q4K Q writes + offsets)
+                    &self.layer_pipeline_qkv,       // TEMP DIAG: Use V1 QKV to test if Q4K QKV is buggy
+                    &self.layer_pipeline_qk_norm,
                     &self.layer_pipeline_q4k_attn_out,
                     &self.layer_pipeline_q4k_attn_proj,
-                    &self.layer_pipeline_post_attn_norm, // Q4K non-Gemma: Use V1 for post_attn_norm (Q4K version is Gemma-only)
-                    &self.layer_pipeline_ffn_norm, // Q4K: Use V1 (no main_ffn_norm in Q4K shader)
-                    &self.layer_pipeline_q4k_ffn_proj,
+                    &self.layer_pipeline_post_attn_norm,
+                    &self.layer_pipeline_ffn_norm,
+                    &self.layer_pipeline_ffn_proj,  // V1 ffn_proj (Q4K ffn_proj produces 200x-too-large gate)
                     &self.layer_pipeline_q4k_ffn_down,
-                    &self.layer_pipeline_post_ffw_norm, // Q4K: Use V1 (no main_post_ffw_norm in Q4K shader)
+                    &self.layer_pipeline_post_ffw_norm,
                 )
             } else {
                 (
