@@ -299,7 +299,13 @@ async fn async_main() -> Result<()> {
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
-        quant_type: 0,
+        quant_type: {
+            let qt_main = gpu_model.metadata.get_tensor_type("blk.0.attn_q.weight").unwrap_or(2);
+            let qt_v    = gpu_model.metadata.get_tensor_type("blk.0.attn_v.weight").unwrap_or(qt_main);
+            let qt_down = gpu_model.metadata.get_tensor_type("blk.0.ffn_down.weight").unwrap_or(qt_main);
+            let qt_out  = gpu_model.metadata.get_tensor_type("blk.0.attn_output.weight").unwrap_or(qt_main);
+            qt_main | (qt_v << 8) | (qt_down << 16) | (qt_out << 24)
+        },
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,

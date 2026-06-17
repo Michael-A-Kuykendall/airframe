@@ -1396,13 +1396,19 @@ impl BindlessPipeline {
         }
 
         // Kernel 2: QKV generation + cache write
+        // Select Q4K pipeline when model weights are Q4_K (type 12); otherwise V1.
+        let use_q4k = (params.quant_type & 0xFF) == 12;
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(&format!("Layer {} - QKV", layer_idx)),
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.set_pipeline(&self.layer_pipeline_qkv);
+            cpass.set_pipeline(if use_q4k {
+                &self.layer_pipeline_q4k_qkv
+            } else {
+                &self.layer_pipeline_qkv
+            });
             cpass.dispatch_workgroups(wg_qkv, 1, 1);
         }
 
@@ -1475,7 +1481,11 @@ impl BindlessPipeline {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.set_pipeline(&self.layer_pipeline_attn_out);
+            cpass.set_pipeline(if use_q4k {
+                &self.layer_pipeline_q4k_attn_out
+            } else {
+                &self.layer_pipeline_attn_out
+            });
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 
@@ -1485,7 +1495,11 @@ impl BindlessPipeline {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.set_pipeline(&self.layer_pipeline_attn_proj);
+            cpass.set_pipeline(if use_q4k {
+                &self.layer_pipeline_q4k_attn_proj
+            } else {
+                &self.layer_pipeline_attn_proj
+            });
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 
@@ -1526,7 +1540,11 @@ impl BindlessPipeline {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.set_pipeline(&self.layer_pipeline_ffn_proj);
+            cpass.set_pipeline(if use_q4k {
+                &self.layer_pipeline_q4k_ffn_proj
+            } else {
+                &self.layer_pipeline_ffn_proj
+            });
             cpass.dispatch_workgroups(wg_ffn, 1, 1);
         }
 
@@ -1536,7 +1554,11 @@ impl BindlessPipeline {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.set_pipeline(&self.layer_pipeline_ffn_down);
+            cpass.set_pipeline(if use_q4k {
+                &self.layer_pipeline_q4k_ffn_down
+            } else {
+                &self.layer_pipeline_ffn_down
+            });
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
 
