@@ -1540,22 +1540,11 @@ impl BindlessPipeline {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &bind_group, &[]);
-            // NOTE: V1 ffn_proj handles Q4_K correctly via dequant_q4k_elem (quant_type bits 24-31).
-            // Q4K-specific ffn_proj produces wrong values (bug under investigation).
-            // Use V1 for both paths until Q4K ffn_proj is fixed.
-            let _ = use_q4k; // suppress unused warning
+            // V1 ffn_proj handles Q4_K correctly via dequant_q4k_elem (quant bits 24-31).
+            // Q4K-specific ffn_proj produces 200x-too-large gate values — bug under investigation.
             cpass.set_pipeline(&self.layer_pipeline_ffn_proj);
             cpass.dispatch_workgroups(wg_ffn, 1, 1);
         }
-
-        // DIAG: capture activation AFTER ffn_proj (should be same as post_attn since ffn_proj doesn't touch activation_buffer)
-        let post_ffn_proj_staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Post-FFNProj Activation"),
-            size: dim * 4,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        encoder.copy_buffer_to_buffer(&activation_buffer, 0, &post_ffn_proj_staging, 0, dim * 4);
 
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1570,24 +1559,6 @@ impl BindlessPipeline {
             });
             cpass.dispatch_workgroups(wg_dim, 1, 1);
         }
-
-        // DIAG: capture gate (temp_state[0..dim]) after ffn_proj to check magnitude
-        // NOTE: This is captured AFTER main_ffn_down, so it reflects what ffn_proj wrote
-        let gate_diag_staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Gate Diag Staging"),
-            size: dim * 4,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        encoder.copy_buffer_to_buffer(&temp_buffer, 0, &gate_diag_staging, 0, dim * 4);
-
-        // DIAG-2: capture gate BEFORE ffn_down to isolate where it's set
-        let gate_pre_ffndown_staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Gate Pre-FFNDown Staging"),
-            size: dim * 4,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
 
         // Kernel 6.5: Post-FFW norm correction (Gemma-2; no-op otherwise)
         {
@@ -1608,13 +1579,7 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        encoder.copy_buffer_to_buffer(
-            &temp_buffer,
-            ffn_debug_offset,
-            &ffn_down_staging,
-            0,
-            dim * 4,
-        );
+        encoder.copy_buffer_to_buffer(&temp_buffer, ffn_debug_offset, &ffn_down_staging, 0, dim * 4);
 
         // Readback final output
         let output_staging = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1634,19 +1599,6 @@ impl BindlessPipeline {
         let post_attn_vals = self.readback_helper(device, &post_attn_staging);
         let ffn_down_vals = self.readback_helper(device, &ffn_down_staging);
         let output = self.readback_helper(device, &output_staging);
-
-        // DIAG: print gate first8 and rms for layer 0
-        let gate_diag = self.readback_helper(device, &gate_diag_staging);
-        let post_ffn_proj = self.readback_helper(device, &post_ffn_proj_staging);
-        if layer_idx == 0 {
-            let gate_rms = (gate_diag.iter().map(|x| x * x).sum::<f32>() / gate_diag.len() as f32).sqrt();
-            let gate_absmax = gate_diag.iter().map(|x| x.abs()).fold(0f32, f32::max);
-            let act_rms_after_ffnproj = (post_ffn_proj.iter().map(|x| x * x).sum::<f32>() / post_ffn_proj.len() as f32).sqrt();
-            eprintln!("[DIAG layer 0 gate] rms={:.6} absmax={:.6} first4={:?}",
-                gate_rms, gate_absmax, &gate_diag[..4.min(gate_diag.len())]);
-            eprintln!("[DIAG layer 0 act_after_ffnproj] rms={:.6} first4={:?}",
-                act_rms_after_ffnproj, &post_ffn_proj[..4.min(post_ffn_proj.len())]);
-        }
 
         (
             output,
