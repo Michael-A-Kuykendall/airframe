@@ -413,7 +413,7 @@ async fn async_main() -> Result<()> {
         })? as u32;
     let norm_params = RMSNormParams {
         count: dim,
-        weights_offset: norm_weight_offset,
+        weights_offset: (norm_weight_offset / 4), // word index (byte_offset / 4) — matches sh_rmsnorm.wgsl convention
         bias_offset: 0,
         eps: spec.rms_eps,
         norm_type: 0,
