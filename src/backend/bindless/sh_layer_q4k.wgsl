@@ -128,8 +128,8 @@ fn q4k_mn(j: u32, sb: u32) -> f32 {
         raw = get_byte(sb + j + 4u) & 0x3Fu;
     } else {
         let sA = get_byte(sb + j + 4u);
-        let sC = get_byte(sb + j);
-        raw = ((sA >> 4u) & 0x0Fu) | (((sC >> 6u) & 0x03u) << 4u);
+        let sB = get_byte(sb + j - 4u);   // match llama.cpp q[j-4] access pattern for the high bits
+        raw = ((sA >> 4u) & 0x0Fu) | (((sB >> 6u) & 0x03u) << 4u);
     }
     return f32(raw);
 }
@@ -250,12 +250,12 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let col_lo = col_base + qi;
                     let nw_lo  = norm_bank[norm_base + col_lo];
                     let vx_lo  = activation_in[act_base + col_lo] * rms * nw_lo;
-                    dot += vx_lo * (d1 * f32(qb & 0x0Fu) - m1);
+                    dot += vx_lo * (d1 * (f32(qb & 0x0Fu) - 8.0) - m1);
 
                     let col_hi = col_base + 32u + qi;
                     let nw_hi  = norm_bank[norm_base + col_hi];
                     let vx_hi  = activation_in[act_base + col_hi] * rms * nw_hi;
-                    dot += vx_hi * (d2 * f32((qb >> 4u) & 0x0Fu) - m2);
+                    dot += vx_hi * (d2 * (f32((qb >> 4u) & 0x0Fu) - 8.0) - m2);
                 }
             }
         }
@@ -342,12 +342,12 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let col_lo = col_base + qi;
                     let nw_lo  = norm_bank[norm_base + col_lo];
                     let vx_lo  = activation_in[act_base + col_lo] * rms * nw_lo;
-                    dot += vx_lo * (d1 * f32(qb & 0x0Fu) - m1);
+                    dot += vx_lo * (d1 * (f32(qb & 0x0Fu) - 8.0) - m1);
 
                     let col_hi = col_base + 32u + qi;
                     let nw_hi  = norm_bank[norm_base + col_hi];
                     let vx_hi  = activation_in[act_base + col_hi] * rms * nw_hi;
-                    dot += vx_hi * (d2 * f32((qb >> 4u) & 0x0Fu) - m2);
+                    dot += vx_hi * (d2 * (f32((qb >> 4u) & 0x0Fu) - 8.0) - m2);
                 }
             }
         }
@@ -511,11 +511,11 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
                 let col_lo  = col_base + qi;
                 let ctx_lo  = temp_state[temp_base + col_lo];
-                dot += ctx_lo * (d1 * f32(qb & 0x0Fu) - m1);
+                dot += ctx_lo * (d1 * (f32(qb & 0x0Fu) - 8.0) - m1);
 
                 let col_hi  = col_base + 32u + qi;
                 let ctx_hi  = temp_state[temp_base + col_hi];
-                dot += ctx_hi * (d2 * f32((qb >> 4u) & 0x0Fu) - m2);
+                dot += ctx_hi * (d2 * (f32((qb >> 4u) & 0x0Fu) - 8.0) - m2);
             }
         }
     }
@@ -631,12 +631,12 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let col_lo = col_base + qi;
                 let nw_lo  = norm_bank[norm_offset_base + col_lo];
                 let vx_lo  = activation_in[act_base + col_lo] * rms * nw_lo;
-                dot += vx_lo * (d1 * f32(qb & 0x0Fu) - m1);
+                dot += vx_lo * (d1 * (f32(qb & 0x0Fu) - 8.0) - m1);
 
                 let col_hi = col_base + 32u + qi;
                 let nw_hi  = norm_bank[norm_offset_base + col_hi];
                 let vx_hi  = activation_in[act_base + col_hi] * rms * nw_hi;
-                dot += vx_hi * (d2 * f32((qb >> 4u) & 0x0Fu) - m2);
+                dot += vx_hi * (d2 * (f32((qb >> 4u) & 0x0Fu) - 8.0) - m2);
             }
         }
     }
@@ -755,12 +755,12 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let k_lo  = col_base + qi;
                     let gate_lo = temp_state[temp_base + k_lo];
                     let up_lo   = temp_state[temp_base + ffn_dim + k_lo];
-                    dot += (gate_lo * up_lo) * (d1 * f32(qb & 0x0Fu) - m1);
+                    dot += (gate_lo * up_lo) * (d1 * (f32(qb & 0x0Fu) - 8.0) - m1);
 
                     let k_hi  = col_base + 32u + qi;
                     let gate_hi = temp_state[temp_base + k_hi];
                     let up_hi   = temp_state[temp_base + ffn_dim + k_hi];
-                    dot += (gate_hi * up_hi) * (d2 * f32((qb >> 4u) & 0x0Fu) - m2);
+                    dot += (gate_hi * up_hi) * (d2 * (f32((qb >> 4u) & 0x0Fu) - 8.0) - m2);
                 }
             }
         }
