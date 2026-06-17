@@ -128,8 +128,8 @@ fn q4k_mn(j: u32, sb: u32) -> f32 {
         raw = get_byte(sb + j + 4u) & 0x3Fu;
     } else {
         let sA = get_byte(sb + j + 4u);
-        let sB = get_byte(sb + j - 4u);   // match llama.cpp q[j-4] access pattern for the high bits
-        raw = ((sA >> 4u) & 0x0Fu) | (((sB >> 6u) & 0x03u) << 4u);
+        let sC = get_byte(sb + j);
+        raw = ((sA >> 4u) & 0x0Fu) | (((sC >> 6u) & 0x03u) << 4u);
     }
     return f32(raw);
 }
