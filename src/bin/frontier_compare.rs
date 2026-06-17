@@ -219,7 +219,19 @@ async fn async_main() -> Result<()> {
         .ok_or_else(|| LibshimmyError::MissingTensor {
             name: "token_embd.weight".to_string(),
         })?;
-    let row_bytes = (dim / 32) * 18;
+    // Type-aware embedding row stride (fixes wrong offset for Q6_K/Q4_K embeddings)
+    let embd_quant_type = gpu_model.metadata.get_tensor_type("token_embd.weight").unwrap_or(2);
+    let row_bytes: u32 = match embd_quant_type {
+        0  => dim * 4,
+        1  => dim * 2,
+        2  => (dim / 32) * 18,
+        8  => (dim / 32) * 34,
+        12 => (dim / 256) * 144,
+        13 => (dim / 256) * 176,
+        14 => (dim / 256) * 210,
+        _  => (dim / 32) * 18,
+    };
+    eprintln!("[frontier_compare] token_embd quant_type={} row_bytes={}", embd_quant_type, row_bytes);
 
     if !prefix_tokens.is_empty() {
         {
@@ -237,6 +249,7 @@ async fn async_main() -> Result<()> {
                 row_bytes,
                 dim,
                 prefix_tokens,
+                embd_quant_type,
             );
             let _ = pipeline.run_full_model_prefill_chunked_with_cache_state(
                 &device,
@@ -494,11 +507,12 @@ fn dequantize_embeddings(
     row_bytes: u32,
     dim: u32,
     tokens: &[usize],
+    embd_quant_type: u32,
 ) -> Vec<f32> {
     let mut batched = Vec::with_capacity(tokens.len() * dim as usize);
     for &token_id in tokens {
         let row_offset = embd_weight_offset + token_id as u64 * row_bytes as u64;
-        let embd = pipeline.run_dequant_request(device, queue, model, row_offset as u32, dim);
+        let embd = pipeline.run_dequant_any_hot(device, queue, model, row_offset as u32, dim, embd_quant_type);
         batched.extend_from_slice(&embd);
     }
     batched
