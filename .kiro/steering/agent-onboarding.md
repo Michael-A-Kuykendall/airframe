@@ -75,14 +75,20 @@ cd /c/Users/micha/repos/airframe && bash scripts/export_code_to_md.sh > docs/int
 
 ---
 
-## Current Branch State (as of 2026-06-15)
+## Current Branch State (as of 2026-06-17)
 
 | Repo | Branch | Status |
 |------|--------|--------|
-| airframe | `feat/phase4-pingpong-activation` | Active dev — dirty, has uncommitted DIAG prints |
-| shimmy | `fix/template-apply-raw-prompt` | Active dev — dirty |
+| airframe | `feat/phase4-pingpong-activation` | Active dev — clean, Q4K debug pipeline fix committed |
+| shimmy | `fix/template-apply-raw-prompt` | Active dev — clean |
 
 **Always `git status` before starting.**
+
+**CRITICAL — DO NOT REGRESS (learned 2026-06-17):**
+- `run_layer_with_cache_debug` in `pipeline/layer.rs` MUST dispatch Q4K pipelines when `(params.quant_type & 0xFF) == 12`. This was the primary source of all-zero GPU Q/K/V in frontier_compare.
+- `frontier_compare` MUST derive `quant_type` from model metadata, never hardcode 0.
+- `dequantize_embeddings` in `frontier_compare` MUST use `run_dequant_any_hot`, not `run_dequant_request` (which is Q4_0 only).
+- See `docs/internal/handoff-q4k-debug-pipeline-fix.md` for full root cause analysis.
 
 ---
 

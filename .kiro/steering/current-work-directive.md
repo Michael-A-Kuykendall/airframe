@@ -85,11 +85,24 @@ Current primary: `fix/v0.2.5-all-fixes` (local + remotes/private).
 - Update relevant steering (inference-testing, this file) and MASTER_HOTFIX as truth moves.
 
 ## Immediate Next After Setup
-1. Baseline current state on the primary hotfix using test scripts + vault/frontier_compare (one model/group at a time).
-2. Break MASTER groups into falsifiable sub-tasks (TDR root kernel diagnosis for Q4K path, Q6K head_blob fix, fused QKV metadata routing for Phi/GPT2 + similar).
-3. Implement minimal changes on focused branches off `fix/v0.2.5-all-fixes`.
-4. Re-certify with mechanized tools + script.
-5. Land only what moves the metric.
+1. **DO NOT RE-INVESTIGATE THE NaN BUG — IT IS FIXED.** See `docs/internal/handoff-q4k-debug-pipeline-fix.md`.
+   - `run_layer_with_cache_debug` now dispatches Q4K pipeline ✅
+   - `frontier_compare` now derives quant_type from metadata ✅
+   - Embeddings now dequant with `run_dequant_any_hot` ✅
+   - `gpu_non_finite = 0` across all layers for Llama-3.2-1B Q4_K_M ✅
+
+2. **Active problem:** Q/K have 7-23% RMS error vs FP32 reference (expected for Q4_K) BUT
+   individual elements have wrong signs. Output MAE cascades from 334 at layer 0 to 200k+ 
+   by layer 3. The model generates garbage tokens.
+
+3. **Next falsifiable test:** Compare `q4k_sc` / `q4k_mn` in `sh_layer_q4k.wgsl` against
+   `get_scale_min_k4` in `sh_dequant_any.wgsl` byte-for-byte. Seed Llama-3.2-1B into vault
+   for Q4_K-level oracle (not FP32) to confirm if our per-element values match llama.cpp.
+
+4. Break MASTER groups into falsifiable sub-tasks (TDR root kernel diagnosis for Q4K path, Q6K head_blob fix, fused QKV metadata routing for Phi/GPT2 + similar).
+5. Implement minimal changes on focused branches off `fix/v0.2.5-all-fixes`.
+6. Re-certify with mechanized tools + script.
+7. Land only what moves the metric.
 
 This directive supersedes older handoffs for the duration of stabilization. Revisit after gentek local dev is the daily norm and all listed models PASS the smoke.
 
