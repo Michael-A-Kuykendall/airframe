@@ -106,7 +106,7 @@ fn dequant_q4k_elem(block_base: u32, e: u32) -> f32 {
     } else {
         nibble = read_byte(ql_byte) >> 4u;
     }
-    return sc_val * f32(nibble) - m_val;
+    return sc_val * (f32(nibble) - 8.0) - m_val;
 }
 
 // ---------------------------------------------------------------------------

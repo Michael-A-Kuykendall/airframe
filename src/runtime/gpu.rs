@@ -600,12 +600,13 @@ impl GpuRuntime {
         let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
         for &token_id in &prompt_tokens {
             let row_offset = self.embd_weight_offset + (token_id as u64 * self.row_bytes);
-            let embd = self.pipeline.run_dequant_request(
+            let embd = self.pipeline.run_dequant_any_hot(
                 &self.device,
                 &self.queue,
                 &self.model,
                 row_offset as u32,
                 dim,
+                self.embd_quant_type,
             );
             batched_embd.extend_from_slice(&embd);
         }
@@ -765,12 +766,13 @@ impl GpuRuntime {
             // run_dequant_request for embedding + run_full_model_with_cache_state
             // batches all 22 layers into ~3 submits instead of 22.
             let row_offset = self.embd_weight_offset + (next_token as u64 * self.row_bytes);
-            let token_embd = self.pipeline.run_dequant_request(
+            let token_embd = self.pipeline.run_dequant_any_hot(
                 &self.device,
                 &self.queue,
                 &self.model,
                 row_offset as u32,
                 dim,
+                self.embd_quant_type,
             );
 
             let current_pos = {
