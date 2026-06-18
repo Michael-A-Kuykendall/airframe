@@ -79,16 +79,24 @@ cd /c/Users/micha/repos/airframe && bash scripts/export_code_to_md.sh > docs/int
 
 | Repo | Branch | Status |
 |------|--------|--------|
-| airframe | `feat/phase4-pingpong-activation` | Active dev — clean, Q4K debug pipeline fix committed |
-| shimmy | `fix/template-apply-raw-prompt` | Active dev — clean |
+| airframe | `feat/phase4-pingpong-activation` | Active dev — HEAD e5539d7, Q4K shader family deleted |
+| shimmy | `fix/template-apply-raw-prompt` | Active dev — clean, template fix uncommitted |
 
 **Always `git status` before starting.**
 
-**CRITICAL — DO NOT REGRESS (learned 2026-06-17):**
-- `run_layer_with_cache_debug` in `pipeline/layer.rs` MUST dispatch Q4K pipelines when `(params.quant_type & 0xFF) == 12`. This was the primary source of all-zero GPU Q/K/V in frontier_compare.
-- `frontier_compare` MUST derive `quant_type` from model metadata, never hardcode 0.
-- `dequantize_embeddings` in `frontier_compare` MUST use `run_dequant_any_hot`, not `run_dequant_request` (which is Q4_0 only).
-- See `docs/internal/handoff-q4k-debug-pipeline-fix.md` for full root cause analysis.
+**READ FIRST:** `docs/internal/opencode-handoff-2026-06-17.md` — current state, open issues, exact next actions.
+
+**CRITICAL — ARCHITECTURE CHANGE (2026-06-17):**
+- `sh_layer_q4k.wgsl` has been DELETED. Do not recreate it.
+- V1 shader (`sh_layer_v1.wgsl`) now handles ALL quant types including Q4_K_M.
+- `use_q4k_pipeline` conditional is GONE from inference.rs and layer.rs.
+- All `layer_pipeline_q4k_*` fields are GONE from BindlessPipeline struct.
+
+**DO NOT REGRESS:**
+- `batch_count` in `frontier_compare` LayerParams must be `1` (not 0)
+- `weights_offset` in rmsnorm params must be bytes/4 (word index, not byte offset)
+- `dequantize_embeddings` must use `run_dequant_any_hot` (not `run_dequant_request`)
+- `quant_type` in frontier_compare layer_params must be derived from metadata (not hardcoded 0)
 
 ---
 
@@ -136,16 +144,15 @@ All models are in `D:/shimmy-test-models/gguf_collection/` and registered in Oll
 
 | File | What It Does |
 |------|-------------|
-| `src/backend/bindless/pipeline/inference.rs` | THE main dispatch loop (~900 LOC) |
-| `src/backend/bindless/sh_layer_q4k.wgsl` | Q4_K_M layer kernels (WGSL) |
-| `src/backend/bindless/sh_layer_v1.wgsl` | Q4_0/Q8_0/F16 layer kernels (WGSL) |
+| `src/backend/bindless/pipeline/inference.rs` | THE main dispatch loop — V1 for all models |
+| `src/backend/bindless/sh_layer_v1.wgsl` | THE ONLY layer shader — handles Q4_0/Q4_K/Q6_K/F16/F32 |
+| `src/backend/bindless/sh_dequant_any.wgsl` | GPU dequant for embeddings — all types |
 | `src/runtime/gpu.rs` | GpuRuntime::load() + generate_isf() |
-| `src/backend/tdr.rs` | TdrScheduler (extracted from inference.rs) |
+| `src/backend/tdr.rs` | TdrScheduler |
 | `crates/airframe_observe/src/isf.rs` | ISF rules + ISFState |
-| `crates/airframe_observe/src/facts.rs` | InferenceFact enum + keys |
-| `shimmy/src/api.rs` | HTTP handlers, template application |
-| `shimmy/src/engine/airframe.rs` | AirframeEngine → GpuRuntime bridge |
-| `shimmy/src/templates.rs` | TemplateFamily renders (ChatML, Llama3, TinyLlama, DeepSeekCoder) |
+| `shimmy/src/main.rs` | CLI — generate command template bug is here (Issue 2) |
+| `shimmy/src/templates.rs` | TemplateFamily renders |
+| `shimmy/src/openai_compat/mod.rs` | Template applied correctly here (line 140) |
 | `shimmy/src/model_registry.rs` | infer_template() by model name |
 
 ---
