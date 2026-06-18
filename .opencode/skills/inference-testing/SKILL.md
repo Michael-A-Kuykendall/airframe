@@ -84,6 +84,16 @@ SHIMMY_MAX_CTX=4096 SHIMMY_ROPE_SCALE=0.5 \
 # Expected: coherent Python code, Llama3 instruct format
 ```
 
+### TinyLlama baseline (quickest sanity check)
+```bash
+cd /c/Users/micha/repos/shimmy
+SHIMMY_BASE_GGUF="D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf" \
+SHIMMY_MAX_CTX=3000 SHIMMY_ROPE_SCALE=0.68 \
+./target/release/shimmy.exe generate "tinyllama-1.1b" \
+  --prompt "hi" --max-tokens 20 2>&1 | grep -v "^\[Metadata\]\|^\[Preflight\]\|^\[DIAG\]\|^\[ISF"
+# Expected: a few words, no garbage, exits cleanly
+```
+
 ## Build Commands
 ```bash
 # Airframe lib only (fast check)
