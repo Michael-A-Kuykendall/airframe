@@ -201,6 +201,10 @@ const TM_CHATML_START: usize = 4; // <|im_start|>
 const TM_CHATML_END: usize = 5; // <|im_end|>
 const TM_TINY_USER: usize = 6; // <|user|>
 const TM_TINY_ASST: usize = 7; // <|assistant|>
+const TM_LLAMA3_NAME_SPACE: usize = 8; // "llama 3"
+const TM_LLAMA3_NAME_HYPHEN: usize = 9; // "llama-3"
+const TM_TINYLLAMA_NAME: usize = 10; // "tinyllama"
+const TM_GEMMA_NAME: usize = 11; // "gemma"
 
 /// Single Aho-Corasick automaton covering all template + model-name markers.
 /// Built once, reused for every model load.
@@ -231,7 +235,7 @@ fn classify_template(haystack: &str) -> Option<ChatTemplateFamily> {
     let mut found = 0u16;
     for mat in template_ac().find_iter(haystack) {
         found |= 1 << mat.pattern().as_usize();
-        // Short-circuit as soon as one family is fully confirmed.
+        // Template-marker-based detection (indices 0-7)
         if (found >> TM_LLAMA3_HEADER) & 1 != 0 && (found >> TM_LLAMA3_EOT) & 1 != 0 {
             return Some(ChatTemplateFamily::Llama3);
         }
@@ -243,6 +247,23 @@ fn classify_template(haystack: &str) -> Option<ChatTemplateFamily> {
         }
         if (found >> TM_TINY_USER) & 1 != 0 && (found >> TM_TINY_ASST) & 1 != 0 {
             return Some(ChatTemplateFamily::TinyLlama);
+        }
+        // Model-name-based detection (indices 8-11) — fires when haystack
+        // is the model name (no template markers present).
+        if ((found >> TM_LLAMA3_NAME_SPACE) & 1 != 0 || (found >> TM_LLAMA3_NAME_HYPHEN) & 1 != 0)
+            && (found >> TM_LLAMA3_HEADER) & 1 == 0
+        {
+            return Some(ChatTemplateFamily::Llama3);
+        }
+        if (found >> TM_TINYLLAMA_NAME) & 1 != 0
+            && (found >> TM_TINY_USER) & 1 == 0
+        {
+            return Some(ChatTemplateFamily::TinyLlama);
+        }
+        if (found >> TM_GEMMA_NAME) & 1 != 0
+            && (found >> TM_GEMMA_START) & 1 == 0
+        {
+            return Some(ChatTemplateFamily::Gemma2);
         }
     }
     None
