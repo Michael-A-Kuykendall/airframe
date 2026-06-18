@@ -1,5 +1,6 @@
 ---
-description: Testing airframe GPU inference — smoke tests, frontier_compare, vault comparison
+name: inference-testing
+description: Testing airframe GPU inference — smoke tests, frontier_compare, vault comparison. Use for running one-liner frontier_compare or shimmy generate inference tests.
 ---
 
 # Inference Testing Skill
@@ -7,51 +8,40 @@ description: Testing airframe GPU inference — smoke tests, frontier_compare, v
 ## One-Liner Smoke Tests (run these first, always)
 
 ### Fastest — TinyLlama Q4_0 (baseline, must always pass)
-```bash
-cd /c/Users/micha/repos/airframe
-./target/release/frontier_compare.exe \
-  --model "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf" \
-  --prompt "hi" --max-ctx 2048 \
-  --output artifacts/tinyllama_smoke.json
+```powershell
+cd C:\Users\micha\repos\airframe
+.\target\release\frontier_compare.exe --model "D:\shimmy-test-models\gguf_collection\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf" --prompt "hi" --max-ctx 2048 --output artifacts\tinyllama_smoke.json
 # Expected: layer 0 output MAE < 0.01, no NaN anywhere
 ```
 
 ### Llama-3.2-1B Q4_K_M (Q4K regression test)
-```bash
-./target/release/frontier_compare.exe \
-  --model "D:/shimmy-test-models/gguf_collection/Llama-3.2-1B-Instruct-Q4_K_M.gguf" \
-  --prompt "hi" --max-ctx 4096 \
-  --output artifacts/llama32_smoke.json
+```powershell
+.\target\release\frontier_compare.exe --model "D:\shimmy-test-models\gguf_collection\Llama-3.2-1B-Instruct-Q4_K_M.gguf" --prompt "hi" --max-ctx 4096 --output artifacts\llama32_smoke.json
 # Expected: layer 0 MAE < 0.0001, layer 1 MAE < 0.0001, no NaN on layers 0-1
 # Layer 2+ NaN is a known frontier_compare debug issue, not production
 ```
 
 ### Read smoke results
-```bash
-python -c "
+```powershell
+python -c @"
 import json
 d = json.load(open('artifacts/llama32_smoke.json'))
 for l in d['layers'][:4]:
-    print(f'layer {l[\"layer_idx\"]}: output MAE={l[\"output\"][\"mean_abs_err\"]}  post_attn MAE={l[\"post_attn\"][\"mean_abs_err\"]}')
+    print(f'layer {l["layer_idx"]}: output MAE={l["output"]["mean_abs_err"]}  post_attn MAE={l["post_attn"]["mean_abs_err"]}')
 print('logits nf=', d['logits']['gpu_non_finite'])
-"
+"@
 ```
 
 ## Vault Comparison (ground truth)
 
 ### Query vault for a model's expected layer output RMS
-```bash
-duckdb vault/vault.duckdb "
-SELECT o.layer_idx, o.expected_rms, o.expected_nan
-FROM layer_oracles o JOIN models m ON o.model_id = m.id
-WHERE m.name LIKE '%Llama%1B%' OR m.name LIKE '%TinyLlama%'
-ORDER BY m.name, o.layer_idx LIMIT 20;
-"
+```powershell
+duckdb vault/vault.duckdb "SELECT o.layer_idx, o.expected_rms, o.expected_nan FROM layer_oracles o JOIN models m ON o.model_id = m.id WHERE m.name LIKE '%Llama%1B%' OR m.name LIKE '%TinyLlama%' ORDER BY m.name, o.layer_idx LIMIT 20;"
 ```
 
 ### Compare GPU output against vault
-```bash
-python -c "
+```powershell
+python -c @"
 import json
 gpu = json.load(open('artifacts/llama32_smoke.json'))
 vault = {0:0.044914,1:0.054706,2:0.077304,3:0.086485}  # from vault query above
@@ -61,49 +51,46 @@ for l in gpu['layers'][:4]:
     v = vault.get(idx, 0)
     pct = abs(g-v)/v*100 if v else 0
     print(f'layer {idx}: vault={v:.5f} gpu={g:.5f} diff={pct:.1f}%')
-"
+"@
 ```
 
 ### List all vault models and oracle counts
-```bash
-duckdb vault/vault.duckdb "
-SELECT m.name, m.quant, COUNT(o.id) as oracles
-FROM models m LEFT JOIN layer_oracles o ON m.id = o.model_id
-GROUP BY m.name, m.quant ORDER BY oracles DESC;
-"
+```powershell
+duckdb vault/vault.duckdb "SELECT m.name, m.quant, COUNT(o.id) as oracles FROM models m LEFT JOIN layer_oracles o ON m.id = o.model_id GROUP BY m.name, m.quant ORDER BY oracles DESC;"
 ```
 
 ## Shimmy Generate Test (end-to-end with template)
-```bash
-cd /c/Users/micha/repos/shimmy
-SHIMMY_BASE_GGUF="D:/shimmy-test-models/gguf_collection/Llama-3.2-3B-Instruct-Q4_K_M.gguf" \
-SHIMMY_MAX_CTX=4096 SHIMMY_ROPE_SCALE=0.5 \
-./target/release/shimmy.exe generate "tinyllama-1.1b" \
-  --prompt "write hello world in python" --max-tokens 60 2>&1 | \
-  grep -v "^\[Metadata\]\|^\[Preflight\]\|^\[DIAG\]\|^\[ISF"
+```powershell
+cd C:\Users\micha\repos\shimmy
+$env:SHIMMY_BASE_GGUF = "D:\shimmy-test-models\gguf_collection\Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+$env:SHIMMY_MAX_CTX = "4096"
+$env:SHIMMY_ROPE_SCALE = "0.5"
+.\target\release\shimmy.exe generate "tinyllama-1.1b" --prompt "write hello world in python" --max-tokens 60 2>&1 | Select-String -NotMatch "^\[Metadata\]|^\[Preflight\]|^\[DIAG\]|^\[ISF"
 # Expected: coherent Python code, Llama3 instruct format
 ```
 
 ### TinyLlama baseline (quickest sanity check)
-```bash
-cd /c/Users/micha/repos/shimmy
-SHIMMY_BASE_GGUF="D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf" \
-SHIMMY_MAX_CTX=3000 SHIMMY_ROPE_SCALE=0.68 \
-./target/release/shimmy.exe generate "tinyllama-1.1b" \
-  --prompt "hi" --max-tokens 20 2>&1 | grep -v "^\[Metadata\]\|^\[Preflight\]\|^\[DIAG\]\|^\[ISF"
+```powershell
+cd C:\Users\micha\repos\shimmy
+$env:SHIMMY_BASE_GGUF = "D:\shimmy-test-models\gguf_collection\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"
+$env:SHIMMY_MAX_CTX = "3000"
+$env:SHIMMY_ROPE_SCALE = "0.68"
+.\target\release\shimmy.exe generate "tinyllama-1.1b" --prompt "hi" --max-tokens 20 2>&1 | Select-String -NotMatch "^\[Metadata\]|^\[Preflight\]|^\[DIAG\]|^\[ISF"
 # Expected: a few words, no garbage, exits cleanly
 ```
 
 ## Build Commands
-```bash
+```powershell
 # Airframe lib only (fast check)
-cd /c/Users/micha/repos/airframe && cargo build --release --bin frontier_compare
+cd C:\Users\micha\repos\airframe
+cargo build --release --bin frontier_compare
 
 # Full airframe release
 cargo build --release
 
 # Shimmy (after airframe changes)
-cd /c/Users/micha/repos/shimmy && cargo build --release
+cd C:\Users\micha\repos\shimmy
+cargo build --release
 ```
 
 ## What Good Looks Like
