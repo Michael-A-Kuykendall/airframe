@@ -63,12 +63,13 @@ bd sync               # Sync with git
 ### Active Branches
 | Repo | Branch | HEAD |
 |------|--------|------|
-| airframe | `feat/phase4-pingpong-activation` | b0cdf16 (modified: src/bin/shimmy_server_gpu.rs) |
-| shimmy | `fix/template-apply-raw-prompt` | clean |
+| airframe | `feat/phase4-pingpong-activation` | b3edf65 (modified: .opencode/skills/ vault/vault.duckdb) |
+| shimmy | `fix/template-apply-raw-prompt` | cc8ee88c (ahead of origin by 1 commit — airframe-e0b fix) |
 
 ### Branch Cleanup Status (2026-06-18)
 - **Airframe:** 28 merged local branches deleted. 2 kept (`feat/control-plane-release-package`, `feat/vision-multimodal` — still ahead of private remote). 2 stashes dropped.
 - **Shimmy:** 3 merged local branches deleted. 2 stashes dropped. Remotes consolidated: `private` now points to `shimmy-private.git`, duplicate `public` and `airframe` (local path) remotes removed.
+- **P1 items (airframe-0h5, airframe-e0b):** Both closed 2026-06-18.
 
 ### Build & Test
 
@@ -122,19 +123,32 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
 ### Open Issues (bd ready)
 
 #### airframe repo
-1. **airframe-6ex** [P2] — `[DIAG]`/`[ISF-TDR]` stderr noise. Grep `eprintln!` in `src/runtime/gpu.rs` and `crates/airframe_observe/src/isf.rs`. Gate behind `AIRFRAME_LOG_TDR_POLLS=1` env var.
-2. **airframe-mbc** [P3] — `frontier_compare` layer 2+ NaN (debug path only). Check zero-valued `LayerParams` fields guarding V1 shader early-returns.
-3. **airframe-dna** [P2] — Qwen3-0.6B QK-norm path broken (NaN with V1 shader).
-4. **airframe-pz9** [P2] — Stabilize Qwen3-1.7B-Q4_K_M (TDR).
-5. **airframe-guf** [P2][in_progress] — Stabilize Llama-3.2-3B-Q4_K_M (TDR).
-6. **airframe-dv0** [P2] — Stabilize Qwen2-1.5B-Q4_K_M (TDR).
-7. **airframe-b41** [P2] — Stabilize Gemma-2-2B-Q4_K_M (TDR).
-8. **airframe-o9e** [P2] — StarCoder2-3B fused QKV arch panic.
-9. **airframe-uty** [P2] — TinyLlama Q6_K empty output (output head Q6_K dequant path).
+ 1. **airframe-6ex** [P2] — `[DIAG]`/`[ISF-TDR]` stderr noise. Grep `eprintln!` in `src/runtime/gpu.rs` and `crates/airframe_observe/src/isf.rs`. Gate behind `AIRFRAME_LOG_TDR_POLLS=1` env var.
+ 2. **airframe-mbc** [P3] — `frontier_compare` layer 2+ NaN (debug path only). Check zero-valued `LayerParams` fields guarding V1 shader early-returns.
+ 3. **airframe-dna** [P2] — Qwen3-0.6B QK-norm path broken (NaN with V1 shader).
+ 4. **airframe-pz9** [P2] — Stabilize Qwen3-1.7B-Q4_K_M (TDR).
+ 5. **airframe-guf** [P2] — Stabilize Llama-3.2-3B-Q4_K_M (TDR).
+ 6. **airframe-dv0** [P2] — Stabilize Qwen2-1.5B-Q4_K_M (TDR).
+ 7. **airframe-b41** [P2] — Stabilize Gemma-2-2B-Q4_K_M (TDR).
+ 8. **airframe-o9e** [P2] — StarCoder2-3B fused QKV arch panic.
+ 9. **airframe-uty** [P2] — TinyLlama Q6_K empty output (output head Q6_K dequant path).
 
-#### shimmy repo (P1 items block airframe testing)
-1. **airframe-0h5** [P1] — **UNCOMMITTED fix in `src/bin/shimmy_server_gpu.rs`** (+22 lines). Adds TM_LLAMA3_NAME_SPACE, TM_LLAMA3_NAME_HYPHEN, TM_TINYLLAMA_NAME, TM_GEMMA_NAME patterns + model-name-based detection in `classify_template()`. Action: `git add src/bin/shimmy_server_gpu.rs && git commit -m "fix: wire Llama3 model-name patterns into classify_template()" && git push private feat/phase4-pingpong-activation`
-2. **airframe-e0b** [P1] — `shimmy generate` command (main.rs:548-569) passes raw `prompt` to `loaded.generate()` without template wrapping. Fix: replicate the `api.rs:129-137` pattern — match `spec.template.as_deref()` to `TemplateFamily`, call `fam.render(None, &[("user".to_string(), prompt)], None)`, pass rendered string. Note: there is no `from_spec` method; inline the match.
+#### Closed this session
+- **airframe-0h5** [P1] — committed + pushed (b3edf65)
+- **airframe-e0b** [P1] — shimmy generate template wrapping fix committed + pushed (cc8ee88c)
+- **airframe-2fq** [P1] — Vault infrastructure cleanup complete: import_seeds.py auto-heal, dedup, idempotent; vault_verify.py written; inference_formulas + formula_comparisons populated
+
+#### Vault Status (as of 2026-06-18)
+- **22 models** in vault DB, **322 oracle rows**, **0 duplicates**, **26/26 seeds import clean**
+- `import_seeds.py` now auto-heals seeds (quant, rms_sum, oracle count) — no more manual fix scripts needed
+- `vault_verify.py` built — runs frontier_compare traces against vault oracles, populates `inference_formulas` + `formula_comparisons`
+- **132 formula rows** (3 models: TinyLlama Q4_0, Llama 3.2 1B, Qwen3 1.7B) — all FAIL (old buggy traces from June 17)
+- All 3 failing traces show GPU Q/K all-zeros from layer 2+ (likely pre-`batch_count:1` fix traces)
+- **8 models need fresh frontier_compare traces:** Llama 3.2 1B/3B, TinyLlama Q4_0/Q6_K, Qwen3 0.6B/1.7B/8B, DeepSeek Coder (with current code to verify bug status)
+- Seed files are gitignored (regeneratable via `vault_seed`); vault DB is tracked, `vault_verify.py` is tracked
+- Key models with oracles: TinyLlama q4_0 (23), TinyLlama q6_k (23), Llama-3.2 1B q4_k_m (17), Llama-3.2 3B q4_k_m (29), Qwen3-1.7B q4_k_m (29), Qwen3-8B q4_k_m (37), deepseek-coder q4_k_m (33), deepseek-llm q4_k_m (31), qwen2 family (79 total)
+- TODO: Run vault_verify against fresh frontier_compare traces (with current code) to confirm bug fixes
+- TODO: Spike on Vault + Saturation Fabric integration
 
 ### Shimmy Template System
 - `TemplateFamily` enum in `src/templates.rs:6-15` — ChatML, Llama3, OpenChat, TinyLlama, DeepSeekCoder
@@ -184,7 +198,7 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
 ### Git Infrastructure
 | Repo | Remotes | Local branches | Stashes | Status |
 |------|---------|---------------|---------|--------|
-| **airframe** | `public` + `private` (clean) | 19 (down from 29) | 0 (dropped 2) | Modified: AGENTS.md, skills, shimmy_server_gpu.rs |
+| **airframe** | `public` + `private` (clean) | 19 (down from 29) | 0 (dropped 2) | Modified: AGENTS.md, skills, vault/vault.duckdb |
 | **shimmy** | `origin` + `private` + `shimmy-console` | 54 (mostly old pre-v2 branches) | 0 (dropped 2) | Clean |
 
 ### Remote Fix (shimmy)
@@ -207,9 +221,17 @@ All public branches in **both repos** scanned for: `ghp_/gho_/ghu_/ghs_/ghr_`, `
 - `airframe` cargo check: **passes** (1 dead_code warning, pre-existing)
 - `shimmy` cargo check (fast): **passes** (clean)
 
-### P1 Bugs Still Open (ready to start next session)
-1. **airframe-0h5**: Commit + push shimmy_server_gpu.rs classify_template() fix
-2. **airframe-e0b**: Wire chat template rendering in shimmy generate command
+### Relevant Files
+- `vault/scripts/vault_verify.py` — vault-driven frontier_compare verification: computes formula signatures, compares GPU vs vault oracles, populates inference_formulas + formula_comparisons
+- `vault/scripts/import_seeds.py` — auto-heals seeds (quant, rms_sum, oracle count), idempotent upsert, case-insensitive dedup
+- `vault/vault.duckdb` — clean state: 22 models, 322 oracles, 132 formula rows (3 models), 3 comparisons (all FAIL — old buggy traces)
+- `artifacts/tinyllama_fc.json` etc. — old frontier_compare traces from June 17 (pre-batch_count:1 fix, Q/K all-zeros from layer 2+)
+
+### Current Issues (next session)
+- All 3 vault_verify comparisons FAIL (old traces) — need fresh frontier_compare traces with current code
+- 8 models need vault-driven debugging (fresh frontier_compare traces): Llama 3.2 1B/3B, TinyLlama Q4_0/Q6_K, Qwen3 0.6B/1.7B/8B, DeepSeek Coder
+- 10 models have metadata only (no oracles) — vault_seed CPU forward pass fails for non-Llama architectures
+- Non-Llama models (StarCoder2, Gemma 2, DeepSeek Coder V2 MoE, GPT2) need CPU path fixes for vault_seed
 
 ### Full context
 See `docs/internal/opencode-handoff-2026-06-18.md` for complete session history and decisions.

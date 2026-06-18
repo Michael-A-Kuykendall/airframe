@@ -1,106 +1,113 @@
 ---
 name: inference-testing
-description: Testing airframe GPU inference — smoke tests, frontier_compare, vault comparison. Use for running one-liner frontier_compare or shimmy generate inference tests.
+description: Airframe GPU inference testing — smoke tests, vault-driven verification, formula comparison, algebraic debugging.
 ---
 
 # Inference Testing Skill
 
-## One-Liner Smoke Tests (run these first, always)
+## CRITICAL: Vault-First Debugging
 
-### Fastest — TinyLlama Q4_0 (baseline, must always pass)
+**Never dive into raw vectors or step-by-step arithmetic.** Every debugging session MUST start with:
+
+1. Query the vault for the model's golden oracle data
+2. Run frontier_compare to get GPU trace
+3. Compare at the **formula level** (RMS, energies, gains)
+4. Find the first divergence → that is the only thing to fix
+5. Re-measure, confirm improvement, done
+
+## Available Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/trace_formula_diff.py` | Compare two traces using log2-fold on algebraic signatures |
+| `scripts/llama_formula_side_by_side.py` | Arch-specific formula against llama.cpp canonical equations |
+| `scripts/template_formula_alignment.py` | Template formula alignment |
+| `scripts/phi_smoke_formula.sh` | Phi formula smoke test |
+| `scripts/prompt_mode_formula_probe.sh` | Prompt mode formula probe |
+
+## One-Liner Smoke Tests
+
+### TinyLlama Q4_0 (baseline — must always pass)
 ```powershell
 cd C:\Users\micha\repos\airframe
 .\target\release\frontier_compare.exe --model "D:\shimmy-test-models\gguf_collection\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf" --prompt "hi" --max-ctx 2048 --output artifacts\tinyllama_smoke.json
-# Expected: layer 0 output MAE < 0.01, no NaN anywhere
 ```
 
-### Llama-3.2-1B Q4_K_M (Q4K regression test)
+### TinyLlama Q6_K (test target for output head Q6_K fix)
 ```powershell
-.\target\release\frontier_compare.exe --model "D:\shimmy-test-models\gguf_collection\Llama-3.2-1B-Instruct-Q4_K_M.gguf" --prompt "hi" --max-ctx 4096 --output artifacts\llama32_smoke.json
-# Expected: layer 0 MAE < 0.0001, layer 1 MAE < 0.0001, no NaN on layers 0-1
-# Layer 2+ NaN is a known frontier_compare debug issue, not production
+.\target\release\frontier_compare.exe --model "D:\shimmy-test-models\gguf_collection\tinyllama-1.1b-chat-v1.0.Q6_K.gguf" --prompt "hi" --max-ctx 2048 --output artifacts\tinyllama_q6k_trace.json
 ```
 
-### Read smoke results
+### Read smoke results (check for first bad layer)
 ```powershell
 python -c @"
 import json
-d = json.load(open('artifacts/llama32_smoke.json'))
-for l in d['layers'][:4]:
-    print(f'layer {l["layer_idx"]}: output MAE={l["output"]["mean_abs_err"]}  post_attn MAE={l["post_attn"]["mean_abs_err"]}')
-print('logits nf=', d['logits']['gpu_non_finite'])
+d=json.load(open('artifacts/tinyllama_q6k_trace.json'))
+print('layer | layer_mae | logits_nf')
+print('-'*40)
+for l in d.get('layers',[]):
+    o=l.get('output',{}); print(f'{l[\"layer_idx\"]:5d} | {o.get(\"mean_abs_err\",0):.6f} | {o.get(\"gpu_non_finite\",0)}')
+print(f'logits gpu_non_finite={d.get(\"logits\",{}).get(\"gpu_non_finite\",\"?\")}')
 "@
 ```
 
-## Vault Comparison (ground truth)
+## Vault-Driven Comparison Workflow
 
-### Query vault for a model's expected layer output RMS
+### 1. Query vault for golden oracles
 ```powershell
-duckdb vault/vault.duckdb "SELECT o.layer_idx, o.expected_rms, o.expected_nan FROM layer_oracles o JOIN models m ON o.model_id = m.id WHERE m.name LIKE '%Llama%1B%' OR m.name LIKE '%TinyLlama%' ORDER BY m.name, o.layer_idx LIMIT 20;"
+duckdb vault/vault.duckdb "SELECT o.layer_idx, o.expected_rms, o.expected_nan FROM layer_oracles o JOIN models m ON o.model_id = m.id WHERE m.name LIKE '%TinyLlama%' AND m.quant = 'q6_k' ORDER BY o.layer_idx;"
 ```
 
-### Compare GPU output against vault
+### 2. Compare GPU output vs vault per layer
 ```powershell
 python -c @"
-import json
-gpu = json.load(open('artifacts/llama32_smoke.json'))
-vault = {0:0.044914,1:0.054706,2:0.077304,3:0.086485}  # from vault query above
-for l in gpu['layers'][:4]:
-    idx = l['layer_idx']
-    g = l['output'].get('gpu_rms') or 0.0
-    v = vault.get(idx, 0)
-    pct = abs(g-v)/v*100 if v else 0
-    print(f'layer {idx}: vault={v:.5f} gpu={g:.5f} diff={pct:.1f}%')
+import json, duckdb
+con = duckdb.connect('vault/vault.duckdb')
+rows = con.execute(\"\"\"
+  SELECT o.layer_idx, o.expected_rms FROM layer_oracles o
+  JOIN models m ON o.model_id = m.id
+  WHERE m.name LIKE '%TinyLlama%' AND m.quant = 'q6_k'
+  ORDER BY o.layer_idx
+\"\"\").fetchall()
+vault = {r[0]: r[1] for r in rows}
+gpu = json.load(open('artifacts/tinyllama_q6k_trace.json'))
+print('layer | vault_rms | gpu_rms | diff%')
+for l in gpu['layers']:
+    idx=l['layer_idx']; v=vault.get(idx); g=l['output'].get('gpu_rms',0)
+    if v: print(f'{idx:4d} | {v:.5f} | {g:.5f} | {abs(g-v)/v*100:.1f}%')
 "@
 ```
 
-### List all vault models and oracle counts
+### 3. Formula diff (algebraic signatures)
 ```powershell
-duckdb vault/vault.duckdb "SELECT m.name, m.quant, COUNT(o.id) as oracles FROM models m LEFT JOIN layer_oracles o ON m.id = o.model_id GROUP BY m.name, m.quant ORDER BY oracles DESC;"
+python scripts/trace_formula_diff.py --candidate artifacts/tinyllama_q6k_trace.json --golden artifacts/tinyllama_q4k_cpu_golden.json --top 10
 ```
 
-## Shimmy Generate Test (end-to-end with template)
+### 4. Cross-validate against Candle
 ```powershell
-cd C:\Users\micha\repos\shimmy
-$env:SHIMMY_BASE_GGUF = "D:\shimmy-test-models\gguf_collection\Llama-3.2-3B-Instruct-Q4_K_M.gguf"
-$env:SHIMMY_MAX_CTX = "4096"
-$env:SHIMMY_ROPE_SCALE = "0.5"
-.\target\release\shimmy.exe generate "tinyllama-1.1b" --prompt "write hello world in python" --max-tokens 60 2>&1 | Select-String -NotMatch "^\[Metadata\]|^\[Preflight\]|^\[DIAG\]|^\[ISF"
-# Expected: coherent Python code, Llama3 instruct format
-```
-
-### TinyLlama baseline (quickest sanity check)
-```powershell
-cd C:\Users\micha\repos\shimmy
-$env:SHIMMY_BASE_GGUF = "D:\shimmy-test-models\gguf_collection\TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"
-$env:SHIMMY_MAX_CTX = "3000"
-$env:SHIMMY_ROPE_SCALE = "0.68"
-.\target\release\shimmy.exe generate "tinyllama-1.1b" --prompt "hi" --max-tokens 20 2>&1 | Select-String -NotMatch "^\[Metadata\]|^\[Preflight\]|^\[DIAG\]|^\[ISF"
-# Expected: a few words, no garbage, exits cleanly
+python vault/scripts/vault_certify.py vault/vault.duckdb vault/seeds/candle
 ```
 
 ## Build Commands
+
 ```powershell
-# Airframe lib only (fast check)
 cd C:\Users\micha\repos\airframe
-cargo build --release --bin frontier_compare
-
-# Full airframe release
-cargo build --release
-
-# Shimmy (after airframe changes)
-cd C:\Users\micha\repos\shimmy
-cargo build --release
+cargo build --release --bin frontier_compare   # Fast: trace binary only
+cargo build --release                          # Full release
 ```
 
-## What Good Looks Like
-| Test | Pass Threshold |
-|------|---------------|
-| TinyLlama frontier_compare layer 0 | MAE < 0.01 |
-| Llama-3.2-1B layer 0 | MAE < 0.001 |
-| Any model logits gpu_non_finite | 0 |
-| Vault delta for any tested model | < 50% (Q4K quantization noise is normal) |
+## Pass Thresholds
 
-## Known Issues (do not investigate unless assigned)
-- frontier_compare layer 2+ NaN on Llama-3.2: debug path only, production unaffected
-- [DIAG]/[ISF-TDR] stderr noise: cosmetic, does not affect inference correctness
+| Test | Threshold |
+|------|-----------|
+| TinyLlama layer 0 output MAE | < 0.01 |
+| Llama-3.2-1B layer 0 MAE | < 0.001 |
+| Any model logits gpu_non_finite | 0 |
+| Vault RMS delta | < 50% (Q4K quantization noise expected) |
+| Formula log2-fold divergence | < 2.0 mean |
+
+## Known Issues (Do Not Investigate Unless Assigned)
+
+- frontier_compare layer 2+ NaN on Llama-3.2: debug path only (airframe-mbc)
+- [DIAG]/[ISF-TDR] stderr noise: cosmetic (airframe-6ex)
+- Sh_layer_q4k.wgsl was deleted 2026-06-17 — do not recreate
