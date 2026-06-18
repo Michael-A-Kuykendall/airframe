@@ -63,7 +63,7 @@ bd sync               # Sync with git
 ### Active Branches
 | Repo | Branch | HEAD |
 |------|--------|------|
-| airframe | `feat/phase4-pingpong-activation` | b3edf65 (modified: .opencode/skills/ vault/vault.duckdb) |
+| airframe | `feat/phase4-pingpong-activation` | b3edf65 (modified: vault/vault.duckdb) |
 | shimmy | `fix/template-apply-raw-prompt` | cc8ee88c (ahead of origin by 1 commit — airframe-e0b fix) |
 
 ### Branch Cleanup Status (2026-06-18)
@@ -131,12 +131,12 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
  6. **airframe-dv0** [P2] — Stabilize Qwen2-1.5B-Q4_K_M (TDR).
  7. **airframe-b41** [P2] — Stabilize Gemma-2-2B-Q4_K_M (TDR).
  8. **airframe-o9e** [P2] — StarCoder2-3B fused QKV arch panic.
- 9. **airframe-uty** [P2] — TinyLlama Q6_K empty output (output head Q6_K dequant path).
 
 #### Closed this session
 - **airframe-0h5** [P1] — committed + pushed (b3edf65)
 - **airframe-e0b** [P1] — shimmy generate template wrapping fix committed + pushed (cc8ee88c)
 - **airframe-2fq** [P1] — Vault infrastructure cleanup complete: import_seeds.py auto-heal, dedup, idempotent; vault_verify.py written; inference_formulas + formula_comparisons populated
+- **airframe-uty** [P2] — TinyLlama Q6_K blob-head verified correct (MAE=0.0 vs F32 matmul). Bug was already fixed by prior V1/batch_count changes. Closed 2026-06-18.
 
 #### Vault Status (as of 2026-06-18)
 - **22 models** in vault DB, **322 oracle rows**, **0 duplicates**, **26/26 seeds import clean**
@@ -144,10 +144,10 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
 - `vault_verify.py` built — runs frontier_compare traces against vault oracles, populates `inference_formulas` + `formula_comparisons`
 - **132 formula rows** (3 models: TinyLlama Q4_0, Llama 3.2 1B, Qwen3 1.7B) — all FAIL (old buggy traces from June 17)
 - All 3 failing traces show GPU Q/K all-zeros from layer 2+ (likely pre-`batch_count:1` fix traces)
-- **8 models need fresh frontier_compare traces:** Llama 3.2 1B/3B, TinyLlama Q4_0/Q6_K, Qwen3 0.6B/1.7B/8B, DeepSeek Coder (with current code to verify bug status)
+- **TinyLlama Q6_K confirmed working:** fresh frontier_compare trace passes vault_verify at layer level (Mean log2-fold 0.0003, GvO_l2 < 0.21). Blob-head matches F32 matmul head perfectly (MAE=0.000000). Q6_K dequant formula identical across CPU Rust, sh_layer_v1.wgsl (layer), and sh_head_blob.wgsl (head).
+- **7 models need fresh frontier_compare traces:** Llama 3.2 1B/3B, TinyLlama Q4_0, Qwen3 0.6B/1.7B/8B, DeepSeek Coder (with current code to verify bug status)
 - Seed files are gitignored (regeneratable via `vault_seed`); vault DB is tracked, `vault_verify.py` is tracked
 - Key models with oracles: TinyLlama q4_0 (23), TinyLlama q6_k (23), Llama-3.2 1B q4_k_m (17), Llama-3.2 3B q4_k_m (29), Qwen3-1.7B q4_k_m (29), Qwen3-8B q4_k_m (37), deepseek-coder q4_k_m (33), deepseek-llm q4_k_m (31), qwen2 family (79 total)
-- TODO: Run vault_verify against fresh frontier_compare traces (with current code) to confirm bug fixes
 - TODO: Spike on Vault + Saturation Fabric integration
 
 ### Shimmy Template System
@@ -229,7 +229,7 @@ All public branches in **both repos** scanned for: `ghp_/gho_/ghu_/ghs_/ghr_`, `
 
 ### Current Issues (next session)
 - All 3 vault_verify comparisons FAIL (old traces) — need fresh frontier_compare traces with current code
-- 8 models need vault-driven debugging (fresh frontier_compare traces): Llama 3.2 1B/3B, TinyLlama Q4_0/Q6_K, Qwen3 0.6B/1.7B/8B, DeepSeek Coder
+- 7 models need vault-driven debugging (fresh frontier_compare traces): Llama 3.2 1B/3B, TinyLlama Q4_0, Qwen3 0.6B/1.7B/8B, DeepSeek Coder
 - 10 models have metadata only (no oracles) — vault_seed CPU forward pass fails for non-Llama architectures
 - Non-Llama models (StarCoder2, Gemma 2, DeepSeek Coder V2 MoE, GPT2) need CPU path fixes for vault_seed
 

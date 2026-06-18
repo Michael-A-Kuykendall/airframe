@@ -15,6 +15,21 @@ description: Airframe GPU inference testing — smoke tests, vault-driven verifi
 4. Find the first divergence → that is the only thing to fix
 5. Re-measure, confirm improvement, done
 
+## Analytical Formula Comparison (Dequant Debugging)
+
+When a specific dequant path is suspected broken, **do not trace individual values.** Instead:
+
+1. **Extract the dequant formula** from all three implementations (CPU Rust, WGSL layer, WGSL head) as plain text
+2. **Strip whitespace/variable names** — compare only the structural elements: nibble extractions, bit shifts, scale indices, arithmetic operations
+3. If all three are **structurally identical**, the bug is NOT in the dequant formula — look elsewhere (dispatch params, buffer bindings, weight offsets, TDR)
+4. If a formula differs, the variant that matches the CPU reference (known working) is correct
+
+**Example** (Q6_K dequant, 2026-06-18):
+- CPU Rust (`q6_k.rs:72-131`): `(b2<<4)|b1` masks, `(scale_idx&3)<<2` pattern
+- sh_layer_v1.wgsl:182-214: same nibble extractions, same scale indexing, same `fma` arithmetic
+- sh_head_blob.wgsl:120-139: identical structure to both
+- **Result:** formula confirmed correct, bug was elsewhere (batch_count:1, already fixed)
+
 ## Available Scripts
 
 | Script | Purpose |
