@@ -197,6 +197,24 @@ fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Q5_0 helper (22 bytes/block, 32 elems/block)
+// ---------------------------------------------------------------------------
+fn dequant_q5_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
+    let d_packed = extractBits(read_wt_blob(block_base_byte / 4u),
+                               (block_base_byte % 4u) * 8u, 16u);
+    let d = unpack2x16float(d_packed).x;
+    let qh_word = read_wt_blob((block_base_byte + 2u) / 4u);
+    let qh_shift = (block_base_byte + 2u) % 4u;
+    let qh = extractBits(qh_word, qh_shift * 8u, 32u);
+    let high_bit = (qh >> elem_in_block) & 1u;
+    let qs_byte = block_base_byte + 6u + (elem_in_block % 16u);
+    let raw = read_wt_byte(qs_byte);
+    let low_nibble = select(raw >> 4u, raw & 0x0Fu, elem_in_block < 16u);
+    let val_5bit = low_nibble | (high_bit << 4u);
+    return (f32(val_5bit) - 16.0) * d;
+}
+
+// ---------------------------------------------------------------------------
 // Main kernel — one thread per output vocab row
 // ---------------------------------------------------------------------------
 @compute @workgroup_size(64, 1, 1)
@@ -232,6 +250,15 @@ fn main_lm_head(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let bb = row_start + b * 144u;
             for (var e = 0u; e < 256u; e++) {
                 dot += act_in[b * 256u + e] * dequant_q4k_elem(bb, e);
+            }
+        }
+    } else if (params.quant_type == 6u) { // Q5_0  (22 bytes/block, 32 elems/block)
+        let bpr       = dim / 32u;
+        let row_start = idx * bpr * 22u;
+        for (var b = 0u; b < bpr; b++) {
+            let bb = row_start + b * 22u;
+            for (var e = 0u; e < 32u; e++) {
+                dot += act_in[b * 32u + e] * dequant_q5_0_elem(bb, e);
             }
         }
     } else if (params.quant_type == 8u) { // Q8_0  (34 bytes/block, 32 elems/block)

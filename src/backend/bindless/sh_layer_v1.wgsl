@@ -229,6 +229,34 @@ fn dequant_q8_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     return scale * f32(signed_val);
 }
 
+// -------------------------------------------------------------------------
+// Q5_0 dequant helper (type 6)
+// Q5_0 block layout (22 bytes per 32-element block):
+//   [0..1]   d      (fp16 scale)
+//   [2..5]   qh     (uint32: bit i = 5th bit of element i)
+//   [6..21]  qs     (16 nibble bytes: low nibble=elements 0..15, high nibble=elements 16..31)
+// dequant: val = (nibble | (high_bit<<4) - 16) * d
+// -------------------------------------------------------------------------
+fn dequant_q5_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
+    let d_packed = extractBits(read_blob(block_base_byte / 4u),
+                               (block_base_byte % 4u) * 8u, 16u);
+    let d = unpack2x16float(d_packed).x;
+
+    // qh: uint32 at byte offset 2
+    let qh_word = read_blob((block_base_byte + 2u) / 4u);
+    let qh_shift = (block_base_byte + 2u) % 4u;
+    let qh = extractBits(qh_word, qh_shift * 8u, 32u);
+    let high_bit = (qh >> elem_in_block) & 1u;
+
+    // qs: nibbles at byte offset 6, packed 2 per byte (low nibble = elem byte, high nibble = elem byte+16)
+    let qs_byte = block_base_byte + 6u + (elem_in_block % 16u);
+    let raw = read_byte_gguf(qs_byte);
+    let low_nibble = select(raw >> 4u, raw & 0x0Fu, elem_in_block < 16u);
+
+    let val_5bit = low_nibble | (high_bit << 4u);
+    return (f32(val_5bit) - 16.0) * d;
+}
+
 // Read a single fp16 value from an arbitrary byte offset in gguf_blob.
 fn dequant_f16_at(byte_offset: u32) -> f32 {
     let packed = extractBits(read_blob(byte_offset / 4u),
@@ -417,6 +445,16 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let val_x = temp_state[temp_base + col];
                 let val_w = dequant_q4k_elem(block_base_k, e);
                 dot += val_x * val_w;
+            }
+        }
+    } else if (qt == 6u) { // Q5_0
+        let bpr = params.dim / 32u;
+        let row_start = weight_byte_offset + row_idx * bpr * 22u;
+        for (var b = 0u; b < bpr; b++) {
+            let bb = row_start + b * 22u;
+            for (var e = 0u; e < 32u; e++) {
+                let col = b * 32u + e;
+                dot += temp_state[temp_base + col] * dequant_q5_0_elem(bb, e);
             }
         }
     } else if (qt == 8u) { // Q8_0
@@ -739,6 +777,16 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 dot += val_ctx * dequant_q4k_elem(block_base_k, e);
             }
         }
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 6u) { // Q5_0
+        let bpr = attn_dim / 32u;
+        let row_start = weight_byte_offset + idx * bpr * 22u;
+        for (var b = 0u; b < bpr; b++) {
+            let bb = row_start + b * 22u;
+            for (var e = 0u; e < 32u; e++) {
+                let col = b * 32u + e;
+                dot += temp_state[temp_base + col] * dequant_q5_0_elem(bb, e);
+            }
+        }
     } else if (((params.quant_type >> 24u) & 0xFFu) == 8u) { // Q8_0
         let bpr = attn_dim / 32u;
         let row_start = weight_byte_offset + idx * bpr * 34u;
@@ -1043,6 +1091,17 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 dot += val_x * dequant_q4k_elem(block_base_k, e);
             }
         }
+    } else if (((params.quant_type >> 24u) & 0xFFu) == 6u) { // Q5_0
+        let bpr = params.dim / 32u;
+        let row_start = weight_off + (row_idx * bpr * 22u);
+        for (var b = 0u; b < bpr; b++) {
+            let bb = row_start + b * 22u;
+            for (var e = 0u; e < 32u; e++) {
+                let col = b * 32u + e;
+                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+                dot += val_x * dequant_q5_0_elem(bb, e);
+            }
+        }
     } else if (((params.quant_type >> 24u) & 0xFFu) == 8u) { // Q8_0
         let bpr = params.dim / 32u;
         let row_start = weight_off + (row_idx * bpr * 34u);
@@ -1160,6 +1219,18 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let val_gate = temp_state[temp_base + col];
                 let val_up   = temp_state[temp_base + ffn_dim + col];
                 dot += (val_gate * val_up) * dequant_q4k_elem(block_base_k, e);
+            }
+        }
+    } else if (qt_down == 6u) { // Q5_0
+        let bpr = ffn_dim / 32u;
+        let row_start = weight_off + idx * bpr * 22u;
+        for (var b = 0u; b < bpr; b++) {
+            let bb = row_start + b * 22u;
+            for (var e = 0u; e < 32u; e++) {
+                let col = b * 32u + e;
+                let val_gate = temp_state[temp_base + col];
+                let val_up   = temp_state[temp_base + ffn_dim + col];
+                dot += (val_gate * val_up) * dequant_q5_0_elem(bb, e);
             }
         }
     } else if (qt_down == 8u) { // Q8_0
