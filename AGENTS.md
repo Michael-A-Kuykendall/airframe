@@ -38,6 +38,13 @@ bd sync               # Sync with git
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
+**ZERO TOLERANCE POLICY:**
+- This is a solo project. **Every warning, error, and lint violation MUST be fixed immediately.**
+- Never silence, suppress, or disable warnings/errors. Fix the root cause.
+- `cargo check` must produce **zero warnings**.
+- `cargo clippy -- -D warnings` must **pass clean**.
+- CI (format + clippy + build + test) must pass on every push.
+
 ---
 
 ## Workspace State (2026-06-19)
@@ -63,7 +70,7 @@ bd sync               # Sync with git
 ### Active Branches
 | Repo | Branch | HEAD |
 |------|--------|------|
-| airframe | `feat/phase4-pingpong-activation` | 25aa540 (modified: inference.rs, matmul.rs, frontier_compare.rs, CHANGELOG.md, AGENTS.md, Cargo.toml) |
+| airframe | `feat/phase4-pingpong-activation` | 907a6bc (modified: inference.rs, matmul.rs, frontier_compare.rs, gpu.rs, ci.yml, CHANGELOG.md, AGENTS.md, Cargo.toml) |
 | shimmy | `fix/template-apply-raw-prompt` | cc8ee88c (ahead of origin by 1 commit — airframe-e0b fix) |
 
 ### Branch Cleanup Status (2026-06-19)
@@ -202,21 +209,23 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
 - **Production hot path** (inference.rs): single `dispatch_workgroups(wg_head_blob, 1, 1)` replaced with tiled loop using `tdr_calibration::ensure_calibrated()`
 - **Calibration cache** (`tdr_calibration.rs`): per-(pipeline, n_embd) safe WG limits at `%LOCALAPPDATA%/Airframe/tdr-calibration.json`, conservative 512-WG default
 - **Validated**: TinyLlama Q6_K tiled vs unsplit MAE=0.0 PASS; frontier_compare layers all <0.001
-- **`.github/workflows/`** not present in branch (CI lives on public/master only)
+- **`.github/workflows/ci.yml`** — format + clippy + build + test (all must pass clean)
 
 ### Version
 - `Cargo.toml`: `0.2.5` → `0.2.6`
 - `CHANGELOG.md`: updated with all changes, deduplicated section ordering
 
 ### Dirty files (to commit)
-- `src/backend/bindless/pipeline/inference.rs` — tiled hot path
+- `src/backend/bindless/pipeline/inference.rs` — tiled hot path, div_ceil fix
 - `src/backend/bindless/pipeline/matmul.rs` — run_lm_head_blob_tiled()
-- `src/bin/frontier_compare.rs` — --validate-head-tile flag
+- `src/bin/frontier_compare.rs` — --validate-head-tile flag, collapsible_if fix
+- `src/runtime/gpu.rs` — removed dead layer_params/norm_params fields
+- `.github/workflows/ci.yml` — added format check
 - `CHANGELOG.md`, `AGENTS.md`, `Cargo.toml`
 
 ### Build Status
-- `cargo check`: **passes** (1 pre-existing dead_code warning in gpu.rs)
-- `cargo clippy -- -D warnings`: **3 pre-existing failures** (2x manual_div_ceil, 1x dead_code — not from these changes)
+- `cargo check`: **passes** (zero warnings)
+- `cargo clippy -- -D warnings`: **passes clean**
 - `frontier_compare smoke test (TinyLlama Q6_K)`: **PASS** — MAE <0.001 per-layer, head tile MAE=0.0
 
 ### Relevant Files

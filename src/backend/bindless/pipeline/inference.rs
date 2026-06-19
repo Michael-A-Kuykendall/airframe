@@ -500,7 +500,7 @@ impl BindlessPipeline {
         //
         // For decode (batch_size=1, qkv_chunk=1): 1 chunk per layer = N_layers entries.
         // For prefill (batch_size=N, qkv_chunk=512): ceil(N/512) chunks per layer.
-        let n_qkv_chunks = ((batch_size + qkv_chunk - 1) / qkv_chunk) as usize;
+        let n_qkv_chunks = batch_size.div_ceil(qkv_chunk) as usize;
         let mut _qkv_chunk_params_buffers: Vec<Vec<wgpu::Buffer>> = Vec::with_capacity(layer_count);
         let mut _qkv_chunk_bind_groups: Vec<Vec<wgpu::BindGroup>> = Vec::with_capacity(layer_count);
 

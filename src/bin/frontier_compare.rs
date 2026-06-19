@@ -160,11 +160,11 @@ async fn async_main() -> Result<()> {
     let mut weights = container.weights;
     // Force tied for Qwen3/Llama-3.2 to avoid MissingTensor output.weight in CPU trace.
     let model_str = args.model.to_string_lossy().to_lowercase();
-    if model_str.contains("qwen3") || model_str.contains("llama-3.2") {
-        if !weights.contains_key(&WeightId::OutputProj) {
-            if let Some(token) = weights.get(&WeightId::TokenEmbed).cloned() {
-                weights.insert(WeightId::OutputProj, token);
-            }
+    if (model_str.contains("qwen3") || model_str.contains("llama-3.2"))
+        && !weights.contains_key(&WeightId::OutputProj)
+    {
+        if let Some(token) = weights.get(&WeightId::TokenEmbed).cloned() {
+            weights.insert(WeightId::OutputProj, token);
         }
     }
 

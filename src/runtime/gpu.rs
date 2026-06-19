@@ -6,7 +6,7 @@
 use crate::backend::bindless::kv_cache::KVCache;
 use crate::backend::bindless::loader::BindlessModel;
 use crate::backend::bindless::metadata::BindlessMetadata;
-use crate::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
+use crate::backend::bindless::pipeline::BindlessPipeline;
 use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use crate::core::dequant::{
     dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,
@@ -71,8 +71,6 @@ pub struct GpuRuntime {
     output_head_f32: wgpu::Buffer,
     kv_cache: Arc<Mutex<KVCache>>,
     // Precomputed constants
-    layer_params: LayerParams,
-    norm_params: RMSNormParams,
     embd_weight_offset: u64,
     row_bytes: u64,
     embd_quant_type: u32,
@@ -140,7 +138,7 @@ impl GpuRuntime {
             eprintln!(
                 "[GpuRuntime] Large model ({:.0} MB): using {}-chunk bindless split",
                 model_file_size as f64 / 1_048_576.0,
-                (model_file_size + chunk_size - 1) / chunk_size
+                model_file_size.div_ceil(chunk_size)
             );
         }
 
@@ -267,58 +265,6 @@ impl GpuRuntime {
             embd_quant_type, row_bytes
         );
 
-        let weight_quant_type = gpu_model
-            .metadata
-            .get_tensor_type("blk.0.attn_q.weight")
-            .unwrap_or(2);
-        let qt_v = gpu_model
-            .metadata
-            .get_tensor_type("blk.0.attn_v.weight")
-            .unwrap_or(weight_quant_type);
-        let qt_ffn_down = gpu_model
-            .metadata
-            .get_tensor_type("blk.0.ffn_down.weight")
-            .unwrap_or(weight_quant_type);
-        let packed_quant_type = weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
-
-        let layer_params = LayerParams {
-            dim,
-            head_count: spec.n_head as u32,
-            head_count_kv: spec.n_head_kv as u32,
-            head_dim: spec.head_dim as u32,
-            rope_dim: spec.rope_dim as u32,
-            rms_eps: spec.rms_eps,
-            ffn_dim: spec.ff_dim as u32,
-            temp_stride: spec.temp_buffer_size as u32,
-            quant_type: packed_quant_type,
-            attn_logit_softcap: spec.attn_logit_softcap,
-            post_norm_enabled: if spec.arch_string().contains("gemma") {
-                1
-            } else {
-                0
-            },
-            qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
-            layer_norm_enabled: 0,
-            ffn_kind_policy: 0,
-            qkv_layout_policy: 0,
-            batch_offset: 0,
-            batch_count: 0, // placeholder — overridden per-dispatch in inference.rs
-            q_weight_k: 0,
-            k_weight_k: 0,
-        };
-
-        let norm_weight_offset = gpu_model
-            .metadata
-            .get_tensor_offset("output_norm.weight")
-            .expect("output_norm.weight not found") as u32;
-        let norm_params = RMSNormParams {
-            count: dim,
-            weights_offset: norm_weight_offset,
-            bias_offset: 0,
-            eps: spec.rms_eps,
-            norm_type: 0,
-        };
-
         let eos_token = tokenizer.eos_token();
         let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
             if v.len() == 1 {
@@ -338,8 +284,6 @@ impl GpuRuntime {
             spec,
             output_head_f32,
             kv_cache,
-            layer_params,
-            norm_params,
             embd_weight_offset,
             row_bytes,
             embd_quant_type,
