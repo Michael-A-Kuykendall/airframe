@@ -70,7 +70,7 @@ bd sync               # Sync with git
 ### Active Branches
 | Repo | Branch | HEAD |
 |------|--------|------|
-| airframe | `feat/phase4-pingpong-activation` | 5f12d74 (clean) |
+| airframe | `feat/phase4-pingpong-activation` | 1668836 (clean, pushed to private) |
 | shimmy | `fix/template-apply-raw-prompt` | cc8ee88c (ahead of origin by 1 commit — airframe-e0b fix) |
 
 ### Branch Cleanup Status (2026-06-19)
@@ -217,6 +217,8 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
 - `CHANGELOG.md`: updated with all changes, deduplicated section ordering
 
 ### Dirty files (to commit)
+- `src/backend/bindless/sh_head_blob.wgsl` — Q5_0 dequant function + kernel branch
+- `src/backend/bindless/sh_layer_v1.wgsl` — Q5_0 branches in QKV, AttnProj, FFNProj, FFNDown
 - `src/backend/bindless/pipeline/inference.rs` — tiled hot path, div_ceil fix
 - `src/backend/bindless/pipeline/matmul.rs` — run_lm_head_blob_tiled()
 - `src/bin/frontier_compare.rs` — --validate-head-tile flag, collapsible_if fix
@@ -242,37 +244,43 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
 
 ### Open Beads
 - **airframe-mbc** [P2] — CLOSED (per-layer quant_type fix for Q4_K_M mixed V projection)
-- **airframe-cjk** [P1] — PARTIAL FIX: Qwen2-1.5B NaN fixed. Qwen2-0.5B still NaN (uses unsupported Q5_0 quant type 6 in shader)
+- **airframe-cjk** [P1] — CLOSED (Q5_0 dequant support, Qwen2-0.5B NaN fixed)
+- **airframe-dv0** [P2] — CLOSED (Qwen2-1.5B NaN fixed by per-layer quant_type)
+- **airframe-6jg** [P2] — CLOSED (shader dispatch splitting + hot path)
 - **airframe-dna** [P2] — Qwen3 QK-norm path: no NaN (improved by quant fix) but high divergence (MAE 28+ at final layer)
 - **airframe-nkf** [P2] — DeepSeek-Coder-V2 MLA: missing tensor name mapping
 - **airframe-3nc** [P2] — Fused QKV weights: Phi-3.5, phi-2, phi3-mini
 - **airframe-o9e** [P2] — StarCoder2 fused FFN gate panic
 - **airframe-6ex** [P2] — stderr noise cleanup (eprintln! in gpu.rs, isf.rs)
-- **airframe-6jg** [P2] — DONE (shader splitting + hot path)
 - **airframe-mbt** [P2] — GPU timestamp query pool
 - **airframe-68s** [P2] — Calibration sweep (blocked by mbt)
 - **airframe-eri** [P2] — Encoder pool design
 - **airframe-dar** [P2] — ISF integration spec
 - **airframe-q5d** [P2] — Migration & rollout plan
 - **airframe-zuy** [P3] — Cross-platform policy
-- **Q5_0 quant support** [not yet tracked] — Qwen2-0.5B needs Q5_0 (type 6) dequant in sh_layer_v1.wgsl. Currently falls through to Q4_0 fallback producing NaN.
 
-## Session 2026-06-19 (Part 2)
+## Session 2026-06-19 (Part 3)
 
 ### Accomplished
-- **airframe-mbc (P0) FIXED**: Per-layer quant_type fix for Q4_K_M mixed-quant V projection. Q4_K_M models alternate V weight quant between Q6_K (14) and Q4_K (12) per-layer. Frontier_compare hardcoded `blk.0` types for ALL layers → layers where V is Q4_K got Q6_K dequant → garbage V (~500M) → NaN cascade from layer 2+.
-- **Structured `layer_diags`**: Added to `ProbeOutput` JSON — per-layer quant types, weight offsets, routing policy. No more eprintln! diagnostics.
-- **Vault migration 003**: `layer_diags` table created; `vault_verify.py` populates it from traces.
-- **Qwen2-1.5B**: NaN cascade fixed (all layers now produce finite output, MAE < 4).
+- **airframe-cjk (P1) FIXED**: Q5_0 dequant (type 6) added to all 4 kernels in `sh_layer_v1.wgsl` (QKV, AttnProj, FFNProj, FFNDown) plus `sh_head_blob.wgsl`. Q5_0 block format: 22 bytes/32-elem block, fp16 scale + uint32 high bits + 16 bytes packed nibbles. `dequant_q5_0_elem` function existed but was never wired into the quant branch chains.
+- **Qwen2-0.5B Q4_K_M**: NaN cascade from layer 0 → all 24 layers finite, MAE 0.12→4.29 (quantization noise accumulation, expected). Logits also finite (MAE 4.52).
+- **Beads closed**: airframe-cjk, airframe-dv0 (Qwen2 NaN), airframe-6jg (TDR dispatch splitting, was already done).
+- **All quality gates pass**: `cargo check` (zero warnings), `cargo clippy -- -D warnings` (clean), `cargo fmt --check` (clean).
+- **Pushed to private remote**: `1668836` on `feat/phase4-pingpong-activation`.
 
 ### Remaining
-- **Qwen2-0.5B**: Still NaN from layer 0 — uses unsupported Q5_0 (type 6) quant. Shader `sh_layer_v1.wgsl` needs Q5_0 dequant.
-- **Qwen3 QK-norm**: Improved (no NaN) but still diverging (MAE 28+ at final layer).
+- **Qwen3 QK-norm** (airframe-dna): No NaN but still diverging (MAE 28+ at final layer).
 - **Loader gaps**: Fused QKV (airframe-3nc), StarCoder2 FFN gate (airframe-o9e), MLA (airframe-nkf).
-- **Shimmy**: `C:\Users\micha\repos\shimmy`, branch `fix/template-apply-raw-prompt`, 1 commit ahead of origin.
+- **Shimmy**: `fix/template-apply-raw-prompt`, 1 commit ahead of origin (not pushed).
+
+### Current Smoke Test Status
+- PASS: TinyLlama Q4_0, TinyLlama Q6_K, Llama-3.2-1B Q4_K_M, Qwen2-1.5B Q4_K_M, **Qwen2-0.5B Q4_K_M**
+- FAIL (QK-norm divergence): Qwen3-0.6B/1.7B Q4_K_M
+- FAIL (loader gap): Phi-3.5, phi-2, phi3-mini, StarCoder2-3B, DeepSeek-Coder-V2
+- FAIL (VRAM OOM): Gemma-2-2B
 
 ### Key Insight
 - **`quant_type` must be per-layer**, never derived from `blk.0`. Both frontier_compare and any new LayerParams construction code must respect this.
+- **Q5_0 is used by Qwen2 family** for Q/K/gate/up/out projections even in "Q4_K_M" quantized models. Qwen2-0.5B uses Q5_0 for 6 weight types, Q8_0 for token_embd/V, Q4_K for attn_k/ffn_down alternating.
 
-### Full context
 See `docs/internal/opencode-handoff-2026-06-18.md` for prior session history.
