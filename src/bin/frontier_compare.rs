@@ -84,6 +84,30 @@ struct LayerComparison {
 }
 
 #[derive(Serialize)]
+struct LayerDiag {
+    layer_idx: usize,
+    q_quant: u32,
+    k_quant: u32,
+    v_quant: u32,
+    ffn_gate_quant: u32,
+    ffn_down_quant: u32,
+    ffn_up_quant: u32,
+    attn_out_quant: u32,
+    v_offset: u64,
+    q_offset: u64,
+    k_offset: u64,
+    ffn_gate_offset: u64,
+    ffn_down_offset: u64,
+    ffn_up_offset: u64,
+    ffn_kind: u32,
+    qkv_layout: u32,
+    qk_norm: u32,
+    post_norm: u32,
+    layer_norm: u32,
+    batch_count: u32,
+}
+
+#[derive(Serialize)]
 struct LogitTopK {
     token_id: usize,
     logit: f32,
@@ -102,6 +126,7 @@ struct ProbeOutput {
     cpu_topk: Vec<LogitTopK>,
     gpu_topk: Vec<LogitTopK>,
     layers: Vec<LayerComparison>,
+    layer_diags: Vec<LayerDiag>,
 }
 
 #[derive(Clone)]
@@ -358,24 +383,10 @@ async fn async_main() -> Result<()> {
         k_weight_k: 0,
     };
 
-    eprintln!(
-        "[DIAG] temp_stride={} dim={} head_count={} head_count_kv={} head_dim={} ffn_dim={}",
-        layer_params.temp_stride, layer_params.dim, layer_params.head_count, layer_params.head_count_kv, layer_params.head_dim, layer_params.ffn_dim
-    );
-    eprintln!(
-        "[DIAG] qk_norm={} post_norm={} layer_norm={} ffn_kind={} qkv_layout={} batch_count={}",
-        layer_params.qk_norm_enabled, layer_params.post_norm_enabled, layer_params.layer_norm_enabled,
-        layer_params.ffn_kind_policy, layer_params.qkv_layout_policy, layer_params.batch_count
-    );
-    let qt_main = layer_params.quant_type & 0xFF;
-    let qt_v = (layer_params.quant_type >> 8) & 0xFF;
-    let qt_down = (layer_params.quant_type >> 16) & 0xFF;
-    let qt_out = (layer_params.quant_type >> 24) & 0xFF;
-    eprintln!("[DIAG] quant_type=0x{:08x} main={} v={} ffn_down={} out={}", layer_params.quant_type, qt_main, qt_v, qt_down, qt_out);
-
     eprintln!("[GPU vs CPU] comparing {} layers ...", spec.n_layer);
     let mut gpu_hidden = target_input.clone();
     let mut layer_comparisons = Vec::with_capacity(spec.n_layer);
+    let mut layer_diags = Vec::with_capacity(spec.n_layer);
     // Note: layer_idx is used legitimately as an index for cpu_layers, metadata, and pipeline
     #[allow(clippy::needless_range_loop)]
     for layer_idx in 0..spec.n_layer {
@@ -386,6 +397,15 @@ async fn async_main() -> Result<()> {
                 name: format!("layer_offsets_{layer_idx}"),
             })?;
 
+        // Per-layer quant_type: Q4_K_M models can have different quant per tensor per layer
+        let qt = |name: &str| gpu_model.metadata.get_tensor_type(name).unwrap_or(0);
+        let key = |s: &str| format!("blk.{}.{}", layer_idx, s);
+        let l_qt_main = qt(&key("attn_q.weight"));
+        let l_qt_v = qt(&key("attn_v.weight"));
+        let l_qt_down = qt(&key("ffn_down.weight"));
+        let l_qt_out = qt(&key("attn_output.weight"));
+        let mut layer_params = layer_params;
+        layer_params.quant_type = l_qt_main | (l_qt_v << 8) | (l_qt_down << 16) | (l_qt_out << 24);
 
         let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = pipeline
             .run_layer_with_cache_debug(
@@ -399,17 +419,29 @@ async fn async_main() -> Result<()> {
                 layer_params,
             );
 
-        eprintln!(
-            "[DIAG] L{} v_offset={} q_count={} k_count={} v_first={}",
+        // Capture per-layer quant types and offsets as structured vault data
+        layer_diags.push(LayerDiag {
             layer_idx,
-            offsets.attn_v,
-            gpu_q.iter().filter(|&&x| x.is_finite()).count(),
-            gpu_k.iter().filter(|&&x| x.is_finite()).count(),
-            gpu_v.first().map(|x| format!("{:.2}", x)).unwrap_or_default(),
-        );
-        let vt = gpu_model.metadata.get_tensor_type(&format!("blk.{}.attn_v.weight", layer_idx));
-        let qt_m = gpu_model.metadata.get_tensor_type(&format!("blk.{}.attn_q.weight", layer_idx));
-        eprintln!("[DIAG] L{} attn_q_type={:?} attn_v_type={:?}", layer_idx, qt_m, vt);
+            q_quant: l_qt_main,
+            k_quant: qt(&key("attn_k.weight")),
+            v_quant: l_qt_v,
+            ffn_gate_quant: qt(&key("ffn_gate.weight")),
+            ffn_down_quant: l_qt_down,
+            ffn_up_quant: qt(&key("ffn_up.weight")),
+            attn_out_quant: l_qt_out,
+            v_offset: offsets.attn_v as u64,
+            q_offset: offsets.attn_q as u64,
+            k_offset: offsets.attn_k as u64,
+            ffn_gate_offset: offsets.ffn_gate as u64,
+            ffn_down_offset: offsets.ffn_down as u64,
+            ffn_up_offset: offsets.ffn_up as u64,
+            ffn_kind: layer_params.ffn_kind_policy,
+            qkv_layout: layer_params.qkv_layout_policy,
+            qk_norm: layer_params.qk_norm_enabled,
+            post_norm: layer_params.post_norm_enabled,
+            layer_norm: layer_params.layer_norm_enabled,
+            batch_count: layer_params.batch_count,
+        });
 
         let cpu_layer = &cpu_layers[layer_idx];
         let cmp = LayerComparison {
@@ -563,6 +595,7 @@ async fn async_main() -> Result<()> {
         cpu_topk: topk(&cpu_logits, 10),
         gpu_topk: topk(&gpu_logits, 10),
         layers: layer_comparisons,
+        layer_diags,
     };
 
     let json = serde_json::to_string_pretty(&probe).map_err(|err| {

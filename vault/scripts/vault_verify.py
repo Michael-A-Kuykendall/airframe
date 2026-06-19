@@ -239,6 +239,111 @@ def get_vault_oracles(con: duckdb.DuckDBPyConnection, model_id: int) -> Dict[int
     return {int(r[0]): float(r[1] or 0.0) for r in rows}
 
 
+# ─── Layer diagnostics ────────────────────────────────────────────────────────
+
+def ensure_layer_diags_table(con: duckdb.DuckDBPyConnection) -> None:
+    """Create layer_diags table if it does not exist (migration 003)."""
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS layer_diags (
+            id              INTEGER PRIMARY KEY,
+            model_id        INTEGER NOT NULL REFERENCES models(id),
+            layer_idx       INTEGER NOT NULL,
+            q_quant         INTEGER NOT NULL DEFAULT 0,
+            k_quant         INTEGER NOT NULL DEFAULT 0,
+            v_quant         INTEGER NOT NULL DEFAULT 0,
+            ffn_gate_quant  INTEGER NOT NULL DEFAULT 0,
+            ffn_down_quant  INTEGER NOT NULL DEFAULT 0,
+            ffn_up_quant    INTEGER NOT NULL DEFAULT 0,
+            attn_out_quant  INTEGER NOT NULL DEFAULT 0,
+            v_offset        BIGINT NOT NULL DEFAULT 0,
+            q_offset        BIGINT NOT NULL DEFAULT 0,
+            k_offset        BIGINT NOT NULL DEFAULT 0,
+            ffn_gate_offset BIGINT NOT NULL DEFAULT 0,
+            ffn_down_offset BIGINT NOT NULL DEFAULT 0,
+            ffn_up_offset   BIGINT NOT NULL DEFAULT 0,
+            ffn_kind        INTEGER NOT NULL DEFAULT 0,
+            qkv_layout      INTEGER NOT NULL DEFAULT 0,
+            qk_norm         INTEGER NOT NULL DEFAULT 0,
+            post_norm       INTEGER NOT NULL DEFAULT 0,
+            layer_norm      INTEGER NOT NULL DEFAULT 0,
+            batch_count     INTEGER NOT NULL DEFAULT 1,
+            source_trace    VARCHAR,
+            created_at      TIMESTAMP DEFAULT NOW(),
+            UNIQUE(model_id, layer_idx, source_trace)
+        )
+    """)
+
+
+def insert_layer_diags(con: duckdb.DuckDBPyConnection, model_id: int, trace_path: Path) -> int:
+    """Upsert layer diagnostics from a frontier_compare trace into vault."""
+    with open(trace_path) as f:
+        trace = json.load(f)
+
+    diags = trace.get("layer_diags", [])
+    if not diags:
+        return 0
+
+    source = trace_path.name
+    count = 0
+    max_id = con.execute("SELECT COALESCE(MAX(id), 0) FROM layer_diags").fetchone()[0]
+
+    for d in diags:
+        li = int(d["layer_idx"])
+        existing = con.execute(
+            "SELECT id FROM layer_diags WHERE model_id=? AND layer_idx=? AND source_trace=?",
+            [model_id, li, source]
+        ).fetchone()
+        if existing:
+            con.execute("""
+                UPDATE layer_diags SET
+                    q_quant=?, k_quant=?, v_quant=?,
+                    ffn_gate_quant=?, ffn_down_quant=?, ffn_up_quant=?, attn_out_quant=?,
+                    v_offset=?, q_offset=?, k_offset=?,
+                    ffn_gate_offset=?, ffn_down_offset=?, ffn_up_offset=?,
+                    ffn_kind=?, qkv_layout=?, qk_norm=?, post_norm=?, layer_norm=?, batch_count=?
+                WHERE id=?
+            """, [
+                d["q_quant"], d["k_quant"], d["v_quant"],
+                d["ffn_gate_quant"], d["ffn_down_quant"], d["ffn_up_quant"], d["attn_out_quant"],
+                d["v_offset"], d["q_offset"], d["k_offset"],
+                d["ffn_gate_offset"], d["ffn_down_offset"], d["ffn_up_offset"],
+                d["ffn_kind"], d["qkv_layout"], d["qk_norm"], d["post_norm"], d["layer_norm"], d["batch_count"],
+                existing[0]
+            ])
+        else:
+            max_id += 1
+            con.execute("""
+                INSERT INTO layer_diags (
+                    id, model_id, layer_idx,
+                    q_quant, k_quant, v_quant,
+                    ffn_gate_quant, ffn_down_quant, ffn_up_quant, attn_out_quant,
+                    v_offset, q_offset, k_offset,
+                    ffn_gate_offset, ffn_down_offset, ffn_up_offset,
+                    ffn_kind, qkv_layout, qk_norm, post_norm, layer_norm, batch_count,
+                    source_trace
+                ) VALUES (
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
+                    ?
+                )
+            """, [
+                max_id, model_id, li,
+                d["q_quant"], d["k_quant"], d["v_quant"],
+                d["ffn_gate_quant"], d["ffn_down_quant"], d["ffn_up_quant"], d["attn_out_quant"],
+                d["v_offset"], d["q_offset"], d["k_offset"],
+                d["ffn_gate_offset"], d["ffn_down_offset"], d["ffn_up_offset"],
+                d["ffn_kind"], d["qkv_layout"], d["qk_norm"], d["post_norm"], d["layer_norm"], d["batch_count"],
+                source
+            ])
+        count += 1
+
+    return count
+
+
 # ─── Core verification ────────────────────────────────────────────────────────
 
 def verify_trace(con: duckdb.DuckDBPyConnection, trace_path: Path, model_id: int) -> List[LayerComparison]:
@@ -498,10 +603,13 @@ def main() -> int:
         n_cpu = insert_formulas(con, model_id, "frontier_cpu", comparisons, "cpu")
         n_gpu = insert_formulas(con, model_id, "frontier_gpu", comparisons, "gpu")
         passed = insert_comparison(con, model_id, comparisons, trace_path)
+        # Import layer diagnostics
+        ensure_layer_diags_table(con)
+        n_diags = insert_layer_diags(con, model_id, trace_path)
         con.commit()
 
         print_report(comparisons, info["name"], trace_path.name, passed)
-        print(f"  Inserted: {n_cpu} CPU formulas + {n_gpu} GPU formulas")
+        print(f"  Inserted: {n_cpu} CPU formulas + {n_gpu} GPU formulas + {n_diags} layer_diags")
         print(f"  Verdict: {'PASS' if passed else 'FAIL'} (threshold={LOG2_FOLD_FAIL_THRESHOLD})")
         return 0 if passed else 2
 
@@ -538,13 +646,16 @@ def main() -> int:
         n_cpu = insert_formulas(con, model_id, "frontier_cpu", comparisons, "cpu")
         n_gpu = insert_formulas(con, model_id, "frontier_gpu", comparisons, "gpu")
         passed = insert_comparison(con, model_id, comparisons, trace_path)
+        # Import layer diagnostics
+        ensure_layer_diags_table(con)
+        n_diags = insert_layer_diags(con, model_id, trace_path)
         con.commit()
 
         folds = [c.formula_log2fold for c in comparisons if c.formula_log2fold < 100]
         mean_fold = statistics.fmean(folds) if folds else 999.0
 
         status = "PASS" if passed else "FAIL"
-        print(f"    Layers: {len(comparisons):2d}  Mean L2: {mean_fold:.4f}  [{status}]")
+        print(f"    Layers: {len(comparisons):2d}  Mean L2: {mean_fold:.4f}  Diags: {n_diags} [{status}]")
 
         if passed:
             total_passed += 1
