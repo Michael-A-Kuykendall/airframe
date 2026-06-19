@@ -229,18 +229,24 @@ async fn async_main() -> Result<()> {
             name: "token_embd.weight".to_string(),
         })?;
     // Type-aware embedding row stride (fixes wrong offset for Q6_K/Q4_K embeddings)
-    let embd_quant_type = gpu_model.metadata.get_tensor_type("token_embd.weight").unwrap_or(2);
+    let embd_quant_type = gpu_model
+        .metadata
+        .get_tensor_type("token_embd.weight")
+        .unwrap_or(2);
     let row_bytes: u32 = match embd_quant_type {
-        0  => dim * 4,
-        1  => dim * 2,
-        2  => (dim / 32) * 18,
-        8  => (dim / 32) * 34,
+        0 => dim * 4,
+        1 => dim * 2,
+        2 => (dim / 32) * 18,
+        8 => (dim / 32) * 34,
         12 => (dim / 256) * 144,
         13 => (dim / 256) * 176,
         14 => (dim / 256) * 210,
-        _  => (dim / 32) * 18,
+        _ => (dim / 32) * 18,
     };
-    eprintln!("[frontier_compare] token_embd quant_type={} row_bytes={}", embd_quant_type, row_bytes);
+    eprintln!(
+        "[frontier_compare] token_embd quant_type={} row_bytes={}",
+        embd_quant_type, row_bytes
+    );
 
     if !prefix_tokens.is_empty() {
         {
@@ -322,10 +328,22 @@ async fn async_main() -> Result<()> {
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
         quant_type: {
-            let qt_main = gpu_model.metadata.get_tensor_type("blk.0.attn_q.weight").unwrap_or(2);
-            let qt_v    = gpu_model.metadata.get_tensor_type("blk.0.attn_v.weight").unwrap_or(qt_main);
-            let qt_down = gpu_model.metadata.get_tensor_type("blk.0.ffn_down.weight").unwrap_or(qt_main);
-            let qt_out  = gpu_model.metadata.get_tensor_type("blk.0.attn_output.weight").unwrap_or(qt_main);
+            let qt_main = gpu_model
+                .metadata
+                .get_tensor_type("blk.0.attn_q.weight")
+                .unwrap_or(2);
+            let qt_v = gpu_model
+                .metadata
+                .get_tensor_type("blk.0.attn_v.weight")
+                .unwrap_or(qt_main);
+            let qt_down = gpu_model
+                .metadata
+                .get_tensor_type("blk.0.ffn_down.weight")
+                .unwrap_or(qt_main);
+            let qt_out = gpu_model
+                .metadata
+                .get_tensor_type("blk.0.attn_output.weight")
+                .unwrap_or(qt_main);
             qt_main | (qt_v << 8) | (qt_down << 16) | (qt_out << 24)
         },
         attn_logit_softcap: 0.0,
@@ -395,9 +413,11 @@ async fn async_main() -> Result<()> {
     // Tied-embedding models (Qwen3, Llama-3.2) have no OutputProj — fall back to TokenEmbed
     let model_str = args.model.to_string_lossy().to_lowercase();
     let output_proj = if model_str.contains("qwen3") || model_str.contains("llama-3.2") {
-        weights.get(&WeightId::TokenEmbed).ok_or_else(|| LibshimmyError::MissingTensor {
-            name: "token_embd.weight (tied embedding for qwen3/llama-3.2)".to_string(),
-        })?
+        weights
+            .get(&WeightId::TokenEmbed)
+            .ok_or_else(|| LibshimmyError::MissingTensor {
+                name: "token_embd.weight (tied embedding for qwen3/llama-3.2)".to_string(),
+            })?
     } else {
         weights
             .get(&WeightId::OutputProj)
@@ -439,39 +459,68 @@ async fn async_main() -> Result<()> {
 
     // Optional: validate head blob dispatch splitting
     if args.validate_head_tile {
-        let head_tensor_name = if gpu_model.metadata.get_tensor_type("output.weight").is_some() {
+        let head_tensor_name = if gpu_model
+            .metadata
+            .get_tensor_type("output.weight")
+            .is_some()
+        {
             "output.weight"
         } else {
             "token_embd.weight"
         };
         let hd_vocab = spec.n_vocab as u32;
         let hd_dim = dim;
-        let hd_off = (gpu_model.metadata.get_tensor_offset(head_tensor_name).unwrap_or(0) / 4) as u32;
-        let hd_qt = gpu_model.metadata.get_tensor_type(head_tensor_name).unwrap_or(2);
+        let hd_off = (gpu_model
+            .metadata
+            .get_tensor_offset(head_tensor_name)
+            .unwrap_or(0)
+            / 4) as u32;
+        let hd_qt = gpu_model
+            .metadata
+            .get_tensor_type(head_tensor_name)
+            .unwrap_or(2);
         let hd_softcap = spec.final_logit_softcap;
 
-        eprintln!("[HEAD-TILE] validating tiled dispatch (max_safe_wgs={})...", args.max_safe_wgs);
+        eprintln!(
+            "[HEAD-TILE] validating tiled dispatch (max_safe_wgs={})...",
+            args.max_safe_wgs
+        );
 
         let tiled_logits = pipeline.run_lm_head_blob_tiled(
-            &device, &queue, &gpu_model, &gpu_norm,
-            hd_vocab, hd_dim, hd_off, hd_qt, hd_softcap,
+            &device,
+            &queue,
+            &gpu_model,
+            &gpu_norm,
+            hd_vocab,
+            hd_dim,
+            hd_off,
+            hd_qt,
+            hd_softcap,
             args.max_safe_wgs,
         );
 
         let unsplit_logits = pipeline.run_lm_head_blob(
-            &device, &queue, &gpu_model, &gpu_norm,
-            hd_vocab, hd_dim, hd_off, hd_qt, hd_softcap,
+            &device, &queue, &gpu_model, &gpu_norm, hd_vocab, hd_dim, hd_off, hd_qt, hd_softcap,
         );
 
-        let mae = tiled_logits.iter().zip(unsplit_logits.iter())
+        let mae = tiled_logits
+            .iter()
+            .zip(unsplit_logits.iter())
             .map(|(a, b)| (a - b).abs())
-            .sum::<f32>() / tiled_logits.len() as f32;
-        let max_ae = tiled_logits.iter().zip(unsplit_logits.iter())
+            .sum::<f32>()
+            / tiled_logits.len() as f32;
+        let max_ae = tiled_logits
+            .iter()
+            .zip(unsplit_logits.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
 
-        eprintln!("[HEAD-TILE] tiled_vs_unsplit: MAE={:.8} max_AE={:.6} PASS={}",
-            mae, max_ae, if mae < 1e-6f32 { "YES" } else { "NO" });
+        eprintln!(
+            "[HEAD-TILE] tiled_vs_unsplit: MAE={:.8} max_AE={:.6} PASS={}",
+            mae,
+            max_ae,
+            if mae < 1e-6f32 { "YES" } else { "NO" }
+        );
     }
 
     let probe = ProbeOutput {
@@ -558,7 +607,14 @@ fn dequantize_embeddings(
     let mut batched = Vec::with_capacity(tokens.len() * dim as usize);
     for &token_id in tokens {
         let row_offset = embd_weight_offset + token_id as u64 * row_bytes as u64;
-        let embd = pipeline.run_dequant_any_hot(device, queue, model, row_offset as u32, dim, embd_quant_type);
+        let embd = pipeline.run_dequant_any_hot(
+            device,
+            queue,
+            model,
+            row_offset as u32,
+            dim,
+            embd_quant_type,
+        );
         batched.extend_from_slice(&embd);
     }
     batched
@@ -578,7 +634,9 @@ fn load_output_head_f32(
         let has_output = gpu_model
             .metadata
             .get_tensor_type("output.weight")
-            .is_some() && !model_str.contains("qwen3") && !model_str.contains("llama-3.2");
+            .is_some()
+            && !model_str.contains("qwen3")
+            && !model_str.contains("llama-3.2");
         if has_output {
             let wt = gpu_model.metadata.get_tensor_type("output.weight").unwrap();
             let off = gpu_model
@@ -679,7 +737,14 @@ fn cpu_debug_target_token(
     let is_qwen_small = spec.n_embd == 1024 && spec.n_layer == 28;
     if is_qwen_small {
         let z = vec![0f32; spec.n_embd];
-        let dummy = CpuLayerDebug { q: z.clone(), k: z.clone(), v: z.clone(), post_attn: z.clone(), ffn_out: z.clone(), output: z.clone() };
+        let dummy = CpuLayerDebug {
+            q: z.clone(),
+            k: z.clone(),
+            v: z.clone(),
+            post_attn: z.clone(),
+            ffn_out: z.clone(),
+            output: z.clone(),
+        };
         return Ok((0..spec.n_layer).map(|_| dummy.clone()).collect());
     }
     let mut hidden = Tensor::new(
@@ -783,8 +848,10 @@ fn summarize_pair(cpu: &[f32], gpu: &[f32]) -> SummaryStats {
         // Qwen3-0.6B etc: cpu dummy or packed 1024 vs gpu capture 2048; produce usable stats from gpu side
         // so table json + formula method can still diagnose divergence (our gpu col) without panic.
         let gmax = gpu.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
-        let grms = if gpu.is_empty() { 0.0 } else {
-            (gpu.iter().map(|&v| v*v).sum::<f32>() / gpu.len() as f32).sqrt()
+        let grms = if gpu.is_empty() {
+            0.0
+        } else {
+            (gpu.iter().map(|&v| v * v).sum::<f32>() / gpu.len() as f32).sqrt()
         };
         let gnon = gpu.iter().filter(|&&v| !v.is_finite()).count();
         return SummaryStats {

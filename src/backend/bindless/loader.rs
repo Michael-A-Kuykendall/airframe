@@ -119,9 +119,7 @@ impl BindlessModel {
         // This avoids the ~60-240s blocking read_to_end() + RAM copy
         // OS pages data on-demand as GPU reads, no intermediate RAM copy
         println!("[BindlessLoader] Memory-mapping GGUF file...");
-        let mmap = unsafe {
-            Mmap::map(&file).expect("Failed to mmap GGUF file")
-        };
+        let mmap = unsafe { Mmap::map(&file).expect("Failed to mmap GGUF file") };
 
         // Create buffer with mapped_at_creation, then copy from mmap
         // This is faster than read_to_end because mmap doesn't allocate
@@ -137,9 +135,12 @@ impl BindlessModel {
         });
 
         // Copy from mmap to GPU buffer (fast, OS handles page faults)
-        gpu_buffer.slice(..).get_mapped_range_mut().copy_from_slice(&mmap[..]);
+        gpu_buffer
+            .slice(..)
+            .get_mapped_range_mut()
+            .copy_from_slice(&mmap[..]);
         gpu_buffer.unmap();
-        
+
         println!("[BindlessLoader] GPU buffer created from mmap (non-blocking)...");
 
         // JIT FUSION: Extract resources from mmap while GPU uploads
@@ -147,7 +148,10 @@ impl BindlessModel {
         let preflight = if let Some(spec) = spec {
             println!("[BindlessLoader] Launching Preflight Fusion (from mmap)...");
             Some(PreflightResources::new_from_ram(
-                device, &mmap[..], &metadata, spec,
+                device,
+                &mmap[..],
+                &metadata,
+                spec,
             ))
         } else {
             println!("[BindlessLoader] No Spec provided, skipping Preflight (Raw Mode).");

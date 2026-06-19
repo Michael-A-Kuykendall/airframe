@@ -364,7 +364,7 @@ impl BindlessPipeline {
         // For ping-pong: two bind group arrays — one with activation_buffer (A) at binding 1,
         // one with activation_buffer_b (B). Layer i uses set_a when i%2==0, set_b when i%2==1.
         // For the old path (use_pingpong=false): only set_a is used; set_b is empty.
-        let mut layer_bind_groups = Vec::new();   // set A: activation_buffer at binding 1
+        let mut layer_bind_groups = Vec::new(); // set A: activation_buffer at binding 1
         let mut layer_bind_groups_b = Vec::new(); // set B: activation_buffer_b at binding 1
         let mut _offset_buffers = Vec::new(); // Keep alive
         let mut _params_buffers: Vec<wgpu::Buffer> = Vec::new(); // Keep alive
@@ -529,27 +529,74 @@ impl BindlessPipeline {
                     batch_count: this_chunk,
                     ..layer_params_base
                 };
-                let chunk_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("L{}-QKV-chunk{}-Params", i, qkv_offset)),
-                    contents: bytemuck::bytes_of(&chunk_params),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+                let chunk_params_buf =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("L{}-QKV-chunk{}-Params", i, qkv_offset)),
+                        contents: bytemuck::bytes_of(&chunk_params),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
                 let chunk_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some(&format!("L{}-QKV-chunk{}-BG", i, qkv_offset)),
                     layout: &self.layer_layout,
                     entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: model.blob_binding_0() },
-                        wgpu::BindGroupEntry { binding: 1, resource: activation_buffer.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 2, resource: temp_buffer.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 3, resource: offsets_buf.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 4, resource: chunk_params_buf.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 5, resource: model.preflight.as_ref().unwrap().norm_bank_buffer.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 6, resource: model.preflight.as_ref().unwrap().rope_cache_buffer.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 7, resource: kv_buffer_k_ref.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 8, resource: kv_buffer_v_ref.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 9, resource: cache_params_buffer.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 10, resource: model.blob_binding_1() },
-                        wgpu::BindGroupEntry { binding: 11, resource: model.blob_binding_2() },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: model.blob_binding_0(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: activation_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: temp_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: offsets_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: chunk_params_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .norm_bank_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .rope_cache_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: kv_buffer_k_ref.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: kv_buffer_v_ref.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 9,
+                            resource: cache_params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 10,
+                            resource: model.blob_binding_1(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 11,
+                            resource: model.blob_binding_2(),
+                        },
                     ],
                 });
                 layer_chunk_params.push(chunk_params_buf);
@@ -808,10 +855,12 @@ impl BindlessPipeline {
             );
 
             {
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - AttnNorm", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - AttnNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
@@ -830,10 +879,15 @@ impl BindlessPipeline {
                 while qkv_offset < batch_size {
                     let this_chunk = (batch_size - qkv_offset).min(qkv_chunk);
                     {
-                        let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some(&format!("Layer {} QKV [{}/{}]", i, qkv_offset, batch_size)),
-                            timestamp_writes: None,
-                        });
+                        let mut cpass =
+                            tdr.encoder
+                                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                    label: Some(&format!(
+                                        "Layer {} QKV [{}/{}]",
+                                        i, qkv_offset, batch_size
+                                    )),
+                                    timestamp_writes: None,
+                                });
                         cpass.set_bind_group(0, &chunk_bgs[chunk_idx], &[]);
                         cpass.set_pipeline(pipe_qkv);
                         cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
@@ -848,19 +902,23 @@ impl BindlessPipeline {
                 }
             }
             {
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - QKNorm", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - QKNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_qk_norm);
                 cpass.dispatch_workgroups(wg_qknorm, batch_size, 1);
             }
             {
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - AttnOut", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - AttnOut", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_attn_out);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
@@ -874,49 +932,60 @@ impl BindlessPipeline {
                 } else {
                     tdr.yield_if_needed(&label)?;
                 }
-            }            {
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - AttnProj", i)),
-                    timestamp_writes: None,
-                });
+            }
+            {
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - AttnProj", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_attn_proj);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             {
                 // Post-attention norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - PostAttnNorm", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - PostAttnNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_post_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             if params_layer.quant_type != 12u32 {
                 // For Q4K, ffn_norm is inside the Q4K ffn_proj kernel; skip V1 to avoid double norm.
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - FFNNorm", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - FFNNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_ffn_norm);
                 cpass.dispatch_workgroups(1, batch_size, 1);
             }
             {
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - FFNProj", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - FFNProj", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_ffn_proj);
                 cpass.dispatch_workgroups(wg_ffn, batch_size, 1);
             }
             {
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - FFNDown", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - FFNDown", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_ffn_down);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
@@ -928,10 +997,12 @@ impl BindlessPipeline {
             }
             {
                 // Post-FFW norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
-                let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - PostFfwNorm", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - PostFfwNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_post_ffw_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
@@ -1008,9 +1079,17 @@ impl BindlessPipeline {
 
         // Snapshot h20 (post-layer-loop, pre-final-norm)
         if tdr_log {
-            eprintln!("[TDR-STATS] batch_size={} layers={} total_yields={} forced_per_layer_min={}",
-                batch_size, layer_count, tdr.yield_count,
-                if layer_count > 0 { tdr.yield_count / layer_count as u32 } else { 0 });
+            eprintln!(
+                "[TDR-STATS] batch_size={} layers={} total_yields={} forced_per_layer_min={}",
+                batch_size,
+                layer_count,
+                tdr.yield_count,
+                if layer_count > 0 {
+                    tdr.yield_count / layer_count as u32
+                } else {
+                    0
+                }
+            );
         }
         tdr.encoder.copy_buffer_to_buffer(
             &activation_buffer,
@@ -1031,10 +1110,12 @@ impl BindlessPipeline {
                 (dim as u64) * 4u64,
             );
         } else {
-            let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Final Norm"),
-                timestamp_writes: None,
-            });
+            let mut cpass = tdr
+                .encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Final Norm"),
+                    timestamp_writes: None,
+                });
             cpass.set_bind_group(0, &norm_bg, &[]);
             cpass.set_pipeline(&self.rmsnorm_pipeline);
             cpass.dispatch_workgroups(wg_norm, 1, 1);
@@ -1042,18 +1123,19 @@ impl BindlessPipeline {
         // LM Head
         let mut _tile_bgs: Vec<wgpu::BindGroup> = Vec::new();
         {
-            let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("LM Head"),
-                timestamp_writes: None,
-            });
+            let mut cpass = tdr
+                .encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("LM Head"),
+                    timestamp_writes: None,
+                });
             match &head_bg {
                 HeadBg::Blob(bg) => {
                     cpass.set_pipeline(&self.lm_head_blob_pipeline);
 
                     // TDR-safe tiled dispatch: split into tiles of max_safe_wgs
-                    let max_safe_wgs = tdr_calibration::ensure_calibrated(
-                        "unknown", "head_blob", dim,
-                    );
+                    let max_safe_wgs =
+                        tdr_calibration::ensure_calibrated("unknown", "head_blob", dim);
                     let tile_size = 64u32; // @workgroup_size in sh_head_blob.wgsl
                     let total_wgs = vocab_size.div_ceil(tile_size);
 
@@ -1079,51 +1161,48 @@ impl BindlessPipeline {
                                 base_row,
                                 _pad: 0,
                             };
-                            let param_buf = device.create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
+                            let param_buf =
+                                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                                     label: Some(&format!("Head Params tile-{}", tile_idx)),
                                     contents: bytemuck::bytes_of(&tile_params),
                                     usage: wgpu::BufferUsages::UNIFORM,
-                                },
-                            );
-                            let tile_bg = device.create_bind_group(
-                                &wgpu::BindGroupDescriptor {
-                                    label: Some(&format!("Head BG tile-{}", tile_idx)),
-                                    layout: &self.lm_head_blob_layout,
-                                    entries: &[
-                                        wgpu::BindGroupEntry {
-                                            binding: 0,
-                                            resource: model.blob_binding_0(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 1,
-                                            resource: wgpu::BindingResource::Buffer(
-                                                wgpu::BufferBinding {
-                                                    buffer: &temp_buffer,
-                                                    offset: 0,
-                                                    size: Some(token_size),
-                                                },
-                                            ),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 2,
-                                            resource: logits_buffer.as_entire_binding(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 3,
-                                            resource: param_buf.as_entire_binding(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 10,
-                                            resource: model.blob_binding_1(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 11,
-                                            resource: model.blob_binding_2(),
-                                        },
-                                    ],
-                                },
-                            );
+                                });
+                            let tile_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some(&format!("Head BG tile-{}", tile_idx)),
+                                layout: &self.lm_head_blob_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: model.blob_binding_0(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Buffer(
+                                            wgpu::BufferBinding {
+                                                buffer: &temp_buffer,
+                                                offset: 0,
+                                                size: Some(token_size),
+                                            },
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: logits_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: param_buf.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 10,
+                                        resource: model.blob_binding_1(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 11,
+                                        resource: model.blob_binding_2(),
+                                    },
+                                ],
+                            });
 
                             cpass.set_bind_group(0, &tile_bg, &[]);
                             cpass.dispatch_workgroups(this_tile, 1, 1);
@@ -1150,8 +1229,10 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
 
-        tdr.encoder.copy_buffer_to_buffer(&temp_buffer, 0, &l21_buffer, 0, (dim as u64) * 4);
-        tdr.encoder.copy_buffer_to_buffer(&logits_buffer, 0, &staging_buffer, 0, output_size);
+        tdr.encoder
+            .copy_buffer_to_buffer(&temp_buffer, 0, &l21_buffer, 0, (dim as u64) * 4);
+        tdr.encoder
+            .copy_buffer_to_buffer(&logits_buffer, 0, &staging_buffer, 0, output_size);
         queue.submit(Some(tdr.encoder.finish()));
 
         let pre_norm_slice = pre_norm_buffer.slice(..);

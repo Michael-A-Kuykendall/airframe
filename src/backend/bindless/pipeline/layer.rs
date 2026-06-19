@@ -1562,7 +1562,13 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        encoder.copy_buffer_to_buffer(&temp_buffer, ffn_debug_offset, &ffn_down_staging, 0, dim * 4);
+        encoder.copy_buffer_to_buffer(
+            &temp_buffer,
+            ffn_debug_offset,
+            &ffn_down_staging,
+            0,
+            dim * 4,
+        );
 
         // Readback final output
         let output_staging = device.create_buffer(&wgpu::BufferDescriptor {

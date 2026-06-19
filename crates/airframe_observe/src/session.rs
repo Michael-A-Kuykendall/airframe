@@ -10,7 +10,9 @@
 //! 4. Call saturate() to run d0-engine to fixpoint
 //! 5. Read results from observers
 
-use crate::facts::{alpha_key_of, InferenceFact, KernelKind, YieldReason, KEY_DISPATCH_TIMING, KEY_TDR_RISK_HIGH};
+use crate::facts::{
+    alpha_key_of, InferenceFact, KernelKind, YieldReason, KEY_DISPATCH_TIMING, KEY_TDR_RISK_HIGH,
+};
 use crate::observers::{CandleCompareObserver, LayerStabilityObserver, VaultOracleObserver};
 use d0_engine::{AlphaKey, ClosureProgram, ReactiveGraph, RunBudget, RunResult};
 use std::sync::{Arc, Mutex};
@@ -101,25 +103,24 @@ impl ObservationSession {
         let scheduler = Arc::new(Mutex::new(TdrScheduler::new(budget_ms)));
         let sched_ref = scheduler.clone();
 
-        self.graph.program.register(
-            AlphaKey(KEY_DISPATCH_TIMING),
-            move |fact, _store| {
-                if let InferenceFact::DispatchTiming { layer, elapsed_ms, .. } = fact {
+        self.graph
+            .program
+            .register(AlphaKey(KEY_DISPATCH_TIMING), move |fact, _store| {
+                if let InferenceFact::DispatchTiming {
+                    layer, elapsed_ms, ..
+                } = fact
+                {
                     let mut s = sched_ref.lock().unwrap();
                     if let Some(yield_fact) = s.accumulate(*layer, *elapsed_ms) {
                         // Derive TdrRiskHigh + YieldNow consequent
-                        vec![
-                            InferenceFact::TdrRiskHigh { layer: *layer },
-                            yield_fact,
-                        ]
+                        vec![InferenceFact::TdrRiskHigh { layer: *layer }, yield_fact]
                     } else {
                         vec![InferenceFact::TdrRiskLow { layer: *layer }]
                     }
                 } else {
                     vec![]
                 }
-            },
-        );
+            });
 
         // Store the scheduler so the inference loop can read should_yield
         self.scheduler = Some(TdrScheduler::new(budget_ms));
@@ -148,7 +149,11 @@ impl ObservationSession {
     /// Emit a DispatchTiming fact — the primary input to the TDR scheduler.
     /// Call this after each GPU kernel dispatch+poll in the inference loop.
     pub fn emit_dispatch_timing(&mut self, layer: u32, kernel: KernelKind, elapsed_ms: u32) {
-        self.emit(InferenceFact::DispatchTiming { layer, kernel, elapsed_ms });
+        self.emit(InferenceFact::DispatchTiming {
+            layer,
+            kernel,
+            elapsed_ms,
+        });
     }
 
     /// Register the VaultOracleObserver.
@@ -245,7 +250,13 @@ impl ObservationSession {
         // For now, enables emit of new facts for per-family debug passes.
         // Example rule for divergence (in full impl, compare to vault).
         self.graph.program.register(
-            crate::facts::alpha_key_of(&InferenceFact::LayerOutput { layer_idx: 0, position: 0, rms_bits: 0, checksum: 0 }).unwrap(),
+            crate::facts::alpha_key_of(&InferenceFact::LayerOutput {
+                layer_idx: 0,
+                position: 0,
+                rms_bits: 0,
+                checksum: 0,
+            })
+            .unwrap(),
             |fact, _store| {
                 if let InferenceFact::LayerOutput { layer_idx, .. } = fact {
                     // In full, derive divergence if not stable.

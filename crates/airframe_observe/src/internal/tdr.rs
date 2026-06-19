@@ -5,17 +5,30 @@
 //!
 //! All types and functions here are private to the crate.
 
-use d0_engine::{AlphaKey, ClosureProgram, SaturationFabric, RunBudget};
 use crate::facts::InferenceFact;
+use d0_engine::{AlphaKey, ClosureProgram, RunBudget, SaturationFabric};
 use std::sync::Arc;
 
 /// TDR-specific facts (kept private).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum TdrFact {
-    DispatchStart { layer: u32, kernel: String, batch: u32, quant: u32 },
-    DispatchTiming { layer: u32, kernel: String, ms: u32 },
-    TdrRisk { level: u8 },
-    SafeChunk { size: u32 },
+    DispatchStart {
+        layer: u32,
+        kernel: String,
+        batch: u32,
+        quant: u32,
+    },
+    DispatchTiming {
+        layer: u32,
+        kernel: String,
+        ms: u32,
+    },
+    TdrRisk {
+        level: u8,
+    },
+    SafeChunk {
+        size: u32,
+    },
     // Can be extended for beads task links, etc.
 }
 
@@ -61,7 +74,9 @@ impl PrivateTdrNavigator {
     pub fn new() -> Self {
         let program = build_tdr_program();
         let key_fn = tdr_alpha_key;
-        let handler = |c: d0_engine::Consequent<InferenceFact>, store: &mut d0_engine::FactStore<InferenceFact>| -> Vec<InferenceFact> {
+        let handler = |c: d0_engine::Consequent<InferenceFact>,
+                       store: &mut d0_engine::FactStore<InferenceFact>|
+         -> Vec<InferenceFact> {
             // Handle consequents: drive chunking, vault write, beads update.
             // This is where the "saturation fabric" actions live.
             match c {

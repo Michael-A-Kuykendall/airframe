@@ -108,8 +108,7 @@ pub fn cache_path() -> PathBuf {
     }
     #[cfg(not(windows))]
     {
-        let dir = std::env::var("HOME")
-            .unwrap_or_else(|_| "/tmp".to_string());
+        let dir = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         let mut p = PathBuf::from(dir);
         p.push(".cache");
         p.push("airframe");
@@ -137,8 +136,7 @@ pub fn save_cache(cache: &CalibrationCache) -> Result<(), String> {
     }
     let data = serde_json::to_string_pretty(cache)
         .map_err(|e| format!("Failed to serialize cache: {}", e))?;
-    std::fs::write(&path, &data)
-        .map_err(|e| format!("Failed to write cache: {}", e))?;
+    std::fs::write(&path, &data).map_err(|e| format!("Failed to write cache: {}", e))?;
     Ok(())
 }
 
@@ -146,8 +144,7 @@ pub fn save_cache(cache: &CalibrationCache) -> Result<(), String> {
 pub fn clear_cache() -> Result<(), String> {
     let path = cache_path();
     if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to remove cache: {}", e))?;
+        std::fs::remove_file(&path).map_err(|e| format!("Failed to remove cache: {}", e))?;
     }
     Ok(())
 }
@@ -160,11 +157,7 @@ pub fn clear_cache() -> Result<(), String> {
 ///
 /// When GPU timestamp queries (airframe-mbt) land, this function will also
 /// run the adaptive calibration sweep on first-use.
-pub fn ensure_calibrated(
-    gpu_name: &str,
-    pipeline: &str,
-    n_embd: u32,
-) -> u32 {
+pub fn ensure_calibrated(gpu_name: &str, pipeline: &str, n_embd: u32) -> u32 {
     let mut cache = load_cache().unwrap_or_else(|| CalibrationCache::empty(gpu_name));
 
     if let Some(safe) = cache.get_safe_workgroups(pipeline, n_embd) {

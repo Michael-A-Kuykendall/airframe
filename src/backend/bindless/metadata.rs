@@ -297,7 +297,7 @@ impl BindlessMetadata {
                     ffn_down: p(&absolute_offsets, layer_idx, "ffn_down.weight"),
                     ffn_up: p(&absolute_offsets, layer_idx, "ffn_up.weight"),
                     layer_idx: layer_idx as u32,
-                    v_is_q4k:       if lqt_v    == 12 { 1 } else { 0 },
+                    v_is_q4k: if lqt_v == 12 { 1 } else { 0 },
                     ffn_down_is_q4k: if lqt_down == 12 { 1 } else { 0 },
                     attn_q_norm: opt(&absolute_offsets, layer_idx, "attn_q_norm.weight"),
                     attn_k_norm: opt(&absolute_offsets, layer_idx, "attn_k_norm.weight"),
@@ -345,7 +345,8 @@ impl BindlessMetadata {
             // Try direct key first, then search for any blk.0.attn_q key
             let q_key = "blk.0.attn_q.weight";
             let dims_opt = self.tensor_dims.get(q_key).or_else(|| {
-                self.tensor_dims.keys()
+                self.tensor_dims
+                    .keys()
                     .find(|k| k.contains("attn_q.weight") && k.starts_with("blk.0"))
                     .and_then(|k| self.tensor_dims.get(k))
             });
@@ -389,7 +390,9 @@ impl BindlessMetadata {
             // Fused QKV fallback for Phi/GPT2/Other arch (GROUP C): use attn_qkv offset for q/k/v
             // so we don't panic on missing separate tensors. The fused layout is Q then K then V concatenated.
             if (s == "attn_q.weight" || s == "attn_k.weight" || s == "attn_v.weight")
-                && self.tensor_offsets.contains_key(&format!("blk.{}.attn_qkv.weight", layer_idx))
+                && self
+                    .tensor_offsets
+                    .contains_key(&format!("blk.{}.attn_qkv.weight", layer_idx))
             {
                 return self.tensor_offsets[&format!("blk.{}.attn_qkv.weight", layer_idx)] as u32;
             }

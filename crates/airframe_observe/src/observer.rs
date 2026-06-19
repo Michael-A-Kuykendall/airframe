@@ -56,7 +56,9 @@ impl VaultOracleObserver {
 }
 
 impl Observer for VaultOracleObserver {
-    fn id(&self) -> &ObserverId { &self.id }
+    fn id(&self) -> &ObserverId {
+        &self.id
+    }
 
     fn observe(&self, data: &ObservationData) {
         self.captured.lock().unwrap().push(data.clone());
@@ -83,7 +85,9 @@ impl CandleCompareObserver {
 }
 
 impl Observer for CandleCompareObserver {
-    fn id(&self) -> &ObserverId { &self.id }
+    fn id(&self) -> &ObserverId {
+        &self.id
+    }
 
     fn observe(&self, data: &ObservationData) {
         if let ObservationData::FinalLogits { values, .. } = data {

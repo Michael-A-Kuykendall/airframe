@@ -31,28 +31,16 @@ pub enum ObservationData {
     },
 
     /// Q projection output at layer N.
-    AttnQ {
-        layer_idx: usize,
-        values: Vec<f32>,
-    },
+    AttnQ { layer_idx: usize, values: Vec<f32> },
 
     /// K projection output at layer N.
-    AttnK {
-        layer_idx: usize,
-        values: Vec<f32>,
-    },
+    AttnK { layer_idx: usize, values: Vec<f32> },
 
     /// V projection output at layer N.
-    AttnV {
-        layer_idx: usize,
-        values: Vec<f32>,
-    },
+    AttnV { layer_idx: usize, values: Vec<f32> },
 
     /// Decoded output text (UTF-8, incremental).
-    OutputText {
-        step: usize,
-        text: String,
-    },
+    OutputText { step: usize, text: String },
 }
 
 impl ObservationData {

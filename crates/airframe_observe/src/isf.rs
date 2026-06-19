@@ -15,10 +15,9 @@
 //! Pending patent by Michael A. Kuykendall. All rights reserved.
 
 use crate::facts::{
-    alpha_key_of, HaltReason, InferenceFact,
-    KEY_DECODE_STEP, KEY_EMBEDDING_READY, KEY_PREFILL_BATCH_READY,
-    KEY_PREFILL_COMPLETE, KEY_PROMPT_TOKEN, KEY_DISPATCH_COMPLETED, KEY_TDR_RISK_HIGH,
-    KEY_EMBEDDING_REQUEST,
+    alpha_key_of, HaltReason, InferenceFact, KEY_DECODE_STEP, KEY_DISPATCH_COMPLETED,
+    KEY_EMBEDDING_READY, KEY_EMBEDDING_REQUEST, KEY_PREFILL_BATCH_READY, KEY_PREFILL_COMPLETE,
+    KEY_PROMPT_TOKEN, KEY_TDR_RISK_HIGH,
 };
 use d0_engine::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric};
 use std::collections::HashSet;
@@ -105,10 +104,14 @@ impl ISFState {
                 // Linux/macOS: no hard TDR (or much longer), use 30s.
                 #[cfg(windows)]
                 let budget = std::env::var("SHIMMY_TDR_BUDGET_MS")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(1400u128);
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1400u128);
                 #[cfg(not(windows))]
                 let budget = std::env::var("SHIMMY_TDR_BUDGET_MS")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(30000u128);
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(30000u128);
                 budget
             },
             tdr_yield_count: 0,
@@ -147,7 +150,9 @@ impl ISFState {
     /// Returns true when all unique token_ids have been dequanted into embedding_cache.
     pub fn all_embeddings_cached(&self, token_ids: &[u32]) -> bool {
         let unique: std::collections::HashSet<u32> = token_ids.iter().cloned().collect();
-        unique.iter().all(|id| self.embedding_cache.contains_key(id))
+        unique
+            .iter()
+            .all(|id| self.embedding_cache.contains_key(id))
     }
 }
 
@@ -207,7 +212,9 @@ impl InferenceSaturationFabric {
                         }
                     }
                     // Assert EmbeddingRequest — FactStore dedup fires Rule 1b exactly once per token_id
-                    vec![InferenceFact::EmbeddingRequest { token_id: *token_id }]
+                    vec![InferenceFact::EmbeddingRequest {
+                        token_id: *token_id,
+                    }]
                 } else {
                     vec![]
                 }
@@ -226,10 +233,17 @@ impl InferenceSaturationFabric {
                     // Embedding quality check on first token dequanted (diagnostic)
                     {
                         let embedding_ref = &embedding;
-                        let nan_count = embedding_ref.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
+                        let nan_count = embedding_ref
+                            .iter()
+                            .filter(|v| v.is_nan() || v.is_infinite())
+                            .count();
                         if nan_count > 0 || embedding_ref.iter().take(4).all(|v| *v == 0.0) {
-                            eprintln!("[ISF-R1b] WARNING token_id={} nan_count={} first4={:?}",
-                                token_id, nan_count, &embedding_ref[..4.min(embedding_ref.len())]);
+                            eprintln!(
+                                "[ISF-R1b] WARNING token_id={} nan_count={} first4={:?}",
+                                token_id,
+                                nan_count,
+                                &embedding_ref[..4.min(embedding_ref.len())]
+                            );
                         }
                     }
                     // Broadcast: fill ALL positions that have this token_id
@@ -487,15 +501,20 @@ impl InferenceSaturationFabric {
         {
             let state_ref = state.clone();
             program.register(AlphaKey(KEY_DISPATCH_COMPLETED), move |fact, _store| {
-                if let InferenceFact::DispatchCompleted { layer, elapsed_ms, .. } = fact {
+                if let InferenceFact::DispatchCompleted {
+                    layer, elapsed_ms, ..
+                } = fact
+                {
                     let (accumulated, budget) = {
                         let mut s = state_ref.lock().unwrap();
                         s.tdr_accumulated_ms += *elapsed_ms as u128;
                         (s.tdr_accumulated_ms, s.tdr_budget_ms)
                     };
                     if accumulated >= budget {
-                        eprintln!("[ISF-TDR] layer={} accumulated={}ms >= budget={}ms → TdrRiskHigh",
-                            layer, accumulated, budget);
+                        eprintln!(
+                            "[ISF-TDR] layer={} accumulated={}ms >= budget={}ms → TdrRiskHigh",
+                            layer, accumulated, budget
+                        );
                         vec![InferenceFact::TdrRiskHigh { layer: *layer }]
                     } else {
                         vec![]

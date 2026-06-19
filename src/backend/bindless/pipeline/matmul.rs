@@ -375,8 +375,9 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
 
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("LM Head Tiled") });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("LM Head Tiled"),
+        });
 
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("LM Head Tiled Pass"),
@@ -402,21 +403,45 @@ impl BindlessPipeline {
                 _pad: 0,
             };
             let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("LM Head Params tile-{}", wgs_dispatched / max_safe_wgs)),
+                label: Some(&format!(
+                    "LM Head Params tile-{}",
+                    wgs_dispatched / max_safe_wgs
+                )),
                 contents: bytemuck::bytes_of(&head_params),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("LM Head BG tile-{}", wgs_dispatched / max_safe_wgs)),
+                label: Some(&format!(
+                    "LM Head BG tile-{}",
+                    wgs_dispatched / max_safe_wgs
+                )),
                 layout: &self.lm_head_blob_layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: model.blob_binding_0() },
-                    wgpu::BindGroupEntry { binding: 1, resource: input_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: output_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: params_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 10, resource: model.blob_binding_1() },
-                    wgpu::BindGroupEntry { binding: 11, resource: model.blob_binding_2() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: model.blob_binding_0(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: input_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: output_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: model.blob_binding_1(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: model.blob_binding_2(),
+                    },
                 ],
             });
 

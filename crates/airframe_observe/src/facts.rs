@@ -17,7 +17,6 @@ pub enum HaltReason {
     ExtraStopToken,
 }
 
-
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum KernelKind {
     Qkv,
@@ -64,11 +63,16 @@ pub enum InferenceFact {
     /// Decoded output text (post-sampling, incremental).
     /// Emitted by the inference server per token.
     /// This is what FseControl uses for policy scanning.
-    OutputToken { step: u32, token_id: u32 },
+    OutputToken {
+        step: u32,
+        token_id: u32,
+    },
 
     // ── Tier 2: Semantic ─────────────────────────────────────────────────
     /// Layer output RMS is within expected bounds (no explosion/collapse).
-    LayerOutputStable { layer_idx: u32 },
+    LayerOutputStable {
+        layer_idx: u32,
+    },
 
     /// Final logits contain no NaN or Inf values.
     LogitsClean,
@@ -76,10 +80,15 @@ pub enum InferenceFact {
     // ── Tier 3: Consequent ───────────────────────────────────────────────
     // (Not stored — consumed immediately by the session loop)
     /// Vault oracle row should be written for this layer.
-    WriteOracleRow { layer_idx: u32 },
+    WriteOracleRow {
+        layer_idx: u32,
+    },
 
     /// Candle cross-validation should be triggered for these logits.
-    TriggerCandleCompare { rms_bits: u32, checksum: i64 },
+    TriggerCandleCompare {
+        rms_bits: u32,
+        checksum: i64,
+    },
 
     // ── Tier 1: Dispatch timing (for TDR scheduling via Saturation Fabric) ──
     /// CPU-side elapsed time for a GPU kernel dispatch at a given layer.
@@ -102,14 +111,21 @@ pub enum InferenceFact {
 
     // ── Tier 2: TDR risk derived from accumulated dispatch timings ────────
     /// Accumulated dispatch time exceeds TDR threshold — yield required.
-    TdrRiskHigh { layer: u32 },
+    TdrRiskHigh {
+        layer: u32,
+    },
 
     /// Accumulated dispatch time is safe — continue batching.
-    TdrRiskLow { layer: u32 },
+    TdrRiskLow {
+        layer: u32,
+    },
 
     // ── Tier 3: Yield decisions (consequents — not stored long-term) ──────
     /// Inference loop must submit+poll now.
-    YieldNow { layer: u32, reason: YieldReason },
+    YieldNow {
+        layer: u32,
+        reason: YieldReason,
+    },
 
     // ── ISF: Inference Saturation Fabric facts ───────────────────────────
     // These facts drive the generate() loop via D0 reactive graph.
@@ -127,7 +143,9 @@ pub enum InferenceFact {
     /// The FactStore's structural dedup ensures this fires exactly once per token_id,
     /// regardless of how many positions share that token_id.
     /// This is the FSE selector-dedup win: N_unique dequants instead of N_total.
-    EmbeddingRequest { token_id: u32 },
+    EmbeddingRequest {
+        token_id: u32,
+    },
 
     // Tier 2: Embedding extracted for a token position
     /// The embedding vector for a token position is ready (dequanted from VRAM).
@@ -139,10 +157,14 @@ pub enum InferenceFact {
     },
 
     // Tier 2: All prompt embeddings collected — prefill can fire
-    PrefillBatchReady { token_count: u32 },
+    PrefillBatchReady {
+        token_count: u32,
+    },
 
     // Tier 2: Prefill complete — first logits available
-    PrefillComplete { position: u32 },
+    PrefillComplete {
+        position: u32,
+    },
 
     // Tier 1: One decode step — self-asserted by the fabric after each token
     /// Unique per step (step field ensures dedup doesn't block re-assertion).
@@ -157,7 +179,9 @@ pub enum InferenceFact {
     },
 
     // Tier 3: Halt the generation loop (EOS hit or max_tokens reached)
-    GenerationHalt { reason: HaltReason },
+    GenerationHalt {
+        reason: HaltReason,
+    },
 
     // New for model family workshop using Saturation Fabric and vault
     FamilyContext {

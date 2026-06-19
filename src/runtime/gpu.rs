@@ -253,16 +253,19 @@ impl GpuRuntime {
         // F16:  dim*2
         // F32:  dim*4
         let row_bytes: u64 = match embd_quant_type {
-            0 => dim as u64 * 4,           // F32
-            1 => dim as u64 * 2,           // F16
-            2 => (dim as u64 / 32) * 18,   // Q4_0
-            8 => (dim as u64 / 32) * 34,   // Q8_0
+            0 => dim as u64 * 4,            // F32
+            1 => dim as u64 * 2,            // F16
+            2 => (dim as u64 / 32) * 18,    // Q4_0
+            8 => (dim as u64 / 32) * 34,    // Q8_0
             12 => (dim as u64 / 256) * 144, // Q4_K
             13 => (dim as u64 / 256) * 176, // Q5_K
             14 => (dim as u64 / 256) * 210, // Q6_K
-            _ => (dim as u64 / 32) * 18,   // fallback Q4_0
+            _ => (dim as u64 / 32) * 18,    // fallback Q4_0
         };
-        eprintln!("[GpuRuntime] token_embd.weight: quant_type={} row_bytes={}", embd_quant_type, row_bytes);
+        eprintln!(
+            "[GpuRuntime] token_embd.weight: quant_type={} row_bytes={}",
+            embd_quant_type, row_bytes
+        );
 
         let weight_quant_type = gpu_model
             .metadata
@@ -360,8 +363,8 @@ impl GpuRuntime {
         params: &SamplingParams,
         on_token: Option<Box<dyn FnMut(&str) + Send>>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
         use airframe_observe::facts::InferenceFact;
+        use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
 
         // Timestamped logging to /tmp/shimmy_isf_run.log — readable by Kiro
         let t0 = std::time::Instant::now();
@@ -370,7 +373,11 @@ impl GpuRuntime {
             use std::io::Write;
             let line = format!("[T+{:.2}s] {}\n", t0.elapsed().as_secs_f64(), msg);
             eprintln!("[ISF] {}", line.trim());
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+            {
                 let _ = f.write_all(line.as_bytes());
             }
         };
@@ -393,7 +400,11 @@ impl GpuRuntime {
             .iter()
             .filter_map(|s| {
                 self.tokenizer.encode(s, false).ok().and_then(|v| {
-                    if v.len() == 1 { Some(v[0]) } else { None }
+                    if v.len() == 1 {
+                        Some(v[0])
+                    } else {
+                        None
+                    }
                 })
             })
             .collect();
@@ -444,54 +455,75 @@ impl GpuRuntime {
         let dequant_fn: std::sync::Arc<dyn Fn(u32, u32) -> Vec<f32> + Send + Sync> =
             std::sync::Arc::new(move |token_id: u32, dim: u32| {
                 let row_offset = embd_offset + (token_id as u64 * row_bytes_val);
-                pipeline_ref.run_dequant_any_hot(device_ref, queue_ref, model_ref, row_offset as u32, dim, embd_quant_type_val)
+                pipeline_ref.run_dequant_any_hot(
+                    device_ref,
+                    queue_ref,
+                    model_ref,
+                    row_offset as u32,
+                    dim,
+                    embd_quant_type_val,
+                )
             });
 
         // ── Closure: GPU prefill dispatch ─────────────────────────────────
         let kv_for_prefill = kv_cache_isf.clone();
         let spec_for_prefill = spec_isf.clone();
-        let prefill_fn: std::sync::Arc<dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync> =
-            std::sync::Arc::new(move |batched: Vec<f32>, _token_count: u32| {
-                let cache_guard = kv_for_prefill.lock().unwrap();
-                match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
-                    device_ref, queue_ref, model_ref,
-                    &batched,
-                    Some(output_head_ref),
-                    0,
-                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
-                    &spec_for_prefill,
-                    prefill_chunk,
-                ) {
-                    Ok((hidden, _l21, logits)) => (hidden, logits),
-                    Err(_) => (vec![], vec![]),
-                }
-            });
+        let prefill_fn: std::sync::Arc<
+            dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync,
+        > = std::sync::Arc::new(move |batched: Vec<f32>, _token_count: u32| {
+            let cache_guard = kv_for_prefill.lock().unwrap();
+            match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
+                device_ref,
+                queue_ref,
+                model_ref,
+                &batched,
+                Some(output_head_ref),
+                0,
+                Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                &spec_for_prefill,
+                prefill_chunk,
+            ) {
+                Ok((hidden, _l21, logits)) => (hidden, logits),
+                Err(_) => (vec![], vec![]),
+            }
+        });
 
         // ── Closure: GPU decode forward pass ─────────────────────────────
         let kv_for_forward = kv_cache_isf.clone();
         let spec_for_forward = spec_isf.clone();
-        let forward_fn: std::sync::Arc<dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync> =
-            std::sync::Arc::new(move |token_data: Vec<f32>, current_pos: u32| {
-                eprintln!("[DIAG] decode forward current_pos={} prompt_len={}", current_pos, prompt_len);
-                let token_id = token_data[0] as u32;
-                let row_offset = embd_offset + (token_id as u64 * row_bytes_val);
-                let token_embd = pipeline_ref.run_dequant_any_hot(
-                    device_ref, queue_ref, model_ref, row_offset as u32, dim, embd_quant_type_val,
-                );
-                let cache_guard = kv_for_forward.lock().unwrap();
-                match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
-                    device_ref, queue_ref, model_ref,
-                    &token_embd,
-                    Some(output_head_ref),
-                    current_pos,
-                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
-                    &spec_for_forward,
-                    1,
-                ) {
-                    Ok((hidden, _l21, logits)) => (hidden, logits),
-                    Err(_) => (vec![], vec![]),
-                }
-            });
+        let forward_fn: std::sync::Arc<
+            dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync,
+        > = std::sync::Arc::new(move |token_data: Vec<f32>, current_pos: u32| {
+            eprintln!(
+                "[DIAG] decode forward current_pos={} prompt_len={}",
+                current_pos, prompt_len
+            );
+            let token_id = token_data[0] as u32;
+            let row_offset = embd_offset + (token_id as u64 * row_bytes_val);
+            let token_embd = pipeline_ref.run_dequant_any_hot(
+                device_ref,
+                queue_ref,
+                model_ref,
+                row_offset as u32,
+                dim,
+                embd_quant_type_val,
+            );
+            let cache_guard = kv_for_forward.lock().unwrap();
+            match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
+                device_ref,
+                queue_ref,
+                model_ref,
+                &token_embd,
+                Some(output_head_ref),
+                current_pos,
+                Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                &spec_for_forward,
+                1,
+            ) {
+                Ok((hidden, _l21, logits)) => (hidden, logits),
+                Err(_) => (vec![], vec![]),
+            }
+        });
 
         // ── Closure: sampling ─────────────────────────────────────────────
         // NOTE: recent_tokens for repetition penalty are tracked in ISFState.recent_tokens
@@ -509,7 +541,9 @@ impl GpuRuntime {
         // ── Closure: token decode ─────────────────────────────────────────
         let decode_fn: std::sync::Arc<dyn Fn(u32) -> String + Send + Sync> =
             std::sync::Arc::new(move |token_id: u32| {
-                tokenizer_ref.decode_single(token_id, true).unwrap_or_default()
+                tokenizer_ref
+                    .decode_single(token_id, true)
+                    .unwrap_or_default()
             });
 
         // ── Closure: KV cache increment ───────────────────────────────────
@@ -554,27 +588,41 @@ impl GpuRuntime {
                 token_id,
             });
         }
-        append_log(&format!("pre_batch: {} tokens, {} unique, asserted PromptToken facts", 
-            prompt_tokens.len(), unique_count));
+        append_log(&format!(
+            "pre_batch: {} tokens, {} unique, asserted PromptToken facts",
+            prompt_tokens.len(),
+            unique_count
+        ));
         let _ = t_embed_start; // timing logged after fixpoint
 
         let t_fixpoint = std::time::Instant::now();
         append_log("fixpoint start");
-        isf.fabric.run_to_fixpoint(airframe_observe::isf::d0_run_budget());
-        append_log(&format!("fixpoint done, {:.2}s", t_fixpoint.elapsed().as_secs_f32()));
+        isf.fabric
+            .run_to_fixpoint(airframe_observe::isf::d0_run_budget());
+        append_log(&format!(
+            "fixpoint done, {:.2}s",
+            t_fixpoint.elapsed().as_secs_f32()
+        ));
 
         let s = state.lock().unwrap();
-        append_log(&format!("complete, {} chars, {} steps", s.generated_text.len(), s.decode_step));
+        append_log(&format!(
+            "complete, {} chars, {} steps",
+            s.generated_text.len(),
+            s.decode_step
+        ));
         // Flush log
         {
             use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+            {
                 let _ = f.write_all(b"---\n");
             }
         }
         Ok(s.generated_text.clone())
     }
-
 
     ///
     /// `on_token` is called for each generated token (for streaming).
@@ -633,9 +681,18 @@ impl GpuRuntime {
         };
 
         // Debug for garbage output diagnosis (1 of 8)
-        let hidden_rms: f32 = _final_act.iter().map(|x| x * x).sum::<f32>().sqrt() / _final_act.len() as f32;
-        eprintln!("[DEBUG 1/8] Final hidden rms: {:.6}, first5: {:?}", hidden_rms, &_final_act[..5.min(_final_act.len())]);
-        let mut top: Vec<(usize, f32)> = prefill_logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+        let hidden_rms: f32 =
+            _final_act.iter().map(|x| x * x).sum::<f32>().sqrt() / _final_act.len() as f32;
+        eprintln!(
+            "[DEBUG 1/8] Final hidden rms: {:.6}, first5: {:?}",
+            hidden_rms,
+            &_final_act[..5.min(_final_act.len())]
+        );
+        let mut top: Vec<(usize, f32)> = prefill_logits
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (i, v))
+            .collect();
         top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         eprintln!("[DEBUG 1/8] Prefill logits top5 tokens: {:?}", &top[..5]);
 
@@ -668,11 +725,16 @@ impl GpuRuntime {
             .collect();
 
         // Decode loop
-        let log_logits = std::env::var("AIRFRAME_LOG_LOGITS").map(|v| v == "1").unwrap_or(false);
+        let log_logits = std::env::var("AIRFRAME_LOG_LOGITS")
+            .map(|v| v == "1")
+            .unwrap_or(false);
         for _step in 0..params.max_tokens {
             if log_logits {
-                let mut top: Vec<(usize, f32)> = logits_vec.iter().enumerate()
-                    .map(|(i, &v)| (i, v)).collect();
+                let mut top: Vec<(usize, f32)> = logits_vec
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| (i, v))
+                    .collect();
                 top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 let argmax = top[0].0;
                 let top5: Vec<(usize, f32)> = top.into_iter().take(5).collect();
@@ -781,17 +843,18 @@ impl GpuRuntime {
             };
             let (new_hidden, _l21, new_logits) = {
                 let cache_guard = self.kv_cache.lock().unwrap();
-                self.pipeline.run_full_model_prefill_chunked_with_cache_state(
-                    &self.device,
-                    &self.queue,
-                    &self.model,
-                    &token_embd,
-                    Some(&self.output_head_f32),
-                    current_pos,
-                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
-                    &self.spec,
-                    1, // single token decode
-                )?
+                self.pipeline
+                    .run_full_model_prefill_chunked_with_cache_state(
+                        &self.device,
+                        &self.queue,
+                        &self.model,
+                        &token_embd,
+                        Some(&self.output_head_f32),
+                        current_pos,
+                        Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
+                        &self.spec,
+                        1, // single token decode
+                    )?
             };
             let layer_output = new_hidden;
             logits_vec = new_logits;
@@ -882,7 +945,12 @@ impl GpuRuntime {
                 let off = gpu_model
                     .metadata
                     .get_tensor_offset("token_embd.weight")
-                    .ok_or_else(|| format!("token_embd.weight not found in tensor_offsets map (tensor_count={})", gpu_model.metadata.tensor_count))?;
+                    .ok_or_else(|| {
+                        format!(
+                            "token_embd.weight not found in tensor_offsets map (tensor_count={})",
+                            gpu_model.metadata.tensor_count
+                        )
+                    })?;
                 ("token_embd.weight", wt, off)
             }
         };
@@ -896,9 +964,9 @@ impl GpuRuntime {
         // - GGUF v3: relative offset from data_start (offset < data_start)
         // Detect by checking if offset >= data_start.
         let tensor_offset_relative = if tensor_offset >= data_start {
-            tensor_offset - data_start  // v2 absolute → convert to relative
+            tensor_offset - data_start // v2 absolute → convert to relative
         } else {
-            tensor_offset               // v3 relative → use directly
+            tensor_offset // v3 relative → use directly
         };
 
         let tensor_info = GgufTensorInfo {

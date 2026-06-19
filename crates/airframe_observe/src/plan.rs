@@ -156,13 +156,13 @@ enum SelectorKey {
 impl From<&Selector> for SelectorKey {
     fn from(s: &Selector) -> Self {
         match s {
-            Selector::LayerOutput(n)    => SelectorKey::LayerOutput(*n),
-            Selector::AllLayerOutputs   => SelectorKey::AllLayerOutputs,
-            Selector::FinalLogits       => SelectorKey::FinalLogits,
-            Selector::OutputText        => SelectorKey::OutputText,
-            Selector::AttnQ { layer }   => SelectorKey::AttnQ(*layer),
-            Selector::AttnK { layer }   => SelectorKey::AttnK(*layer),
-            Selector::AttnV { layer }   => SelectorKey::AttnV(*layer),
+            Selector::LayerOutput(n) => SelectorKey::LayerOutput(*n),
+            Selector::AllLayerOutputs => SelectorKey::AllLayerOutputs,
+            Selector::FinalLogits => SelectorKey::FinalLogits,
+            Selector::OutputText => SelectorKey::OutputText,
+            Selector::AttnQ { layer } => SelectorKey::AttnQ(*layer),
+            Selector::AttnK { layer } => SelectorKey::AttnK(*layer),
+            Selector::AttnV { layer } => SelectorKey::AttnV(*layer),
         }
     }
 }
@@ -170,26 +170,26 @@ impl From<&Selector> for SelectorKey {
 impl From<SelectorKey> for Selector {
     fn from(k: SelectorKey) -> Self {
         match k {
-            SelectorKey::LayerOutput(n)  => Selector::LayerOutput(n),
+            SelectorKey::LayerOutput(n) => Selector::LayerOutput(n),
             SelectorKey::AllLayerOutputs => Selector::AllLayerOutputs,
-            SelectorKey::FinalLogits     => Selector::FinalLogits,
-            SelectorKey::OutputText      => Selector::OutputText,
-            SelectorKey::AttnQ(n)        => Selector::AttnQ { layer: n },
-            SelectorKey::AttnK(n)        => Selector::AttnK { layer: n },
-            SelectorKey::AttnV(n)        => Selector::AttnV { layer: n },
+            SelectorKey::FinalLogits => Selector::FinalLogits,
+            SelectorKey::OutputText => Selector::OutputText,
+            SelectorKey::AttnQ(n) => Selector::AttnQ { layer: n },
+            SelectorKey::AttnK(n) => Selector::AttnK { layer: n },
+            SelectorKey::AttnV(n) => Selector::AttnV { layer: n },
         }
     }
 }
 
 fn selector_sort_key(s: &Selector) -> (u32, usize) {
     match s {
-        Selector::LayerOutput(n)    => (0, *n),
-        Selector::AllLayerOutputs   => (0, usize::MAX),
-        Selector::AttnQ { layer }   => (1, *layer),
-        Selector::AttnK { layer }   => (2, *layer),
-        Selector::AttnV { layer }   => (3, *layer),
-        Selector::FinalLogits       => (4, 0),
-        Selector::OutputText        => (5, 0),
+        Selector::LayerOutput(n) => (0, *n),
+        Selector::AllLayerOutputs => (0, usize::MAX),
+        Selector::AttnQ { layer } => (1, *layer),
+        Selector::AttnK { layer } => (2, *layer),
+        Selector::AttnV { layer } => (3, *layer),
+        Selector::FinalLogits => (4, 0),
+        Selector::OutputText => (5, 0),
     }
 }
 
@@ -215,11 +215,23 @@ mod tests {
 
         let plan = ObservationPlan::compile(regs);
 
-        assert_eq!(plan.unique_selector_count(), 1, "should deduplicate to 1 selector");
-        assert_eq!(plan.registration_count(), 2, "should record 2 registrations");
+        assert_eq!(
+            plan.unique_selector_count(),
+            1,
+            "should deduplicate to 1 selector"
+        );
+        assert_eq!(
+            plan.registration_count(),
+            2,
+            "should record 2 registrations"
+        );
 
         let entry = &plan.entries[0];
-        assert_eq!(entry.observers.len(), 2, "both observers should be in broadcast list");
+        assert_eq!(
+            entry.observers.len(),
+            2,
+            "both observers should be in broadcast list"
+        );
     }
 
     #[test]

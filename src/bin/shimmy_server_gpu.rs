@@ -255,14 +255,10 @@ fn classify_template(haystack: &str) -> Option<ChatTemplateFamily> {
         {
             return Some(ChatTemplateFamily::Llama3);
         }
-        if (found >> TM_TINYLLAMA_NAME) & 1 != 0
-            && (found >> TM_TINY_USER) & 1 == 0
-        {
+        if (found >> TM_TINYLLAMA_NAME) & 1 != 0 && (found >> TM_TINY_USER) & 1 == 0 {
             return Some(ChatTemplateFamily::TinyLlama);
         }
-        if (found >> TM_GEMMA_NAME) & 1 != 0
-            && (found >> TM_GEMMA_START) & 1 == 0
-        {
+        if (found >> TM_GEMMA_NAME) & 1 != 0 && (found >> TM_GEMMA_START) & 1 == 0 {
             return Some(ChatTemplateFamily::Gemma2);
         }
     }

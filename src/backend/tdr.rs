@@ -54,19 +54,14 @@ impl<'d> TdrScheduler<'d> {
     ///
     /// Reads `SHIMMY_TDR_BUDGET_MS` from the environment; falls back to the
     /// platform default.
-    pub fn new(
-        device: &'d wgpu::Device,
-        queue: &'d wgpu::Queue,
-        label: &str,
-    ) -> Self {
+    pub fn new(device: &'d wgpu::Device, queue: &'d wgpu::Queue, label: &str) -> Self {
         let budget_ms = std::env::var("SHIMMY_TDR_BUDGET_MS")
             .ok()
             .and_then(|s| s.parse::<u128>().ok())
             .unwrap_or(DEFAULT_TDR_BUDGET_MS);
 
-        let encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some(label),
-        });
+        let encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
 
         Self {
             device,
@@ -90,9 +85,10 @@ impl<'d> TdrScheduler<'d> {
         // We need to call finish() which consumes it.
         let encoder = std::mem::replace(
             &mut self.encoder,
-            self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("tdr-placeholder"),
-            }),
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("tdr-placeholder"),
+                }),
         );
         self.queue.submit(Some(encoder.finish()));
         self.device
@@ -104,9 +100,11 @@ impl<'d> TdrScheduler<'d> {
         self.yield_count += 1;
 
         // Replace with a fresh encoder for subsequent work.
-        self.encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some(&format!("post-{}", label)),
-        });
+        self.encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("post-{}", label)),
+            });
 
         Ok(elapsed)
     }
@@ -135,9 +133,10 @@ impl<'d> TdrScheduler<'d> {
     pub fn submit_current(&mut self, label: &str) {
         let encoder = std::mem::replace(
             &mut self.encoder,
-            self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some(&format!("post-submit-{}", label)),
-            }),
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some(&format!("post-submit-{}", label)),
+                }),
         );
         self.queue.submit(Some(encoder.finish()));
     }
