@@ -36,6 +36,7 @@ struct HeadBlobParams {
     weight_off: u32,   // word offset (byte_offset / 4) of output.weight inside the GGUF blob
     quant_type: u32,   // GGML quant type: 0=F32 1=F16 2=Q4_0 8=Q8_0 12=Q4_K 13=Q5_K 14=Q6_K
     softcap:    f32,   // final_logit_softcap (0.0 = disabled, Gemma-2 uses 30.0)
+    base_row:   u32,   // output row offset for dispatch splitting (TDR tiles)
     _pad:       u32,
 }
 
@@ -200,7 +201,7 @@ fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 // ---------------------------------------------------------------------------
 @compute @workgroup_size(64, 1, 1)
 fn main_lm_head(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;   // vocab row index (0 .. vocab_size)
+    let idx = params.base_row + global_id.x;   // vocab row index, offset by tile base
     if (idx >= params.vocab_size) { return; }
 
     let dim = params.dim;

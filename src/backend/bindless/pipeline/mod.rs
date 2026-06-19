@@ -131,6 +131,7 @@ pub struct HeadBlobParams {
     pub weight_off: u32, // word offset (byte_offset / 4) of output.weight inside the GGUF blob
     pub quant_type: u32, // GGML type: 0=F32 1=F16 2=Q4_0 8=Q8_0 12=Q4_K 13=Q5_K 14=Q6_K
     pub softcap: f32,    // final_logit_softcap (0.0 = disabled)
+    pub base_row: u32,   // output row offset for dispatch splitting (TDR tiles)
     pub _pad: u32,
 }
 

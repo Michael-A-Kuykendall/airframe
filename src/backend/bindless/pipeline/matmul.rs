@@ -254,6 +254,7 @@ impl BindlessPipeline {
             weight_off,
             quant_type,
             softcap,
+            base_row: 0,
             _pad: 0,
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
