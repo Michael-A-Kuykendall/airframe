@@ -358,6 +358,21 @@ async fn async_main() -> Result<()> {
         k_weight_k: 0,
     };
 
+    eprintln!(
+        "[DIAG] temp_stride={} dim={} head_count={} head_count_kv={} head_dim={} ffn_dim={}",
+        layer_params.temp_stride, layer_params.dim, layer_params.head_count, layer_params.head_count_kv, layer_params.head_dim, layer_params.ffn_dim
+    );
+    eprintln!(
+        "[DIAG] qk_norm={} post_norm={} layer_norm={} ffn_kind={} qkv_layout={} batch_count={}",
+        layer_params.qk_norm_enabled, layer_params.post_norm_enabled, layer_params.layer_norm_enabled,
+        layer_params.ffn_kind_policy, layer_params.qkv_layout_policy, layer_params.batch_count
+    );
+    let qt_main = layer_params.quant_type & 0xFF;
+    let qt_v = (layer_params.quant_type >> 8) & 0xFF;
+    let qt_down = (layer_params.quant_type >> 16) & 0xFF;
+    let qt_out = (layer_params.quant_type >> 24) & 0xFF;
+    eprintln!("[DIAG] quant_type=0x{:08x} main={} v={} ffn_down={} out={}", layer_params.quant_type, qt_main, qt_v, qt_down, qt_out);
+
     eprintln!("[GPU vs CPU] comparing {} layers ...", spec.n_layer);
     let mut gpu_hidden = target_input.clone();
     let mut layer_comparisons = Vec::with_capacity(spec.n_layer);
@@ -371,6 +386,7 @@ async fn async_main() -> Result<()> {
                 name: format!("layer_offsets_{layer_idx}"),
             })?;
 
+
         let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = pipeline
             .run_layer_with_cache_debug(
                 &device,
@@ -382,6 +398,18 @@ async fn async_main() -> Result<()> {
                 offsets,
                 layer_params,
             );
+
+        eprintln!(
+            "[DIAG] L{} v_offset={} q_count={} k_count={} v_first={}",
+            layer_idx,
+            offsets.attn_v,
+            gpu_q.iter().filter(|&&x| x.is_finite()).count(),
+            gpu_k.iter().filter(|&&x| x.is_finite()).count(),
+            gpu_v.first().map(|x| format!("{:.2}", x)).unwrap_or_default(),
+        );
+        let vt = gpu_model.metadata.get_tensor_type(&format!("blk.{}.attn_v.weight", layer_idx));
+        let qt_m = gpu_model.metadata.get_tensor_type(&format!("blk.{}.attn_q.weight", layer_idx));
+        eprintln!("[DIAG] L{} attn_q_type={:?} attn_v_type={:?}", layer_idx, qt_m, vt);
 
         let cpu_layer = &cpu_layers[layer_idx];
         let cmp = LayerComparison {
