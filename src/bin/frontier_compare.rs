@@ -47,6 +47,15 @@ struct Args {
 
     #[arg(long)]
     decode_start_index: Option<usize>,
+
+    /// Validate head blob dispatch splitting: compare tiled vs unsplit output.
+    /// Runs after the main probe and reports MAE.
+    #[arg(long)]
+    validate_head_tile: bool,
+
+    /// Max workgroups per tile (used with --validate-head-tile).
+    #[arg(long, default_value_t = 512)]
+    max_safe_wgs: u32,
 }
 
 #[derive(Serialize)]
@@ -427,6 +436,43 @@ async fn async_main() -> Result<()> {
         spec.n_vocab as u32,
         dim,
     );
+
+    // Optional: validate head blob dispatch splitting
+    if args.validate_head_tile {
+        let head_tensor_name = if gpu_model.metadata.get_tensor_type("output.weight").is_some() {
+            "output.weight"
+        } else {
+            "token_embd.weight"
+        };
+        let hd_vocab = spec.n_vocab as u32;
+        let hd_dim = dim;
+        let hd_off = (gpu_model.metadata.get_tensor_offset(head_tensor_name).unwrap_or(0) / 4) as u32;
+        let hd_qt = gpu_model.metadata.get_tensor_type(head_tensor_name).unwrap_or(2);
+        let hd_softcap = spec.final_logit_softcap;
+
+        eprintln!("[HEAD-TILE] validating tiled dispatch (max_safe_wgs={})...", args.max_safe_wgs);
+
+        let tiled_logits = pipeline.run_lm_head_blob_tiled(
+            &device, &queue, &gpu_model, &gpu_norm,
+            hd_vocab, hd_dim, hd_off, hd_qt, hd_softcap,
+            args.max_safe_wgs,
+        );
+
+        let unsplit_logits = pipeline.run_lm_head_blob(
+            &device, &queue, &gpu_model, &gpu_norm,
+            hd_vocab, hd_dim, hd_off, hd_qt, hd_softcap,
+        );
+
+        let mae = tiled_logits.iter().zip(unsplit_logits.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum::<f32>() / tiled_logits.len() as f32;
+        let max_ae = tiled_logits.iter().zip(unsplit_logits.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+
+        eprintln!("[HEAD-TILE] tiled_vs_unsplit: MAE={:.8} max_AE={:.6} PASS={}",
+            mae, max_ae, if mae < 1e-6f32 { "YES" } else { "NO" });
+    }
 
     let probe = ProbeOutput {
         prompt_len: prompt_tokens.len(),

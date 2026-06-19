@@ -3,6 +3,42 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.6] — 2026-06-19
+
+### Fixed
+
+- **TDR crash on large-vocab models (Gemma-2 256K, Qwen3, Llama-3.2-3B)** — LM head
+  dispatch now splits into safe-sized tiles using the cache-calibrated workgroup limit.
+  - `sh_head_blob.wgsl`: added `base_row` param for tile offset (output indexing now
+    `base_row + global_id.x` instead of `global_id.x`).
+  - `HeadBlobParams` struct extended with `base_row: u32` field.
+  - `run_lm_head_blob_tiled()`: dispatches head in tiles of `max_safe_wgs` workgroups,
+    each writing to the correct output region.
+  - Production hot path (`inference.rs`): `dispatch_workgroups(wg_head_blob, 1, 1)`
+    replaced with tiled loop using `tdr_calibration::ensure_calibrated()`.
+  - Disk cache (`tdr_calibration.rs`): per-(pipeline, n_embd) safe WG limits stored at
+    `%LOCALAPPDATA%/Airframe/tdr-calibration.json` (Win) or `~/.cache/airframe/` (Linux),
+    with conservative 512-WG default fallback.
+  - Validated on TinyLlama Q6_K (32K vocab): tiled vs unsplit **MAE=0.00000000, PASS**.
+  - `frontier_compare --validate-head-tile` flag added for regression testing.
+
+---
+
+## [0.2.5] — 2026-06-12
+
+### Fixed (rolled-up hotfix — includes all v0.2.3 and v0.2.4 fixes)
+
+- **Critical: GPU temp buffer underallocated for all GQA models** (`src/core/spec.rs`)
+  - Formula `ff_dim*2+n_embd` was missing Q/K/V vectors — 13312 vs 15872 needed for TinyLlama.
+  - All GQA models affected: TinyLlama, Qwen3, LLaMA 3.2, Gemma2, DeepSeek, Qwen2.
+  - Symptom: single garbage token output on every inference call.
+
+- **frontier_compare: tied-embedding crash** (`src/bin/frontier_compare.rs`)
+  - `load_output_head_f32` now falls back to `token_embd.weight` when `output.weight` absent.
+  - Supports all quant types (was Q6_K only).
+  - `CpuKvCache` uses `spec.head_dim` not `n_embd/n_head` (wrong for GQA head_dim=128).
+  - Unblocks diagnostic tracing for Qwen3, LLaMA-3.2.
+
 ---
 
 ## [0.2.3] — 2026-06-11
@@ -47,14 +83,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **FSE inference observation layer** () — Selector-first,
   single-pass inference capture powered by d0-engine. Multiple observers sharing a
   selector cost zero additional extraction (FSE invariant). Internal; not published.
-
----
-
-## [Unreleased] — v0.2.3
-
-_No changes yet._
-
----
 
 ## [0.2.1] — 2026-06-02
 
@@ -176,27 +204,10 @@ The following work lands in Shimmy after airframe 0.2.0 is published:
 - Version: `0.1.1` → `0.2.0`.
 - `shimmyjinja` dependency: `0.2.1` → `0.5.0`.
 
----
-
 ## [0.1.1] — 2026-05-15
 
 Initial public release: Bindless WebGPU pipeline, FSE subsystem, OpenAI-compatible HTTP
 server (`shimmy_server_gpu`). Supports Llama, Gemma, Phi, Qwen2, Qwen3 architectures via
 GGUF Q4_K_M and related quantization types. Ships `shimmyjinja` (Jinja2 chat_template
 renderer) and `shimmytok` (GGUF-native tokenizer) as zero-dependency companion crates.
-
-## [0.2.5] — 2026-06-12
-
-### Fixed (rolled-up hotfix — includes all v0.2.3 and v0.2.4 fixes)
-
-- **Critical: GPU temp buffer underallocated for all GQA models** (`src/core/spec.rs`)
-  - Formula `ff_dim*2+n_embd` was missing Q/K/V vectors — 13312 vs 15872 needed for TinyLlama.
-  - All GQA models affected: TinyLlama, Qwen3, LLaMA 3.2, Gemma2, DeepSeek, Qwen2.
-  - Symptom: single garbage token output on every inference call.
-
-- **frontier_compare: tied-embedding crash** (`src/bin/frontier_compare.rs`)
-  - `load_output_head_f32` now falls back to `token_embd.weight` when `output.weight` absent.
-  - Supports all quant types (was Q6_K only).
-  - `CpuKvCache` uses `spec.head_dim` not `n_embd/n_head` (wrong for GQA head_dim=128).
-  - Unblocks diagnostic tracing for Qwen3, LLaMA-3.2.
 

@@ -3,6 +3,7 @@
 use super::super::loader::BindlessModel;
 use super::*;
 use crate::backend::tdr::TdrScheduler;
+use crate::backend::tdr_calibration;
 use crate::core::routing::ModelRoutePlan;
 use wgpu::util::DeviceExt;
 
@@ -754,8 +755,7 @@ impl BindlessPipeline {
         let ffn_total = ffn_dim * 2; // Gate + Up need this many threads
         let wg_ffn = ffn_total.div_ceil(256); // Ceil div by workgroup size (256)
         let wg_norm = dim.div_ceil(256);
-        // sh_head_blob.wgsl uses @workgroup_size(64, 1, 1); matmul_f32 uses @workgroup_size(256).
-        let wg_head_blob = vocab_size.div_ceil(64);
+        // matmul_f32 uses @workgroup_size(256).
         let wg_head_f32 = vocab_size.div_ceil(256);
 
         // QKV Dispatch Calculation
@@ -1040,6 +1040,7 @@ impl BindlessPipeline {
             cpass.dispatch_workgroups(wg_norm, 1, 1);
         }
         // LM Head
+        let mut _tile_bgs: Vec<wgpu::BindGroup> = Vec::new();
         {
             let mut cpass = tdr.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("LM Head"),
@@ -1047,9 +1048,90 @@ impl BindlessPipeline {
             });
             match &head_bg {
                 HeadBg::Blob(bg) => {
-                    cpass.set_bind_group(0, bg, &[]);
                     cpass.set_pipeline(&self.lm_head_blob_pipeline);
-                    cpass.dispatch_workgroups(wg_head_blob, 1, 1);
+
+                    // TDR-safe tiled dispatch: split into tiles of max_safe_wgs
+                    let max_safe_wgs = tdr_calibration::ensure_calibrated(
+                        "unknown", "head_blob", dim,
+                    );
+                    let tile_size = 64u32; // @workgroup_size in sh_head_blob.wgsl
+                    let total_wgs = vocab_size.div_ceil(tile_size);
+
+                    if total_wgs <= max_safe_wgs {
+                        // Fast path: single dispatch
+                        cpass.set_bind_group(0, bg, &[]);
+                        cpass.dispatch_workgroups(total_wgs, 1, 1);
+                    } else {
+                        // Tiled path: split into max_safe_wgs chunks
+                        let mut dispatched = 0u32;
+
+                        while dispatched < total_wgs {
+                            let this_tile = (total_wgs - dispatched).min(max_safe_wgs);
+                            let base_row = dispatched * tile_size;
+                            let tile_idx = dispatched / max_safe_wgs;
+
+                            let tile_params = HeadBlobParams {
+                                vocab_size,
+                                dim,
+                                weight_off: head_weight_off,
+                                quant_type: head_quant_type,
+                                softcap: spec.final_logit_softcap,
+                                base_row,
+                                _pad: 0,
+                            };
+                            let param_buf = device.create_buffer_init(
+                                &wgpu::util::BufferInitDescriptor {
+                                    label: Some(&format!("Head Params tile-{}", tile_idx)),
+                                    contents: bytemuck::bytes_of(&tile_params),
+                                    usage: wgpu::BufferUsages::UNIFORM,
+                                },
+                            );
+                            let tile_bg = device.create_bind_group(
+                                &wgpu::BindGroupDescriptor {
+                                    label: Some(&format!("Head BG tile-{}", tile_idx)),
+                                    layout: &self.lm_head_blob_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: model.blob_binding_0(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: wgpu::BindingResource::Buffer(
+                                                wgpu::BufferBinding {
+                                                    buffer: &temp_buffer,
+                                                    offset: 0,
+                                                    size: Some(token_size),
+                                                },
+                                            ),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: logits_buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 3,
+                                            resource: param_buf.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 10,
+                                            resource: model.blob_binding_1(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 11,
+                                            resource: model.blob_binding_2(),
+                                        },
+                                    ],
+                                },
+                            );
+
+                            cpass.set_bind_group(0, &tile_bg, &[]);
+                            cpass.dispatch_workgroups(this_tile, 1, 1);
+
+                            _tile_bgs.push(tile_bg);
+                            dispatched += this_tile;
+                        }
+                    }
                 }
                 HeadBg::F32(bg) => {
                     cpass.set_bind_group(0, bg, &[]);
