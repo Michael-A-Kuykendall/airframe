@@ -352,25 +352,30 @@ async fn async_main() -> Result<()> {
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
-        quant_type: {
-            let qt_main = gpu_model
-                .metadata
-                .get_tensor_type("blk.0.attn_q.weight")
-                .unwrap_or(2);
-            let qt_v = gpu_model
-                .metadata
-                .get_tensor_type("blk.0.attn_v.weight")
-                .unwrap_or(qt_main);
-            let qt_down = gpu_model
-                .metadata
-                .get_tensor_type("blk.0.ffn_down.weight")
-                .unwrap_or(qt_main);
-            let qt_out = gpu_model
-                .metadata
-                .get_tensor_type("blk.0.attn_output.weight")
-                .unwrap_or(qt_main);
-            qt_main | (qt_v << 8) | (qt_down << 16) | (qt_out << 24)
-        },
+        quant_qk: gpu_model
+            .metadata
+            .get_tensor_type("blk.0.attn_q.weight")
+            .unwrap_or(2),
+        quant_v: gpu_model
+            .metadata
+            .get_tensor_type("blk.0.attn_v.weight")
+            .unwrap_or(2),
+        quant_attn_out: gpu_model
+            .metadata
+            .get_tensor_type("blk.0.attn_output.weight")
+            .unwrap_or(2),
+        quant_ffn_down: gpu_model
+            .metadata
+            .get_tensor_type("blk.0.ffn_down.weight")
+            .unwrap_or(2),
+        quant_ffn_gate: gpu_model
+            .metadata
+            .get_tensor_type("blk.0.ffn_gate.weight")
+            .unwrap_or(2),
+        quant_ffn_up: gpu_model
+            .metadata
+            .get_tensor_type("blk.0.ffn_up.weight")
+            .unwrap_or(2),
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
@@ -405,7 +410,12 @@ async fn async_main() -> Result<()> {
         let l_qt_down = qt(&key("ffn_down.weight"));
         let l_qt_out = qt(&key("attn_output.weight"));
         let mut layer_params = layer_params;
-        layer_params.quant_type = l_qt_main | (l_qt_v << 8) | (l_qt_down << 16) | (l_qt_out << 24);
+        layer_params.quant_qk = l_qt_main;
+        layer_params.quant_v = l_qt_v;
+        layer_params.quant_attn_out = l_qt_out;
+        layer_params.quant_ffn_down = l_qt_down;
+        layer_params.quant_ffn_gate = qt(&key("ffn_gate.weight"));
+        layer_params.quant_ffn_up = qt(&key("ffn_up.weight"));
 
         let (gpu_output, gpu_post_attn, gpu_ffn_out, gpu_q, gpu_k, gpu_v) = pipeline
             .run_layer_with_cache_debug(

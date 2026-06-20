@@ -253,7 +253,12 @@ impl BindlessPipeline {
             rms_eps: spec.rms_eps,
             ffn_dim,
             temp_stride,
-            quant_type: 0, // overridden per-layer below
+            quant_qk: 0,
+            quant_v: 0,
+            quant_attn_out: 0,
+            quant_ffn_down: 0,
+            quant_ffn_gate: 0,
+            quant_ffn_up: 0,
             attn_logit_softcap: spec.attn_logit_softcap,
             post_norm_enabled: if spec.arch_string() == "gemma2" { 1 } else { 0 },
             qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
@@ -372,8 +377,26 @@ impl BindlessPipeline {
 
         for i in 0..layer_count {
             let compiled = &model.metadata.compiled_layers[i];
+            let supported = [0u8, 1, 2, 6, 8, 12, 13, 14];
+            for &q in &[
+                compiled.quant_qk,
+                compiled.quant_v,
+                compiled.quant_attn_out,
+                compiled.quant_ffn_down,
+                compiled.quant_ffn_gate,
+                compiled.quant_ffn_up,
+            ] {
+                if q != 0 && !supported.contains(&(q as u8)) {
+                    panic!("Unsupported quant type {} in layer {}", q, i);
+                }
+            }
             let mut layer_params_i = LayerParams {
-                quant_type: compiled.quant_type_packed,
+                quant_qk: compiled.quant_qk,
+                quant_v: compiled.quant_v,
+                quant_attn_out: compiled.quant_attn_out,
+                quant_ffn_down: compiled.quant_ffn_down,
+                quant_ffn_gate: compiled.quant_ffn_gate,
+                quant_ffn_up: compiled.quant_ffn_up,
                 ..params_base
             };
             if spec.arch_string() == "qwen3" {
@@ -698,6 +721,10 @@ impl BindlessPipeline {
             .metadata
             .get_tensor_type(head_tensor_name)
             .unwrap_or(2);
+        let supported = [0u8, 1, 2, 6, 8, 12, 13, 14];
+        if !supported.contains(&(head_quant_type as u8)) {
+            panic!("Unsupported head quant type {}", head_quant_type);
+        }
 
         enum HeadBg {
             F32(wgpu::BindGroup),
@@ -956,7 +983,7 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_post_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            if params_layer.quant_type != 12u32 {
+            if params_layer.quant_ffn_down != 12u32 {
                 // For Q4K, ffn_norm is inside the Q4K ffn_proj kernel; skip V1 to avoid double norm.
                 let mut cpass = tdr
                     .encoder

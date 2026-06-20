@@ -178,6 +178,7 @@ fn spec_from_gguf_metadata(
             .unwrap_or_else(|| "unknown".to_string()),
         temp_buffer_size: 0,
         kv_cache_size_per_layer: 0,
+        chat_template: None,
     };
 
     Ok(spec.compute_derived())

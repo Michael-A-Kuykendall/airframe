@@ -641,7 +641,12 @@ fn run_inference_completion(
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
-        quant_type: packed_quant_type,
+        quant_qk: packed_quant_type & 0xFF,
+        quant_v: (packed_quant_type >> 8) & 0xFF,
+        quant_attn_out: (packed_quant_type >> 24) & 0xFF,
+        quant_ffn_down: (packed_quant_type >> 16) & 0xFF,
+        quant_ffn_gate: (packed_quant_type >> 24) & 0xFF,
+        quant_ffn_up: (packed_quant_type >> 24) & 0xFF,
         attn_logit_softcap: spec.attn_logit_softcap,
         post_norm_enabled: if spec.arch_string().contains("gemma") {
             1
@@ -685,7 +690,10 @@ fn run_inference_completion(
         layer_norm_enabled: layer_params.layer_norm_enabled,
         post_norm_enabled: layer_params.post_norm_enabled,
         qk_norm_enabled: layer_params.qk_norm_enabled,
-        packed_quant_type: layer_params.quant_type,
+        packed_quant_type: layer_params.quant_qk
+            | (layer_params.quant_v << 8)
+            | (layer_params.quant_ffn_down << 16)
+            | (layer_params.quant_attn_out << 24),
         prompt_mode: prompt_mode.clone(),
         prompt_renderer_mode: req
             .prompt_renderer_mode
@@ -806,7 +814,12 @@ fn run_inference_completion(
                     for layer_idx in 0..spec.n_layer {
                         let compiled = &model.metadata.compiled_layers[layer_idx];
                         let layer_params_l = LayerParams {
-                            quant_type: compiled.quant_type_packed,
+                            quant_qk: compiled.quant_qk,
+                            quant_v: compiled.quant_v,
+                            quant_attn_out: compiled.quant_attn_out,
+                            quant_ffn_down: compiled.quant_ffn_down,
+                            quant_ffn_gate: compiled.quant_ffn_gate,
+                            quant_ffn_up: compiled.quant_ffn_up,
                             ..layer_params
                         };
 
@@ -1253,7 +1266,12 @@ fn run_inference_completion(
             for layer_idx in 0..spec.n_layer {
                 let compiled = &model.metadata.compiled_layers[layer_idx];
                 let layer_params_l = LayerParams {
-                    quant_type: compiled.quant_type_packed,
+                    quant_qk: compiled.quant_qk,
+                    quant_v: compiled.quant_v,
+                    quant_attn_out: compiled.quant_attn_out,
+                    quant_ffn_down: compiled.quant_ffn_down,
+                    quant_ffn_gate: compiled.quant_ffn_gate,
+                    quant_ffn_up: compiled.quant_ffn_up,
                     ..layer_params
                 };
 
@@ -1293,7 +1311,12 @@ fn run_inference_completion(
             for layer_idx in 0..spec.n_layer {
                 let compiled = &model.metadata.compiled_layers[layer_idx];
                 let layer_params_l = LayerParams {
-                    quant_type: compiled.quant_type_packed,
+                    quant_qk: compiled.quant_qk,
+                    quant_v: compiled.quant_v,
+                    quant_attn_out: compiled.quant_attn_out,
+                    quant_ffn_down: compiled.quant_ffn_down,
+                    quant_ffn_gate: compiled.quant_ffn_gate,
+                    quant_ffn_up: compiled.quant_ffn_up,
                     ..layer_params
                 };
 

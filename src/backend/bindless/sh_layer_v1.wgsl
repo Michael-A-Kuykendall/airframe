@@ -34,7 +34,12 @@ struct LayerParams {
     rms_eps: f32,       // 1e-5
     ffn_dim: u32,       // Feed-forward intermediate dim (e.g. 5632)
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
-    quant_type: u32,    // GGML type: 0=F32, 1=F16, 2=Q4_0, 8=Q8_0, 12=Q4_K, 13=Q5_K, 14=Q6_K
+    quant_qk: u32,        // attn_q / attn_k type
+    quant_v: u32,         // attn_v type
+    quant_attn_out: u32,  // attn_output type
+    quant_ffn_down: u32,  // ffn_down type
+    quant_ffn_gate: u32,  // ffn_gate type
+    quant_ffn_up: u32,    // ffn_up type
     attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
     post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
     qk_norm_enabled: u32,     // 1 = apply per-head Q/K RMSNorm before attention (Qwen3); 0 = disabled
@@ -318,6 +323,44 @@ fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 }
 
 // -------------------------------------------------------------------------
+// Q4_0 element dequant (18-byte blocks, 32 elements)
+// -------------------------------------------------------------------------
+fn dequant_q4_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
+    let scale_packed = extractBits(read_blob(block_base_byte / 4u),
+                                   (block_base_byte % 4u) * 8u, 16u);
+    let scale = unpack2x16float(scale_packed).x;
+    let qs_byte = block_base_byte + 2u + (elem_in_block % 16u);
+    let qs = read_byte_gguf(qs_byte);
+    let nib = select(qs & 0x0Fu, qs >> 4u, elem_in_block >= 16u);
+    return (f32(nib) - 8.0) * scale;
+}
+
+// -------------------------------------------------------------------------
+// Quant block metadata — indexed by GGML quant type code.
+// elems:   elements per block (0 = not a block type, handled separately)
+// bytes:   bytes per block
+// -------------------------------------------------------------------------
+const QUANT_ELEMS: array<u32, 16> = array<u32, 16>(
+    0, 0, 32, 0, 0, 0, 32, 0, 32, 0, 0, 0, 256, 256, 256, 0);
+const QUANT_BYTES: array<u32, 16> = array<u32, 16>(
+    0, 0, 18, 0, 0, 0, 22, 0, 34, 0, 0, 0, 144, 176, 210, 0);
+
+// -------------------------------------------------------------------------
+// Unified dequant dispatch — one function, all quant type branches.
+// block_base_byte: byte offset of the quant block (for F16/F32: row start byte)
+// elem_in_block:   element index within the block (for F16/F32: column index)
+// -------------------------------------------------------------------------
+fn dequant_dispatch(qt: u32, block_base_byte: u32, elem_in_block: u32) -> f32 {
+    if (qt == 14u) { return dequant_q6k_elem(block_base_byte, elem_in_block); }
+    else if (qt == 13u) { return dequant_q5k_elem(block_base_byte, elem_in_block); }
+    else if (qt == 12u) { return dequant_q4k_elem(block_base_byte, elem_in_block); }
+    else if (qt == 6u)  { return dequant_q5_0_elem(block_base_byte, elem_in_block); }
+    else if (qt == 8u)  { return dequant_q8_0_elem(block_base_byte, elem_in_block); }
+    else if (qt == 2u)  { return dequant_q4_0_elem(block_base_byte, elem_in_block); }
+    else { return 0.0; }
+}
+
+// -------------------------------------------------------------------------
 // Kernel 0: Attention RMSNorm Provider
 // -------------------------------------------------------------------------
 // Computes the shared attention-normalized activation stream once per token.
@@ -410,64 +453,9 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // 2. MatMul (Row `row_idx`) against the staged attention-normalized provider.
     var dot: f32 = 0.0;
 
-    // Per-component quant type: bits 0-7 = main (Q/K), bits 8-15 = V, bits 16-23 = ffn_down
-    let qt_main = params.quant_type & 0xFFu;
-    let qt_v    = (params.quant_type >> 8u) & 0xFFu;
-    let qt      = select(qt_main, qt_v, target_stage == 2u);
+    let qt = select(params.quant_qk, params.quant_v, target_stage == 2u);
 
-    if (qt == 14u) { // Q6_K
-        let bpr = params.dim / 256u;
-        let row_start = weight_byte_offset + (row_idx * bpr * 210u);
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 210u;
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                dot += temp_state[temp_base + col] * dequant_q6k_elem(bb, e);
-            }
-        }
-    } else if (qt == 13u) { // Q5_K
-        let bpr = params.dim / 256u;
-        let row_start = weight_byte_offset + (row_idx * bpr * 176u);
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 176u;
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                dot += temp_state[temp_base + col] * dequant_q5k_elem(bb, e);
-            }
-        }
-    } else if (qt == 12u) { // Q4_K
-        let blocks_per_row_k = params.dim / 256u;
-        let row_start_byte_k = weight_byte_offset + (row_idx * blocks_per_row_k * 144u);
-        for (var b = 0u; b < blocks_per_row_k; b++) {
-            let block_base_k = row_start_byte_k + (b * 144u);
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                let val_x = temp_state[temp_base + col];
-                let val_w = dequant_q4k_elem(block_base_k, e);
-                dot += val_x * val_w;
-            }
-        }
-    } else if (qt == 6u) { // Q5_0
-        let bpr = params.dim / 32u;
-        let row_start = weight_byte_offset + row_idx * bpr * 22u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 22u;
-            for (var e = 0u; e < 32u; e++) {
-                let col = b * 32u + e;
-                dot += temp_state[temp_base + col] * dequant_q5_0_elem(bb, e);
-            }
-        }
-    } else if (qt == 8u) { // Q8_0
-        let bpr = params.dim / 32u;
-        let row_start = weight_byte_offset + row_idx * bpr * 34u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 34u;
-            for (var e = 0u; e < 32u; e++) {
-                let col = b * 32u + e;
-                dot += temp_state[temp_base + col] * dequant_q8_0_elem(bb, e);
-            }
-        }
-    } else if (qt == 1u) { // F16
+    if (qt == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_byte_offset + (row_idx * params.dim + col) * 2u;
             dot += temp_state[temp_base + col] * dequant_f16_at(w_byte);
@@ -477,25 +465,18 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let w_idx = weight_byte_offset / 4u + row_idx * params.dim + col;
             dot += temp_state[temp_base + col] * bitcast<f32>(read_blob(w_idx));
         }
-    } else { // Q4_0 (quant_type == 2)
-        let blocks_per_row = params.dim / 32u;
-        let row_start_byte = weight_byte_offset + (row_idx * blocks_per_row * 18u);
-        for (var b = 0u; b < blocks_per_row; b++) {
-            let block_base = row_start_byte + (b * 18u);
-            let scale_idx = block_base / 4u;
-            let scale_packed = extractBits(read_blob(scale_idx), (block_base % 4u) * 8u, 16u);
-            let scale = unpack2x16float(scale_packed).x;
-            let qs_byte_start = block_base + 2u;
-            for (var i = 0u; i < 32u; i++) {
-                let col = b * 32u + i;
-                let val_x = temp_state[temp_base + col];
-                let byte_idx = i % 16u;
-                let qs_idx = qs_byte_start + byte_idx;
-                let qs_word = read_blob(qs_idx / 4u);
-                let qs_byte = extractBits(qs_word, (qs_idx % 4u) * 8u, 8u);
-                let nib = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
-                let val_w = (f32(nib) - 8.0) * scale;
-                dot += val_x * val_w;
+    } else { // Block quant types via unified dispatch
+        let epb = QUANT_ELEMS[qt];
+        let bpb = QUANT_BYTES[qt];
+        if (epb > 0u) {
+            let total_blocks = params.dim / epb;
+            let row_start_byte = weight_byte_offset + row_idx * total_blocks * bpb;
+            for (var b = 0u; b < total_blocks; b++) {
+                let bb = row_start_byte + b * bpb;
+                for (var e = 0u; e < epb; e++) {
+                    let col = b * epb + e;
+                    dot += temp_state[temp_base + col] * dequant_dispatch(qt, bb, e);
+                }
             }
         }
     }
@@ -746,86 +727,30 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var dot = 0.0;
     let weight_byte_offset = offsets.attn_out;
 
-    if (((params.quant_type >> 24u) & 0xFFu) == 14u) { // Q6_K
-        let bpr = attn_dim / 256u;
-        let row_start = weight_byte_offset + idx * bpr * 210u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 210u;
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                dot += temp_state[temp_base + col] * dequant_q6k_elem(bb, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 13u) { // Q5_K
-        let bpr = attn_dim / 256u;
-        let row_start = weight_byte_offset + idx * bpr * 176u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 176u;
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                dot += temp_state[temp_base + col] * dequant_q5k_elem(bb, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 12u) { // Q4_K
-        let blocks_per_row_k = attn_dim / 256u;
-        let row_start_byte_k = weight_byte_offset + (idx * blocks_per_row_k * 144u);
-        for (var b = 0u; b < blocks_per_row_k; b++) {
-            let block_base_k = row_start_byte_k + (b * 144u);
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                let val_ctx = temp_state[temp_base + col];
-                dot += val_ctx * dequant_q4k_elem(block_base_k, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 6u) { // Q5_0
-        let bpr = attn_dim / 32u;
-        let row_start = weight_byte_offset + idx * bpr * 22u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 22u;
-            for (var e = 0u; e < 32u; e++) {
-                let col = b * 32u + e;
-                dot += temp_state[temp_base + col] * dequant_q5_0_elem(bb, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 8u) { // Q8_0
-        let bpr = attn_dim / 32u;
-        let row_start = weight_byte_offset + idx * bpr * 34u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 34u;
-            for (var e = 0u; e < 32u; e++) {
-                let col = b * 32u + e;
-                dot += temp_state[temp_base + col] * dequant_q8_0_elem(bb, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 1u) { // F16
+    let wt = params.quant_attn_out;
+
+    if (wt == 1u) { // F16
         for (var col = 0u; col < attn_dim; col++) {
             let w_byte = weight_byte_offset + (idx * attn_dim + col) * 2u;
             dot += temp_state[temp_base + col] * dequant_f16_at(w_byte);
         }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 0u) { // F32
+    } else if (wt == 0u) { // F32
         for (var col = 0u; col < attn_dim; col++) {
             let w_idx = weight_byte_offset / 4u + idx * attn_dim + col;
             dot += temp_state[temp_base + col] * bitcast<f32>(read_blob(w_idx));
         }
-    } else { // Q4_0
-        let blocks_per_row = attn_dim / 32u;
-        let row_start_byte = weight_byte_offset + (idx * blocks_per_row * 18u);
-        for (var b = 0u; b < blocks_per_row; b++) {
-            let block_base = row_start_byte + (b * 18u);
-            let scale_idx = block_base / 4u;
-            let scale_packed = extractBits(read_blob(scale_idx), (block_base % 4u) * 8u, 16u);
-            let w_scale = unpack2x16float(scale_packed).x;
-            let qs_byte_start = block_base + 2u;
-            for (var i = 0u; i < 32u; i++) {
-                let col = b * 32u + i;
-                let val_ctx = temp_state[temp_base + col];
-                let byte_idx = i % 16u;
-                let qs_idx = qs_byte_start + byte_idx;
-                let qs_word = read_blob(qs_idx / 4u);
-                let qs_byte = extractBits(qs_word, (qs_idx % 4u) * 8u, 8u);
-                let nib = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
-                let val_w = (f32(nib) - 8.0) * w_scale;
-                dot += val_ctx * val_w;
+    } else { // Block quant types via unified dispatch
+        let epb = QUANT_ELEMS[wt];
+        let bpb = QUANT_BYTES[wt];
+        if (epb > 0u) {
+            let total_blocks = attn_dim / epb;
+            let row_start_byte = weight_byte_offset + idx * total_blocks * bpb;
+            for (var b = 0u; b < total_blocks; b++) {
+                let bb = row_start_byte + b * bpb;
+                for (var e = 0u; e < epb; e++) {
+                    let col = b * epb + e;
+                    dot += temp_state[temp_base + col] * dequant_dispatch(wt, bb, e);
+                }
             }
         }
     }
@@ -1057,93 +982,33 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // MatMul
     var dot = 0.0;
+    let wt = params.quant_attn_out;
 
-    if (((params.quant_type >> 24u) & 0xFFu) == 14u) { // Q6_K
-        let bpr = params.dim / 256u;
-        let row_start = weight_off + (row_idx * bpr * 210u);
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 210u;
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
-                dot += val_x * dequant_q6k_elem(bb, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 13u) { // Q5_K
-        let bpr = params.dim / 256u;
-        let row_start = weight_off + (row_idx * bpr * 176u);
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 176u;
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
-                dot += val_x * dequant_q5k_elem(bb, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 12u) { // Q4_K
-        let blocks_per_row_k = params.dim / 256u;
-        let row_start_byte_k = weight_off + (row_idx * blocks_per_row_k * 144u);
-        for (var b = 0u; b < blocks_per_row_k; b++) {
-            let block_base_k = row_start_byte_k + (b * 144u);
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
-                dot += val_x * dequant_q4k_elem(block_base_k, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 6u) { // Q5_0
-        let bpr = params.dim / 32u;
-        let row_start = weight_off + (row_idx * bpr * 22u);
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 22u;
-            for (var e = 0u; e < 32u; e++) {
-                let col = b * 32u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
-                dot += val_x * dequant_q5_0_elem(bb, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 8u) { // Q8_0
-        let bpr = params.dim / 32u;
-        let row_start = weight_off + (row_idx * bpr * 34u);
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 34u;
-            for (var e = 0u; e < 32u; e++) {
-                let col = b * 32u + e;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
-                dot += val_x * dequant_q8_0_elem(bb, e);
-            }
-        }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 1u) { // F16
+    if (wt == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_off + (row_idx * params.dim + col) * 2u;
             let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
             dot += val_x * dequant_f16_at(w_byte);
         }
-    } else if (((params.quant_type >> 24u) & 0xFFu) == 0u) { // F32
+    } else if (wt == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_off / 4u + row_idx * params.dim + col;
             let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
             dot += val_x * bitcast<f32>(read_blob(w_idx));
         }
-    } else { // Q4_0
-        let blocks_per_row = params.dim / 32u;
-        let row_start_byte = weight_off + (row_idx * blocks_per_row * 18u);
-        for (var b = 0u; b < blocks_per_row; b++) {
-            let block_base = row_start_byte + (b * 18u);
-            let scale_idx = block_base / 4u;
-            let scale_packed = extractBits(read_blob(scale_idx), (block_base % 4u) * 8u, 16u);
-            let scale = unpack2x16float(scale_packed).x;
-            let qs_byte_start = block_base + 2u;
-            for (var i = 0u; i < 32u; i++) {
-                let col = b * 32u + i;
-                let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
-                let byte_idx = i % 16u;
-                let qs_idx = qs_byte_start + byte_idx;
-                let qs_word = read_blob(qs_idx / 4u);
-                let qs_byte = extractBits(qs_word, (qs_idx % 4u) * 8u, 8u);
-                let nib = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
-                let val_w = (f32(nib) - 8.0) * scale;
-                dot += val_x * val_w;
+    } else { // Block quant types via unified dispatch
+        let epb = QUANT_ELEMS[wt];
+        let bpb = QUANT_BYTES[wt];
+        if (epb > 0u) {
+            let total_blocks = params.dim / epb;
+            let row_start_byte = weight_off + row_idx * total_blocks * bpb;
+            for (var b = 0u; b < total_blocks; b++) {
+                let bb = row_start_byte + b * bpb;
+                for (var e = 0u; e < epb; e++) {
+                    let col = b * epb + e;
+                    let val_x = activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col];
+                    dot += val_x * dequant_dispatch(wt, bb, e);
+                }
             }
         }
     }
@@ -1184,68 +1049,9 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let weight_off = offsets.ffn_down;
 
-    let qt_down = (params.quant_type >> 16u) & 0xFFu;
-    if (qt_down == 14u) { // Q6_K
-        let bpr = ffn_dim / 256u;
-        let row_start = weight_off + (idx * bpr * 210u);
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 210u;
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                let val_gate = temp_state[temp_base + col];
-                let val_up   = temp_state[temp_base + ffn_dim + col];
-                dot += (val_gate * val_up) * dequant_q6k_elem(bb, e);
-            }
-        }
-    } else if (qt_down == 13u) { // Q5_K
-        let bpr = ffn_dim / 256u;
-        let row_start = weight_off + (idx * bpr * 176u);
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 176u;
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                let val_gate = temp_state[temp_base + col];
-                let val_up   = temp_state[temp_base + ffn_dim + col];
-                dot += (val_gate * val_up) * dequant_q5k_elem(bb, e);
-            }
-        }
-    } else if (qt_down == 12u) { // Q4_K
-        let blocks_per_row_k = ffn_dim / 256u;
-        let row_start_byte_k = weight_off + (idx * blocks_per_row_k * 144u);
-        for (var b = 0u; b < blocks_per_row_k; b++) {
-            let block_base_k = row_start_byte_k + (b * 144u);
-            for (var e = 0u; e < 256u; e++) {
-                let col = b * 256u + e;
-                let val_gate = temp_state[temp_base + col];
-                let val_up   = temp_state[temp_base + ffn_dim + col];
-                dot += (val_gate * val_up) * dequant_q4k_elem(block_base_k, e);
-            }
-        }
-    } else if (qt_down == 6u) { // Q5_0
-        let bpr = ffn_dim / 32u;
-        let row_start = weight_off + idx * bpr * 22u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 22u;
-            for (var e = 0u; e < 32u; e++) {
-                let col = b * 32u + e;
-                let val_gate = temp_state[temp_base + col];
-                let val_up   = temp_state[temp_base + ffn_dim + col];
-                dot += (val_gate * val_up) * dequant_q5_0_elem(bb, e);
-            }
-        }
-    } else if (qt_down == 8u) { // Q8_0
-        let bpr = ffn_dim / 32u;
-        let row_start = weight_off + idx * bpr * 34u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 34u;
-            for (var e = 0u; e < 32u; e++) {
-                let col = b * 32u + e;
-                let val_gate = temp_state[temp_base + col];
-                let val_up   = temp_state[temp_base + ffn_dim + col];
-                dot += (val_gate * val_up) * dequant_q8_0_elem(bb, e);
-            }
-        }
-    } else if (qt_down == 1u) { // F16
+    let qt_down = params.quant_ffn_down;
+
+    if (qt_down == 1u) { // F16
         for (var col = 0u; col < ffn_dim; col++) {
             let w_byte = weight_off + (idx * ffn_dim + col) * 2u;
             let val_gate = temp_state[temp_base + col];
@@ -1259,31 +1065,24 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let val_up   = temp_state[temp_base + ffn_dim + col];
             dot += (val_gate * val_up) * bitcast<f32>(read_blob(w_idx));
         }
-    } else { // Q4_0
-        let blocks_per_row = ffn_dim / 32u;
-        let row_start_byte = weight_off + (idx * blocks_per_row * 18u);
-        for (var b = 0u; b < blocks_per_row; b++) {
-            let block_base = row_start_byte + (b * 18u);
-            let scale_idx = block_base / 4u;
-            let scale_packed = extractBits(read_blob(scale_idx), (block_base % 4u) * 8u, 16u);
-            let scale = unpack2x16float(scale_packed).x;
-            let qs_byte_start = block_base + 2u;
-            for (var i = 0u; i < 32u; i++) {
-                let col = b * 32u + i;
-                let val_gate = temp_state[temp_base + col];
-                let val_up   = temp_state[temp_base + ffn_dim + col];
-                let val_x    = val_gate * val_up;
-                let byte_idx = i % 16u;
-                let qs_idx = qs_byte_start + byte_idx;
-                let qs_word = read_blob(qs_idx / 4u);
-                let qs_byte = extractBits(qs_word, (qs_idx % 4u) * 8u, 8u);
-                let nib = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
-                let val_w = (f32(nib) - 8.0) * scale;
-                dot += val_x * val_w;
+    } else { // Block quant types via unified dispatch
+        let epb = QUANT_ELEMS[qt_down];
+        let bpb = QUANT_BYTES[qt_down];
+        if (epb > 0u) {
+            let total_blocks = ffn_dim / epb;
+            let row_start_byte = weight_off + idx * total_blocks * bpb;
+            for (var b = 0u; b < total_blocks; b++) {
+                let bb = row_start_byte + b * bpb;
+                for (var e = 0u; e < epb; e++) {
+                    let col = b * epb + e;
+                    let val_gate = temp_state[temp_base + col];
+                    let val_up   = temp_state[temp_base + ffn_dim + col];
+                    dot += (val_gate * val_up) * dequant_dispatch(qt_down, bb, e);
+                }
             }
         }
     }
-    
+
     // Debug stash: store pure FFN down output before residual
     // temp_state layout uses 0..ffn_dim*2-1; ffn_dim*2..temp_stride is free for dim floats
     temp_state[temp_base + params.ffn_dim * 2u + idx] = dot;

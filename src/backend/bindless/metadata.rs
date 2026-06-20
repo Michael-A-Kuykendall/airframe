@@ -305,16 +305,17 @@ impl BindlessMetadata {
                     attn_k_bias: attn_k_bias_off,
                     attn_v_bias: attn_v_bias_off,
                 };
-                // bits 24-31: attn_output.weight type — used by main_attn_proj and main_ffn_proj.
-                // For models with fused QKV (phi-2, starcoder2), lqt_main = fused QKV type, but
-                // attn_output.weight and ffn_up/gate have a different (usually lower) quant type.
                 let lqt_attn_out = t(&tensor_types, layer_idx, "attn_output.weight");
+                let lqt_gate = t(&tensor_types, layer_idx, "ffn_gate.weight");
+                let lqt_up = t(&tensor_types, layer_idx, "ffn_up.weight");
                 compiled_layers.push(CompiledLayerEntry {
                     offsets,
-                    quant_type_packed: lqt_main
-                        | (lqt_v << 8)
-                        | (lqt_down << 16)
-                        | (lqt_attn_out << 24),
+                    quant_qk: lqt_main,
+                    quant_v: lqt_v,
+                    quant_attn_out: lqt_attn_out,
+                    quant_ffn_down: lqt_down,
+                    quant_ffn_gate: lqt_gate,
+                    quant_ffn_up: lqt_up,
                 });
                 layer_idx += 1;
             }
@@ -395,6 +396,15 @@ impl BindlessMetadata {
                     .contains_key(&format!("blk.{}.attn_qkv.weight", layer_idx))
             {
                 return self.tensor_offsets[&format!("blk.{}.attn_qkv.weight", layer_idx)] as u32;
+            }
+            // Fused FFN gate_up for StarCoder2 etc (GROUP C)
+            if (s == "ffn_gate.weight" || s == "ffn_up.weight")
+                && self
+                    .tensor_offsets
+                    .contains_key(&format!("blk.{}.ffn_gate_up.weight", layer_idx))
+            {
+                return self.tensor_offsets[&format!("blk.{}.ffn_gate_up.weight", layer_idx)]
+                    as u32;
             }
             // Critical failure: layer exists but sub-tensor is missing
             panic!(

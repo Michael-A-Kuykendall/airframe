@@ -83,13 +83,19 @@ pub struct LayerParams {
     pub rms_eps: f32,
     pub ffn_dim: u32, // Feed-forward intermediate dimension (e.g. 5632 for TinyLlama)
     pub temp_stride: u32, // Per-token temp buffer stride in floats (e.g. 16384)
-    pub quant_type: u32, // GGML type: 2=Q4_0, 12=Q4_K
+    pub quant_qk: u32, // attn_q / attn_k
+    pub quant_v: u32, // attn_v
+    pub quant_attn_out: u32, // attn_output
+    pub quant_ffn_down: u32, // ffn_down
+    pub quant_ffn_gate: u32, // ffn_gate
+    pub quant_ffn_up: u32, // ffn_up
+    // (old quant_type removed; use per-tensor selectors above for FSE dispatch)
     pub attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
-    pub post_norm_enabled: u32, // 1 = apply post-attn and post-ffw norm (Gemma-2); 0 = disabled
-    pub qk_norm_enabled: u32, // 1 = apply per-head Q/K RMSNorm before RoPE (Qwen3); 0 = disabled
+    pub post_norm_enabled: u32,  // 1 = apply post-attn and post-ffw norm (Gemma-2); 0 = disabled
+    pub qk_norm_enabled: u32,    // 1 = apply per-head Q/K RMSNorm before RoPE (Qwen3); 0 = disabled
     pub layer_norm_enabled: u32, // 1 = use LayerNorm math in layer norms (Phi-family)
-    pub ffn_kind_policy: u32, // 0 = infer from offsets (compat), 1 = gated, 2 = non-gated
-    pub qkv_layout_policy: u32, // 0 = infer from offsets (compat), 1 = separate, 2 = fused
+    pub ffn_kind_policy: u32,    // 0 = infer from offsets (compat), 1 = gated, 2 = non-gated
+    pub qkv_layout_policy: u32,  // 0 = infer from offsets (compat), 1 = separate, 2 = fused
     /// Micro-batch offset: first token index in this QKV chunk (0 for non-chunked dispatches)
     pub batch_offset: u32,
     /// Micro-batch count: number of tokens in this QKV chunk (== batch_size for non-chunked)
@@ -143,9 +149,12 @@ pub struct HeadBlobParams {
 pub struct CompiledLayerEntry {
     /// All tensor byte-offsets for this layer, ready to upload to GPU.
     pub offsets: LayerOffsets,
-    /// Packed quant types: bits[7:0]=attn_q, bits[15:8]=attn_v, bits[23:16]=ffn_down.
-    /// Matches the `quant_type` field layout expected by LayerParams.
-    pub quant_type_packed: u32,
+    pub quant_qk: u32,
+    pub quant_v: u32,
+    pub quant_attn_out: u32,
+    pub quant_ffn_down: u32,
+    pub quant_ffn_gate: u32,
+    pub quant_ffn_up: u32,
 }
 
 /// The Control Plane for Bindless Inference.

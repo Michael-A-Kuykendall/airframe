@@ -316,7 +316,9 @@ impl GpuRuntime {
         let append_log = |msg: &str| {
             use std::io::Write;
             let line = format!("[T+{:.2}s] {}\n", t0.elapsed().as_secs_f64(), msg);
-            eprintln!("[ISF] {}", line.trim());
+            if std::env::var("AIRFRAME_LOG_TDR_POLLS").is_ok() {
+                eprintln!("[ISF] {}", line.trim());
+            }
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)

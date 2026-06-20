@@ -215,6 +215,40 @@ fn dequant_q5_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Q4_0 element dequant (18-byte blocks, 32 elements)
+// ---------------------------------------------------------------------------
+fn dequant_q4_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
+    let scale_packed = extractBits(read_wt_blob(block_base_byte / 4u),
+                                   (block_base_byte % 4u) * 8u, 16u);
+    let scale = unpack2x16float(scale_packed).x;
+    let qs_byte = block_base_byte + 2u + (elem_in_block % 16u);
+    let qs = read_wt_byte(qs_byte);
+    let nib = select(qs & 0x0Fu, qs >> 4u, elem_in_block >= 16u);
+    return (f32(nib) - 8.0) * scale;
+}
+
+// ---------------------------------------------------------------------------
+// Quant block metadata — indexed by GGML quant type code.
+// ---------------------------------------------------------------------------
+const QUANT_ELEMS: array<u32, 16> = array<u32, 16>(
+    0, 0, 32, 0, 0, 0, 32, 0, 32, 0, 0, 0, 256, 256, 256, 0);
+const QUANT_BYTES: array<u32, 16> = array<u32, 16>(
+    0, 0, 18, 0, 0, 0, 22, 0, 34, 0, 0, 0, 144, 176, 210, 0);
+
+// ---------------------------------------------------------------------------
+// Unified dequant dispatch — all quant type branches in one function.
+// ---------------------------------------------------------------------------
+fn dequant_dispatch(qt: u32, block_base_byte: u32, elem_in_block: u32) -> f32 {
+    if (qt == 14u) { return dequant_q6k_elem(block_base_byte, elem_in_block); }
+    else if (qt == 13u) { return dequant_q5k_elem(block_base_byte, elem_in_block); }
+    else if (qt == 12u) { return dequant_q4k_elem(block_base_byte, elem_in_block); }
+    else if (qt == 6u)  { return dequant_q5_0_elem(block_base_byte, elem_in_block); }
+    else if (qt == 8u)  { return dequant_q8_0_elem(block_base_byte, elem_in_block); }
+    else if (qt == 2u)  { return dequant_q4_0_elem(block_base_byte, elem_in_block); }
+    else { return 0.0; }
+}
+
+// ---------------------------------------------------------------------------
 // Main kernel — one thread per output vocab row
 // ---------------------------------------------------------------------------
 @compute @workgroup_size(64, 1, 1)
@@ -225,52 +259,7 @@ fn main_lm_head(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let dim = params.dim;
     var dot = 0.0f;
 
-    if (params.quant_type == 14u) { // Q6_K  (210 bytes/block, 256 elems/block)
-        let bpr       = dim / 256u;                         // blocks per row
-        let row_start = idx * bpr * 210u;                   // relative byte offset from tensor start
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 210u;
-            for (var e = 0u; e < 256u; e++) {
-                dot += act_in[b * 256u + e] * dequant_q6k_elem(bb, e);
-            }
-        }
-    } else if (params.quant_type == 13u) { // Q5_K  (176 bytes/block, 256 elems/block)
-        let bpr       = dim / 256u;
-        let row_start = idx * bpr * 176u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 176u;
-            for (var e = 0u; e < 256u; e++) {
-                dot += act_in[b * 256u + e] * dequant_q5k_elem(bb, e);
-            }
-        }
-    } else if (params.quant_type == 12u) { // Q4_K  (144 bytes/block, 256 elems/block)
-        let bpr       = dim / 256u;
-        let row_start = idx * bpr * 144u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 144u;
-            for (var e = 0u; e < 256u; e++) {
-                dot += act_in[b * 256u + e] * dequant_q4k_elem(bb, e);
-            }
-        }
-    } else if (params.quant_type == 6u) { // Q5_0  (22 bytes/block, 32 elems/block)
-        let bpr       = dim / 32u;
-        let row_start = idx * bpr * 22u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 22u;
-            for (var e = 0u; e < 32u; e++) {
-                dot += act_in[b * 32u + e] * dequant_q5_0_elem(bb, e);
-            }
-        }
-    } else if (params.quant_type == 8u) { // Q8_0  (34 bytes/block, 32 elems/block)
-        let bpr       = dim / 32u;
-        let row_start = idx * bpr * 34u;
-        for (var b = 0u; b < bpr; b++) {
-            let bb = row_start + b * 34u;
-            for (var e = 0u; e < 32u; e++) {
-                dot += act_in[b * 32u + e] * dequant_q8_0_elem(bb, e);
-            }
-        }
-    } else if (params.quant_type == 1u) { // F16
+    if (params.quant_type == 1u) { // F16
         for (var col = 0u; col < dim; col++) {
             let w_byte = (idx * dim + col) * 2u;
             dot += act_in[col] * dequant_f16_at(w_byte);
@@ -279,22 +268,18 @@ fn main_lm_head(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var col = 0u; col < dim; col++) {
             dot += act_in[col] * bitcast<f32>(read_wt_blob(idx * dim + col));
         }
-    } else { // Q4_0 (default / fallback)  (18 bytes/block, 32 elems/block)
-        let bpr          = dim / 32u;
-        let row_start_b  = idx * bpr * 18u;
-        for (var b = 0u; b < bpr; b++) {
-            let block_base   = row_start_b + b * 18u;
-            let scale_packed = extractBits(read_wt_blob(block_base / 4u),
-                                           (block_base % 4u) * 8u, 16u);
-            let scale        = unpack2x16float(scale_packed).x;
-            let qs_byte_start = block_base + 2u;
-            for (var i = 0u; i < 32u; i++) {
-                let col      = b * 32u + i;
-                let byte_idx = qs_byte_start + (i % 16u);
-                let qs_word  = read_wt_blob(byte_idx / 4u);
-                let qs_byte  = extractBits(qs_word, (byte_idx % 4u) * 8u, 8u);
-                let nib      = select((qs_byte & 0x0Fu), (qs_byte >> 4u), i >= 16u);
-                dot         += act_in[col] * ((f32(nib) - 8.0) * scale);
+    } else { // Block quant types via unified dispatch
+        let qt = params.quant_type;
+        let epb = QUANT_ELEMS[qt];
+        let bpb = QUANT_BYTES[qt];
+        if (epb > 0u) {
+            let total_blocks = dim / epb;
+            let row_start = idx * total_blocks * bpb;
+            for (var b = 0u; b < total_blocks; b++) {
+                let bb = row_start + b * bpb;
+                for (var e = 0u; e < epb; e++) {
+                    dot += act_in[b * epb + e] * dequant_dispatch(qt, bb, e);
+                }
             }
         }
     }
