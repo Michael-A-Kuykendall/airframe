@@ -90,4 +90,4 @@ console-functional-review.md
 build/artifact/*
 target/*.rldb
 target/debug/***}
-target/release/[a-z0-9]*
+target/release/[a-z0-9]*all_sessions_export.json

@@ -1,0 +1,5 @@
+# .clinerules for Windows/PowerShell
+Always use PowerShell syntax via powershell.exe.
+Use absolute paths.
+Avoid re-writing existing files; append or add new ones only.
+Verify with cargo check.

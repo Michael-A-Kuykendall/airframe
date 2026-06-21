@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "review-team": {
+      "source": "cline/skills",
+      "sourceType": "github",
+      "skillPath": "skills/review-team/SKILL.md",
+      "computedHash": "e968e5c74d5745f1370c67cd25432dd741c861a4fe4bffcbe145934a693aac45"
+    }
+  }
+}
