@@ -85,3 +85,9 @@ internal/
 # Scratch files
 console-functional-review.md
 .qwen/
+
+# Build artifacts and cache
+build/artifact/*
+target/*.rldb
+target/debug/***}
+target/release/[a-z0-9]*

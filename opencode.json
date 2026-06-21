@@ -1,8 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
   
-  "model": "groq/gpt-oss-120b",
-  "small_model": "groq/gpt-oss-120b",
+  "model": "local-model",
+  "small_model": "local-model",
 
   "skills": {
     "paths": [
@@ -40,21 +40,12 @@
   },
 
   "provider": {
-    "groq": {
-      "models": {
-        "gpt-oss-120b": {
-          "limit": {
-            "context": 131072,
-            "input": 131072,
-            "output": 1024
-          }
-        }
-      },
-      "options": {
-        "timeout": 600000
-      }
+    "custom": {
+      "baseUrl": "http://localhost:1234/v1",
+      "apiKey": "dummy-key"
     }
   },
+  "model": "gemma-4-12b-coder-fable5-composer2.5-v1",
 
   "permission": {
     "bash": "ask",
