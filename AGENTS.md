@@ -258,20 +258,30 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
 
 ### Tooling Upgrade (dzero-cas Phase 1) ✅ COMPLETE
 
-All AST-aware and terminal superpower tools installed & tested in bash environment:
+All AST-aware and terminal superpower tools installed & tested in bash environment.
 
-| Tool | Purpose | Path |
-|------|---------|------|
-| `ast-grep` | AST-aware pattern matching | `/c/Users/micha/.cargo/bin/ast-grep.exe` |
-| `fd` | Fast file finder (replaces find) | `/c/Users/micha/scoop/shims/fd` |
-| `bat` | Syntax-highlighted cat | `/c/Users/micha/.cargo/bin/bat.exe` |
-| `eza` | Git-aware ls replacement | `/c/Users/micha/.cargo/bin/eza.exe` |
-| `fzf` | Fuzzy terminal navigation | `/c/ProgramData/chocolatey/bin/fzf` |
-| `zoxide` | Smart directory jumping | `/c/Users/micha/.cargo/bin/zoxide.exe` |
+**⚠️ CRITICAL COMMAND MAPPING — MUST USE THESE FUNCTIONS:**
 
-**Configured in opencode.json:**
-- Line 119: `ast-grep` alias (`ag`) for Rust pattern matching
-- Line 124: `terminal-triage` command (`fd .rs \| fzf \| xargs bat`)
+| Old Command | ❌ DO NOT USE | New Function | ✅ MUST USE | What It Replaces |
+|-------------|---------------|--------------|-------------|------------------|
+| `ls`        | `ls dir/`     | `ls()`       | `ls() dir/` | eza with git status colors |
+| `find`      | `find . -name "*.rs"` | `find()`   | `find() .rs` | fd (3x faster, ignores .git/) |
+| `cat`       | `cat file.rs` | `cat()`      | `cat() file.rs` | bat with syntax highlighting + line numbers |
+| `grep`      | `grep -r "pattern"` | `ag()`     | `ag() -p "pattern" .` | ast-grep (AST-aware Rust pattern matching) |
+
+**Enforcement Rules:**
+1. **ALWAYS use functions**: `ls()`, `find()`, `cat()`, `ag()` — never plain commands
+2. **Source the aliases FIRST**: `source ~/.bash_aliases` in every new bash session
+3. **Watch for regressions**: If you see me using plain `ls`, `find`, `cat`, or `grep`, it means I forgot the mapping — CORRECT IMMEDIATELY
+4. **AGENTS.md is your training**: Always check this section to confirm correct command usage
+
+**Tool Paths:**
+- `ast-grep`: `/c/Users/micha/.cargo/bin/ast-grep.exe`
+- `fd`: `/c/Users/micha/scoop/shims/fd`
+- `bat`: `/c/Users/micha/.cargo/bin/bat.exe`
+- `eza`: `/c/Users/micha/.cargo/bin/eza.exe`
+- `fzf`: `/c/ProgramData/chocolatey/bin/fzf`
+- `zoxide`: `/c/Users/micha/.cargo/bin/zoxide.exe`
 
 **Tested & Working:** All tools verified in bash environment (see `docs/opencode-tooling-test-results.md`).
 
