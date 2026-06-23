@@ -285,6 +285,58 @@ All AST-aware and terminal superpower tools installed & tested in bash environme
 
 **Tested & Working:** All tools verified in bash environment (see `docs/opencode-tooling-test-results.md`).
 
+---
+
+## Beads Mastery Report ✅
+
+**Current Version:** `bd v0.49.1 (dev)` | **Latest Available:** `v1.0.4`
+
+See full report: `docs/beads-mastery-report.md`
+
+### Core Philosophy
+Beads solves agent amnesia, work disavowal, and lost work problems by providing persistent issue-based memory via git-backed SQLite.
+
+### Key Commands to Master
+
+**Daily Workflow:**
+- `bd ready --json` - Get definitive list of unblocked work
+- `bd graph --all` - Visualize dependency graph with execution order
+- `bd status` - Database overview and statistics
+
+**Advanced Features:**
+- **Formulas:** Reusable workflow templates (`bd formula list`, `bd mol pour`)
+- **Molecules:** Work templates with proto→mol instantiation
+- **Graph:** ASCII visualization of issue dependencies (`--box`, `--compact`, `--json`)
+- **Agent State:** ZFC compliance for monitoring (`bd agent state`, `bd agent heartbeat`)
+- **Audit Trail:** Append-only JSONL log for auditing (`bd audit record`, `bd audit label`)
+- **Worktree:** Parallel development with shared database (`bd worktree create`)
+- **Prime:** AI-optimized context output for hooks (`bd prime`, `bd prime --export`)
+
+### Best Practices
+1. Always use `bd ready` before starting work
+2. Kill agents after each issue completion (cheaper, better decisions)
+3. File issues for discovered problems automatically
+4. Use `bd graph` to understand dependency structure
+5. Export issues for review/archive (`bd export --format obsidian`)
+
+### Configuration Issues to Fix
+1. `jsonl_export` points to system file instead of `issues.jsonl`
+2. `.beads/issues.jsonl` is gitignored (should be tracked)
+
+**Fix with:** `bd doctor` then address warnings shown
+
+### Available Advanced Commands
+- `bd formula list/show/convert` - Formula management
+- `bd mol show/pour/wisp/bond/squash/distill/burn` - Molecule operations
+- `bd agent state/heartbeat/show/backfill-labels` - Agent management
+- `bd audit record/label` - Audit trail
+- `bd worktree create/list/remove/info` - Parallel dev setup
+- `bd prime/--full/--mcp/--stealth/--export` - AI context output
+- `bd upgrade status/review/ack` - Version management
+- `bd doctor/repair/resolve-conflicts/migrate` - Maintenance
+
+---
+
 ### Available Skills (`.opencode/skills/`) - Use these for specialized tasks:
 
 | Skill | What it covers |
