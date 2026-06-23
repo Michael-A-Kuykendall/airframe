@@ -92,3 +92,7 @@ target/*.rldb
 target/debug/***}
 target/release/[a-z0-9]*all_sessions_export.json
 .opencode/opencode.json
+
+# opencode session logs (not part of hotfix release changes)
+session.json
+session_ses_*.json
