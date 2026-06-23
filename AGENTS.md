@@ -256,6 +256,25 @@ cargo run --release -- generate --name "Phi-3.5-mini-instruct" --prompt "Hello" 
 
 - `quant_type` derived from metadata in frontier_compare (not hardcoded 0)
 
+### Tooling Upgrade (dzero-cas Phase 1) ✅ COMPLETE
+
+All AST-aware and terminal superpower tools installed & tested in bash environment:
+
+| Tool | Purpose | Path |
+|------|---------|------|
+| `ast-grep` | AST-aware pattern matching | `/c/Users/micha/.cargo/bin/ast-grep.exe` |
+| `fd` | Fast file finder (replaces find) | `/c/Users/micha/scoop/shims/fd` |
+| `bat` | Syntax-highlighted cat | `/c/Users/micha/.cargo/bin/bat.exe` |
+| `eza` | Git-aware ls replacement | `/c/Users/micha/.cargo/bin/eza.exe` |
+| `fzf` | Fuzzy terminal navigation | `/c/ProgramData/chocolatey/bin/fzf` |
+| `zoxide` | Smart directory jumping | `/c/Users/micha/.cargo/bin/zoxide.exe` |
+
+**Configured in opencode.json:**
+- Line 119: `ast-grep` alias (`ag`) for Rust pattern matching
+- Line 124: `terminal-triage` command (`fd .rs \| fzf \| xargs bat`)
+
+**Tested & Working:** All tools verified in bash environment (see `docs/opencode-tooling-test-results.md`).
+
 ### Available Skills (`.opencode/skills/`) - Use these for specialized tasks:
 
 | Skill | What it covers |
