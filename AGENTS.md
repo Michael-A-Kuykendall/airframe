@@ -319,11 +319,19 @@ Beads solves agent amnesia, work disavowal, and lost work problems by providing 
 4. Use `bd graph` to understand dependency structure
 5. Export issues for review/archive (`bd export --format obsidian`)
 
-### Configuration Issues to Fix
-1. `jsonl_export` points to system file instead of `issues.jsonl`
-2. `.beads/issues.jsonl` is gitignored (should be tracked)
+### Enforcement Rules - Negative State to Avoid
+**⚠️ WATCH FOR THESE MISTAKES:**
+- Using plain `ls`, `find`, `cat`, or `grep` instead of `ls()`, `find()`, `cat()`, `ag()`
+- Not using `bd ready --json` before starting work sessions
+- Not visualizing dependencies with `bd graph --all` when issues are complex
+- Forgetting to kill agents after completing each issue (leads to disavowal)
+- Ignoring discovered problems instead of filing beads issues immediately
+- Not using `bd prime` or `bd prime --export` for AI context before session restarts
+- Skipping `bd sync` before git push operations
+- Not checking `bd status` to understand database state
+- Forgetting configuration fixes from `bd doctor` warnings
 
-**Fix with:** `bd doctor` then address warnings shown
+**Fix with:** Always run `bd doctor` and address warnings shown
 
 ### Available Advanced Commands
 - `bd formula list/show/convert` - Formula management
@@ -334,6 +342,11 @@ Beads solves agent amnesia, work disavowal, and lost work problems by providing 
 - `bd prime/--full/--mcp/--stealth/--export` - AI context output
 - `bd upgrade status/review/ack` - Version management
 - `bd doctor/repair/resolve-conflicts/migrate` - Maintenance
+
+**Usage Guidance:**
+- **Before work:** `bd ready --json` (get unblocked work), `bd graph --all` (visualize dependencies)
+- **During work:** File issues for discovered problems, use `bd prime --full` before session restarts
+- **After work:** `bd sync`, close completed issues with `bd close <id>`, update status with `bd update <id> --status closed`
 
 ---
 
