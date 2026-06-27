@@ -1,0 +1,38 @@
+{
+  "seed_version": 1,
+  "source_gguf": "D:/shimmy-test-models/gguf_collection\\Phi-3.5-mini-instruct.Q4_K_M.gguf",
+  "generated_at": "2026-06-13T17:18:30.327611600+00:00",
+  "model": {
+    "name": "Phi-3.5-mini-instruct.Q4_K_M.gguf",
+    "gguf_filename": "Phi-3.5-mini-instruct.Q4_K_M.gguf",
+    "arch": "unknown",
+    "quant": "q4_k_m",
+    "n_layers": 0,
+    "n_heads": 0,
+    "n_heads_kv": 0,
+    "head_dim": 0,
+    "n_embd": 0,
+    "ff_dim": 0,
+    "n_vocab": 0,
+    "n_ctx": 0,
+    "rope_base": 0.0,
+    "rope_scale": 0.0,
+    "rope_dim": 0,
+    "rms_eps": 0.0,
+    "has_qk_norm": false,
+    "attn_logit_softcap": 0.0,
+    "final_logit_softcap": 0.0,
+    "gguf_path": "D:/shimmy-test-models/gguf_collection\\Phi-3.5-mini-instruct.Q4_K_M.gguf",
+    "file_size_bytes": 2393232384
+  },
+  "oracles": [],
+  "integrity": {
+    "expected_oracle_count": 0,
+    "rms_sum": 0.0,
+    "nan_count": 0,
+    "inf_count": 0,
+    "forward_pass_seconds": 0.0,
+    "forward_pass_ok": false,
+    "forward_error": "WeightMissing { weight_id: \"AttnQ { layer: 0 }\" }"
+  }
+}

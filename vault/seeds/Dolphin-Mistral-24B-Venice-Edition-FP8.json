@@ -1,0 +1,38 @@
+{
+  "seed_version": 2,
+  "source_gguf": "dphn/Dolphin-Mistral-24B-Venice-Edition-FP8",
+  "generated_at": "2026-06-27T19:31:58.747952800+00:00",
+  "model": {
+    "name": "dphn/Dolphin-Mistral-24B-Venice-Edition-FP8",
+    "gguf_filename": "Dolphin-Mistral-24B-Venice-Edition-FP8",
+    "arch": "phi",
+    "quant": "Q4_K_M",
+    "n_layers": 48,
+    "n_heads": 32,
+    "n_heads_kv": 8,
+    "head_dim": 128,
+    "n_embd": 5120,
+    "ff_dim": 24576,
+    "n_vocab": 151936,
+    "n_ctx": 4096,
+    "rope_base": 10000.0,
+    "rope_scale": 1.0,
+    "rope_dim": 128,
+    "rms_eps": 0.00001,
+    "has_qk_norm": false,
+    "attn_logit_softcap": 0.0,
+    "final_logit_softcap": 0.0,
+    "gguf_path": "hf://dphn/Dolphin-Mistral-24B-Venice-Edition-FP8",
+    "file_size_bytes": 4294967296
+  },
+  "oracles": [],
+  "integrity": {
+    "expected_oracle_count": 0,
+    "rms_sum": 0.0,
+    "nan_count": 0,
+    "inf_count": 0,
+    "forward_pass_seconds": 0.0,
+    "forward_pass_ok": false,
+    "forward_error": ""
+  }
+}
