@@ -1575,6 +1575,7 @@ mod tests {
             arch: crate::core::spec::ModelArch::Llama,
             file_type: crate::core::spec::GgufFileType::Unknown,
             model_name: String::new(),
+            chat_template: None,
             temp_buffer_size: 0,
             kv_cache_size_per_layer: 0,
             attn_logit_softcap: 0.0,

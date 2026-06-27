@@ -565,6 +565,7 @@ mod tests {
 
     fn create_tiny_spec() -> ModelSpec {
         ModelSpec {
+            chat_template: None,
             n_vocab: 100,
             n_embd: 8,
             n_layer: 2,

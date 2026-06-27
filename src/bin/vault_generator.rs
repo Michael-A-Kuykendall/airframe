@@ -11,9 +11,8 @@
 //!
 
 use serde::Serialize;
-use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 // ─── Output Types ──────────────────────────────────────────────────────────
@@ -100,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let manifest_path = output_dir.join("manifest.json");
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
-    File::create(manifest_path)?.write_all(manifest_json.as_bytes())?;
+    File::create(manifest_path)?.write(manifest_json.as_bytes())?;
     
     println!();
     println!("=== Summary ===");
@@ -133,8 +132,8 @@ fn fetch_model_list() -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let models = match json.as_array() {
             Some(arr) => arr.iter()
                 .filter_map(|m| m.get("name").and_then(|n| n.as_str()))
+                .map(|s: &str| s.to_string()) // Convert &str to String
                 .take(20) // Limit to top 20 for initial vault
-                .map(|s| s.to_string())
                 .collect(),
             None => Vec::new(),
         };
@@ -149,35 +148,35 @@ fn fetch_model_list() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     
     let models = vec![
         // Qwen family (primary target)
-        "Qwen/Qwen3.5-9B-Q4_K_M",
-        "Qwen/Qwen3-8B-Q4_K_M",
-        "Qwen/Qwen3-4B-Thinking-Q4_K_M",
-        "Qwen/Qwen3-1.7B-Q4_K_M",
-        "Qwen/Qwen3-0.6B-Q4_K_M",
+        "Qwen/Qwen3.5-9B-Q4_K_M".to_string(),
+        "Qwen/Qwen3-8B-Q4_K_M".to_string(),
+        "Qwen/Qwen3-4B-Thinking-Q4_K_M".to_string(),
+        "Qwen/Qwen3-1.7B-Q4_K_M".to_string(),
+        "Qwen/Qwen3-0.6B-Q4_K_M".to_string(),
         // DeepSeek
-        "DeepSeek-R1-0528-Qwen3-8B-Q4_K_M",
-        "deepseek/deepseek-r1-qwen3-8b",
+        "DeepSeek-R1-0528-Qwen3-8B-Q4_K_M".to_string(),
+        "deepseek/deepseek-r1-qwen3-8b".to_string(),
         // Mistral
-        "mistralai/ministral-3-14b-reasoning-Q4_K_M",
-        "mistralai/Mistral-Nemo-Instruct-2407-Q4_K_M",
+        "mistralai/ministral-3-14b-reasoning-Q4_K_M".to_string(),
+        "mistralai/Mistral-Nemo-Instruct-2407-Q4_K_M".to_string(),
         // Gemma
-        "google/gemma-4-e4b-it-Q4_K_M",
-        "google/gemma-2-9b-it-Q4_K_M",
-        "google/gemma-2-2b-it-Q4_K_M",
+        "google/gemma-4-e4b-it-Q4_K_M".to_string(),
+        "google/gemma-2-9b-it-Q4_K_M".to_string(),
+        "google/gemma-2-2b-it-Q4_K_M".to_string(),
         // Phi
-        "microsoft/phi-4-Q4_K_M",
-        "microsoft/phi-3.5-mini-instruct-Q4_K_M",
-        "microsoft/phi-3-vision-instruct-Q4_K_M",
-        "microsoft/phi-2-Q4_K_M",
+        "microsoft/phi-4-Q4_K_M".to_string(),
+        "microsoft/phi-3.5-mini-instruct-Q4_K_M".to_string(),
+        "microsoft/phi-3-vision-instruct-Q4_K_M".to_string(),
+        "microsoft/phi-2-Q4_K_M".to_string(),
         // Llama
-        "meta-llama/Llama-3.2-3B-Instruct-Q4_K_M",
-        "meta-llama/Llama-3.2-1B-Instruct-Q4_K_M",
-        "bartowski/Llama-3.1-8B-Instruct-GGUF",
+        "meta-llama/Llama-3.2-3B-Instruct-Q4_K_M".to_string(),
+        "meta-llama/Llama-3.2-1B-Instruct-Q4_K_M".to_string(),
+        "bartowski/Llama-3.1-8B-Instruct-GGUF".to_string(),
         // Qwen2 (legacy but popular)
-        "Qwen/Qwen2.5-Coder-14B-Instruct-Q4_K_M",
-        "Qwen/Qwen2.5-7B-Instruct-Q4_K_M",
-        "Qwen/Qwen2.5-1.5B-Instruct-Q4_K_M",
-        "Qwen/Qwen2-7B-Instruct-Q4_K_M",
+        "Qwen/Qwen2.5-Coder-14B-Instruct-Q4_K_M".to_string(),
+        "Qwen/Qwen2.5-7B-Instruct-Q4_K_M".to_string(),
+        "Qwen/Qwen2.5-1.5B-Instruct-Q4_K_M".to_string(),
+        "Qwen/Qwen2-7B-Instruct-Q4_K_M".to_string(),
     ];
     
     Ok(models)
@@ -236,12 +235,12 @@ fn extract_metadata_from_hf_api(model_id: &str) -> Result<Option<ModelMetadata>,
             let size_gb = params_raw * 0.5; // Q4_K_M is ~50% of FP32
             let file_size_bytes = (size_gb * 1_073_741_824.0) as u64;
             
-            Some(ModelMetadata {
+            Ok(Some(ModelMetadata {
                 name: model_id.to_string(),
                 gguf_filename: filename.to_string(),
-                arch,
+                arch: parse_architecture_from_name(model_id),
                 quant,
-                n_layers: estimate_layers(&params_raw),
+                n_layers: estimate_layers(params_raw), // Estimate from parameters
                 n_heads: 32, // default for most models
                 n_heads_kv: 8, // GQA default
                 head_dim: 128,
@@ -250,19 +249,21 @@ fn extract_metadata_from_hf_api(model_id: &str) -> Result<Option<ModelMetadata>,
                 n_vocab: 151936,
                 n_ctx: 4096,
                 rope_base: 10000.0,
+                rope_scale: 1.0,
+                rope_dim: 128, // default
                 rms_eps: 1e-5,
-                has_qk_norm: arch == "qwen3",
+                has_qk_norm: arch == "qwen3", // arch is already computed above
                 attn_logit_softcap: 0.0,
                 final_logit_softcap: 0.0,
                 gguf_path: format!("hf://{}", model_id),
                 file_size_bytes,
-            })
+            }))
         } else {
-            None
+            Ok(None)
         }
     } else {
         println!("   [HF API] Model not found or network error");
-        None
+        Ok(None)
     }
 }
 

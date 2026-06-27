@@ -256,6 +256,7 @@ mod tests {
             arch: ModelArch::Llama,
             file_type: GgufFileType::Q4_0,
             model_name: "unit-test-model".to_string(),
+            chat_template: None,
             temp_buffer_size: 16384,
             kv_cache_size_per_layer: 2048 * 4 * 64 * 4,
         }
