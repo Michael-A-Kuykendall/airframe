@@ -1271,3 +1271,44 @@ mod tests {
         }
     }
 }
+
+// ─── ISF Integration Spec (vault-derived, no model runs needed!) ──────────
+/// Derive TDR risk from model metadata (no model runs!)
+pub fn derive_tdr_risk_from_metadata(n_vocab: usize) -> &'static str {
+    if n_vocab > 200_000 { "High" } else if n_vocab > 100_000 { "Medium" } else { "Low" }
+}
+
+/// Compute max safe workgroups for head blob dispatch from vault metadata  
+pub fn compute_max_safe_workgroups(n_vocab: usize, budget_ms: f64) -> u32 {
+    let head_wgs = n_vocab / 32; // 32 tokens per WG
+    if head_wgs > 4000 {
+        ((budget_ms * 1_000_000.0 - 500.0) / 500.0).min(head_wgs as f64).max(1.0) as u32
+    } else {
+        ((budget_ms * 1_000_000.0 - 500.0) / 100.0).min(head_wgs as f64).max(1.0) as u32
+    }
+}
+
+/// ISF Rule: YieldNow — derived from TDR risk and dispatch timing
+pub fn should_yield_now(gpu_ms: f64, n_vocab: usize) -> bool {
+    let risk = derive_tdr_risk_from_metadata(n_vocab);
+    match risk {
+        "High" => gpu_ms > 10.0,
+        "Medium" => gpu_ms > 20.0,
+        _ => gpu_ms > 50.0,
+    }
+}
+
+/// ISF Rule: IncreaseTileCount — when head consistently close to budget  
+pub fn should_increase_tiles(current_wgs: u32, n_vocab: usize) -> bool {
+    let max_safe = compute_max_safe_workgroups(n_vocab, 100.0); // 100ms default budget
+    (current_wgs as f64 / (max_safe.max(1) as f64)) > 0.8
+}
+
+/// Risk level string for logging/debugging (for ISF fact emission)
+pub fn risk_level_string(n_vocab: usize) -> String {
+    match derive_tdr_risk_from_metadata(n_vocab) {
+        "High" => "TDR_RISK_HIGH".to_string(),
+        "Medium" => "TDR_RISK_MEDIUM".to_string(),
+        _ => "TDR_RISK_LOW".to_string(),
+    }
+}

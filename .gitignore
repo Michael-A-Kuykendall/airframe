@@ -65,8 +65,7 @@ crates/libfse/docs/
 docs/internal/
 artifacts/
 
-# Generated vault seeds — reproducible, not committed
-vault/seeds/
+# vault/seeds/  # Now committed as canonical vault data
 # vault/vault.duckdb IS committed (via LFS) — do NOT add vault/ here
 
 # Generated fixture CSVs from oracle runs
@@ -89,7 +88,7 @@ console-functional-review.md
 # Build artifacts and cache
 build/artifact/*
 target/*.rldb
-target/debug/***}
+target/debug/**/*
 target/release/[a-z0-9]*all_sessions_export.json
 .opencode/opencode.json
 
