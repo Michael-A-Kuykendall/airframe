@@ -1,56 +1,35 @@
----
+# Session Handoff — NaN Fixed, StarCoder2 Non-Gated FFN Remains
 
-## Session Handoff (2026-06-19)
+## Current State
+- **Branch**: `feat/phase4-pingpong-activation` (HEAD `ac961a3`)
+- **Tests**: 369/369 passing (`cargo test --lib`)
+- **GPU**: RTX 3060 (12GB VRAM, Vulkan, driver 596.49)
+- **GGUF models**: All 5 on `D:/shimmy-test-models/gguf_collection/`
 
-### Current State
-- **Branch:** `feat/phase4-pingpong-activation`
-- **HEAD:** 4e85c66 — "chore: Ignore opencode session logs"
-- **Status:** Up to date with remote (private/feat/phase4-pingpong-activation)
+## Critical Findings This Session
+1. **GPU pipeline NaN FIXED**. Root cause: `sh_layer_v1.wgsl:985` used `params.quant_attn_out` for both FFN gate and up projections instead of per-tensor `quant_ffn_gate`/`quant_ffn_up`. Also fixed `layer_dump_gpu.rs` which hardcoded all quant types to 0 (F32) and used Q4_0-only dequant. Verified: TinyLlama Q4_0 produces valid layer outputs.
+2. **StarCoder2 panics at `metadata.rs:410`**: Missing `ffn_gate.weight` (non-gated FFN arch). NOT fused QKV — has separate Q/K/V.
+3. **gguf_inspector rewritten**: Now detects arch, ffn_gate presence, fused QKV via raw byte scan (8MB window).
+4. **Pool encoder/timestamp**: Fixes tracked in `airframe-dg3` and `airframe-f35`. Not wired into `mod.rs`.
 
-### Work Completed This Session
-1. ✅ Fixed `bd doctor` warnings (`metadata.json`)
-2. ✅ Reverted accidental `.vscode/settings.json` theme change
-3. ✅ Committed hotfix release v0.2.6 code (inference.rs, matmul.rs, etc.)
-4. ✅ Created tool enforcement infrastructure:
-   - `.opencode/skills/tool-enforcement/SKILL.md`
-   - `.opencode/agent/guardrail.md`
-   - `.opencode/prime-enforcement.md`
-5. ✅ Added session logs to `.gitignore`
-6. ✅ Pushed all changes to remote
+## Quick Commands
+```bash
+# GGUF inspector (detects arch, ffn_gate, fused QKV)
+cargo run --bin gguf_inspector -- "D:/shimmy-test-models/gguf_collection/<model-path>"
 
-### Open Beads Issues (10 total)
-| ID | Title | Status | Priority |
-|----|-------|--------|----------|
-| dna | Qwen3-0.6B: QK-norm path broken | open | P2 |
-| pz9 | Stabilize Qwen3-1.7B-Q4_K_M (TDR) | open | P2 |
-| guf | Stabilize Llama-3.2-3B-Q4_K_M (TDR) | in_progress | P2 |
-| b41 | Stabilize Gemma-2-2B-Q4_K_M (TDR) | open | P2 |
-| o9e | StarCoder2-3B: fused QKV arch panic | open | P2 |
-| 6ex | Shimmy stderr noise cleanup | open | P2 |
-| mbt | TDR Transport — GPU timestamp query pool | open | P2 |
-| eri | TDR Transport — Encoder pool design | open | P2 |
-| dar | TDR Transport — ISF integration spec | open | P2 |
-| 68s | TDR Transport — Calibration tooling | open | P2 |
+# Layer dump (runs all layers on GPU)
+cargo run --bin layer_dump_gpu -- "<gguf_path>" "Hello" output.json
 
-### Test Queue
-- New beads issue created: `airframe-01o` (Test Queue Management System)
-- Documentation written: `docs/test-regimes.md`
-- Workflow: Agent queues tests → Human runs when agent dormant → Results logged to `.beads/test-results/`
+# TDR calibration (vault DB only, no GPU)
+cargo run --bin tdr_calibrate -- qwen3-0.6b-q4_k_m
+cargo run --bin model_calibrator -- qwen3-0.6b-q4_k_m
+```
 
-### Next Session Start Checklist
-1. Run `bd ready --json` to see unblocked work
-2. Review open beads issues and their dependencies (`bd graph --all`)
-3. Check test results in `.beads/test-results/` if available
-4. Use `bd prime --export` for full context injection
+## Beads Overview
+- `bd prime` — Shows BD workflow commands
+- `bd ready` — Ready-to-work issues
+- See `.beads/PRIME.md` for full context
 
-### Tool Enforcement Rules
-**DO NOT USE:** Plain `ls`, `find`, `cat`, `grep` commands
-**ALWAYS USE:** Function-style tools `ls()`, `find()`, `cat()`, `ag()`
-**BEADS WORKFLOW:** Always run `bd ready --json` first, file issues immediately for discovered problems
-
-### Build Status
-- ✅ `cargo check`: passes (zero warnings)
-- ✅ `cargo clippy -- -D warnings`: passes clean
-- ✅ CI format check added to `.github/workflows/ci.yml`
-
----
+## IMPORTANT: DO NOT USE THESE (don't exist)
+- `cargo run --bin inference` — binary doesn't exist
+- `cargo test --features tdr_test` — feature doesn't exist

@@ -3,10 +3,11 @@
 
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
+use airframe::backend::bindless::metadata::BindlessMetadata;
 use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams};
-use airframe::core::spec::ModelSpec;
 use serde::Serialize;
 use shimmytok::Tokenizer;
+use std::fs::File;
 use std::path::PathBuf;
 
 #[derive(Serialize)]
@@ -121,13 +122,22 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     // === Load Model ===
     let tokenizer = Tokenizer::from_gguf_file(model_path)?;
-    let spec_hint = ModelSpec::tinylama_1_1b_chat_v1_0();
-    let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(model_path), Some(&spec_hint));
-    let spec = gpu_model.metadata.to_model_spec();
+
+    // Read metadata first to get correct spec for preflight
+    let mut meta_file = File::open(model_path)?;
+    let meta = BindlessMetadata::new(&mut meta_file);
+    drop(meta_file);
+    let spec = meta.to_model_spec();
+
+    eprintln!("[Layer Dump] Spec: n_embd={}, n_head={}, n_head_kv={}, head_dim={}, rope_dim={}, n_ctx={}, ffn_dim={}, rms_eps={}, has_qk_norm={}, attn_logit_softcap={}",
+        spec.n_embd, spec.n_head, spec.n_head_kv, spec.n_embd / spec.n_head, spec.rope_dim, spec.n_ctx, spec.ff_dim, spec.rms_eps,
+        spec.has_qk_norm, spec.attn_logit_softcap);
+
+    let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(model_path), Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
 
     let n_layers = gpu_model.metadata.compiled_layers.len();
-    eprintln!("[Layer Dump] Model loaded to VRAM ({} layers)", n_layers);
+    eprintln!("[Layer Dump] Model loaded to VRAM ({}, {} layers)", spec.model_name, n_layers);
 
     // === Tokenize ===
     let prompt_tokens = tokenizer.encode(prompt, true)?;
@@ -161,13 +171,14 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let head_dim = (spec.n_embd / spec.n_head) as u32;
+    let rope_dim = if spec.rope_dim > 0 { spec.rope_dim as u32 } else { head_dim };
 
     let layer_params_base = LayerParams {
         dim,
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
         head_dim,
-        rope_dim: spec.rope_dim as u32,
+        rope_dim,
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
@@ -178,9 +189,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         quant_ffn_gate: 0,
         quant_ffn_up: 0,
         attn_logit_softcap: spec.attn_logit_softcap,
-        post_norm_enabled: 0,
-        qk_norm_enabled: 0,
-        layer_norm_enabled: 0,
+        post_norm_enabled: spec.arch_string().contains("gemma") as u32,
+        qk_norm_enabled: spec.has_qk_norm as u32,
+        layer_norm_enabled: spec.uses_layer_norm() as u32,
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
         batch_offset: 0,
@@ -207,6 +218,11 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let row_offset = embd_weight_offset + (token_id as u64 * embd_row_bytes as u64);
     let mut layer_output =
         pipeline.run_dequant_any_hot(&device, &queue, &gpu_model, row_offset as u32, dim, embd_quant_type);
+
+    eprintln!("[Layer Dump] Embedding complete (min={:.6}, max={:.6}, mean={:.6})",
+        layer_output.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
+        layer_output.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+        layer_output.iter().sum::<f32>() / layer_output.len() as f32);
 
     // Capture embedding layer (Layer 0 input)
     layers.push(LayerOutput {

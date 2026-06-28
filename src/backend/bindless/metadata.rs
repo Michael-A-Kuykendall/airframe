@@ -306,8 +306,14 @@ impl BindlessMetadata {
                     attn_v_bias: attn_v_bias_off,
                 };
                 let lqt_attn_out = t(&tensor_types, layer_idx, "attn_output.weight");
-                let lqt_gate = t(&tensor_types, layer_idx, "ffn_gate.weight");
                 let lqt_up = t(&tensor_types, layer_idx, "ffn_up.weight");
+                // Non-gated FFN (StarCoder2 etc): ffn_gate.weight absent; use ffn_up's quant type
+                // since the shader reads ffn_up weights for both gate and up slots.
+                let lqt_gate = if absolute_offsets.contains_key(&format!("blk.{}.ffn_gate.weight", layer_idx)) {
+                    t(&tensor_types, layer_idx, "ffn_gate.weight")
+                } else {
+                    lqt_up
+                };
                 compiled_layers.push(CompiledLayerEntry {
                     offsets,
                     quant_qk: lqt_main,
@@ -434,7 +440,11 @@ impl BindlessMetadata {
                 .get(&format!("blk.{}.ffn_norm.bias", layer_idx))
                 .copied()
                 .unwrap_or(0) as u32,
-            ffn_gate: p("ffn_gate.weight"),
+            ffn_gate: self
+                .tensor_offsets
+                .get(&format!("blk.{}.ffn_gate.weight", layer_idx))
+                .copied()
+                .unwrap_or(0) as u32,
             ffn_down: p("ffn_down.weight"),
             ffn_up: p("ffn_up.weight"),
             layer_idx: layer_idx as u32,
