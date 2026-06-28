@@ -119,28 +119,29 @@ mod tests {
         // qs[0] = 0x88 (nibbles 8, 8). (8-8)*1.0 = 0.0.
         // qs[1] = 0x97 (nibbles 9, 7). (7-8)=-1.0, (9-8)=1.0.
 
-        // We need 18 bytes.
-        let mut block_bytes: Vec<u8> = Vec::with_capacity(18);
+        // We need 18 bytes for Q4_0 block, but wgpu STORAGE buffers require 4-byte alignment.
+        // Pad to next multiple of 4: 20 bytes total (18 data + 2 padding).
+        let mut block_bytes: Vec<u8> = Vec::with_capacity(20);
 
         // Offset 0: scale = 1.0 (0x3C00, LE = 00 3C)
         block_bytes.push(0x00);
         block_bytes.push(0x3C);
 
-        // Offset 2..18: 16 bytes of u8 qs
+        // Offset 2..18: 16 bytes of u8 qs (Q4_0: simplified test with 16 elements)
         // Byte 0 (qs[0]): 0x88 -> (8, 8) -> val 0.0, 0.0
         block_bytes.push(0x88);
 
         // Byte 1 (qs[1]): 0x0F -> (15, 0) -> val (15-8)=7.0, (0-8)=-8.0
-        // Wait, nibbles are low/high?
-        // if qs[i] & 0x0F is first, then 0x0F & 0x0F = 15. qs[i] >> 4 = 0.
-        // So element corresponding to lane 1 is 15-8=7.
-        // Element corresponding to lane 17 is 0-8=-8.
         block_bytes.push(0x0F);
 
         // Fill rest with 0x88 (zeros)
         for _ in 2..16 {
             block_bytes.push(0x88);
         }
+
+        // Padding to 4-byte alignment (wgpu STORAGE buffer requirement)
+        block_bytes.push(0x00); // padding byte 0
+        block_bytes.push(0x00); // padding byte 1
 
         // Upload
         use wgpu::util::DeviceExt;
@@ -154,7 +155,7 @@ mod tests {
 
         let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Dummy Blob"),
-            contents: &[0u8; 4],
+            contents: &[0u8; 8], // Pad to 4-byte alignment for STORAGE buffer
             usage: wgpu::BufferUsages::STORAGE,
         });
         let model = BindlessModel {
@@ -338,7 +339,7 @@ mod tests {
 
         let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Dummy Blob"),
-            contents: &[0u8; 4],
+            contents: &[0u8; 8], // Pad to 4-byte alignment for STORAGE buffer
             usage: wgpu::BufferUsages::STORAGE,
         });
         let model = BindlessModel {
@@ -415,7 +416,7 @@ mod tests {
         });
         let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Dummy Blob"),
-            contents: &[0u8; 4],
+            contents: &[0u8; 8], // Pad to 4-byte alignment for STORAGE buffer
             usage: wgpu::BufferUsages::STORAGE,
         });
         let model = BindlessModel {
