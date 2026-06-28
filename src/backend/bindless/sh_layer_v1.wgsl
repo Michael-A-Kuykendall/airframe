@@ -968,21 +968,23 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
     }
 
-    // Select Matrix
+    // Select Matrix and quant type
     var weight_off: u32;
     var row_idx = idx;
+    var wt: u32;
 
     if (idx < ffn_dim) {
         // Non-gated (phi-2, GPT-2): use ffn_up for the single proj that feeds the gate slot.
         weight_off = select(offsets.ffn_gate, offsets.ffn_up, non_gated);
+        wt = params.quant_ffn_gate;
     } else {
         weight_off = offsets.ffn_up; // Up
         row_idx = idx - ffn_dim;
+        wt = params.quant_ffn_up;
     }
 
     // MatMul
     var dot = 0.0;
-    let wt = params.quant_attn_out;
 
     if (wt == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
