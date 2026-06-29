@@ -50,7 +50,7 @@ duckdb = { version = "1.1", features = ["bundled"], optional = true }
 
 # Optional: ISF (Inference Saturation Fabric) — depends on dzero.
 # Enable with --features isf. Not published to crates.io.
-airframe-observe = { path = "crates/airframe_observe", version = "0.1.0" }
+airframe-observe = { path = "crates/airframe_observe", version = "0.1.0", optional = true }
 
 [features]
 isf = ["dep:airframe-observe"]
