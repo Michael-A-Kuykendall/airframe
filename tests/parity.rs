@@ -42,25 +42,6 @@ struct StepDiagnostic {
     finite: bool,
 }
 
-#[derive(Debug, Serialize)]
-struct DeterminismProof {
-    run1_tokens: Vec<usize>,
-    run2_tokens: Vec<usize>,
-    identical: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct AirframeParityArtifact {
-    model_sha256: String,
-    model_file_size: u64,
-    prompt_fixture_id: String,
-    prompt_token_ids: Vec<usize>,
-    generated_token_ids: Vec<usize>,
-    per_step_diagnostics: Vec<StepDiagnostic>,
-    determinism_proof: DeterminismProof,
-    gate_status: String,
-}
-
 /// Generate 16 tokens using MultiTokenEngine
 fn generate_16_tokens_greedy(
     engine: &mut MultiTokenEngine,
@@ -134,7 +115,7 @@ fn test_airframe_parity_control() {
 
     // 4. Initialize Engine
     let llama_model = LlamaModel::from_spec(model.spec.clone());
-    let mut engine = MultiTokenEngine::new(llama_model);
+    let mut engine = MultiTokenEngine::new(Box::new(llama_model));
     init_verbose_diagnostics();
 
     // 5. Run 1

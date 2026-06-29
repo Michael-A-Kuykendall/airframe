@@ -167,6 +167,7 @@ fn spec_from_gguf_metadata(
         attn_logit_softcap: 0.0,
         final_logit_softcap: 0.0,
         has_qk_norm: false,
+        post_norm_enabled: false,
         head_dim: 0,
         gqa_ratio: 0,
         kv_dim: 0,

@@ -20,7 +20,6 @@ use crate::facts::{
     KEY_PROMPT_TOKEN, KEY_TDR_RISK_HIGH,
 };
 use dzero::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric};
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 /// Re-export RunBudget::default() so callers don't need dzero directly.
@@ -38,6 +37,7 @@ pub struct GenerateOutput {
 
 /// Shared mutable state threaded through rule closures via Arc<Mutex<>>.
 /// This is the "working memory" of the ISF session — rules read and write it.
+#[allow(clippy::type_complexity)]
 pub struct ISFState {
     /// Collected embeddings: position → flat f32 vec (dim elements)
     pub embeddings: Vec<Option<Vec<f32>>>,
@@ -79,6 +79,7 @@ pub struct ISFState {
 }
 
 impl ISFState {
+    #[allow(clippy::type_complexity)]
     pub fn new(
         prompt_len: u32,
         max_tokens: u32,
@@ -134,7 +135,7 @@ impl ISFState {
                 .flat_map(|token_id| {
                     self.embedding_cache
                         .get(token_id)
-                        .map(|v| v.iter().cloned().collect::<Vec<_>>())
+                        .map(|v| v.to_vec())
                         .unwrap_or_default()
                 })
                 .collect()
@@ -181,6 +182,7 @@ impl InferenceSaturationFabric {
     /// `sample_fn`: closure that takes (logits: &mut Vec<f32>) and returns token_id: u32.
     ///
     /// `decode_fn`: closure that takes (token_id: u32) and returns the text piece: String.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     pub fn new(
         state: Arc<Mutex<ISFState>>,
         dequant_fn: Arc<dyn Fn(u32, u32) -> Vec<f32> + Send + Sync>,
@@ -204,7 +206,7 @@ impl InferenceSaturationFabric {
                 if let InferenceFact::PromptToken { position, token_id } = fact {
                     // Record the position→token_id mapping in state for batch assembly
                     {
-                        let mut s = state_ref.lock().unwrap();
+                        let s = state_ref.lock().unwrap();
                         let pos = *position as usize;
                         if pos < s.embeddings.len() && s.embeddings[pos].is_none() {
                             // Mark position as pending — will be filled by EmbeddingRequest rule
@@ -442,7 +444,7 @@ impl InferenceSaturationFabric {
                         let s = state_ref.lock().unwrap();
                         let is_eos = next_token == s.eos_token;
                         let is_stop = s.extra_stop_ids.contains(&next_token);
-                        let is_max = (*step + 1) >= s.max_tokens as u32;
+                        let is_max = (*step + 1) >= s.max_tokens;
                         if is_eos || is_stop {
                             (true, HaltReason::EosToken)
                         } else if is_max {

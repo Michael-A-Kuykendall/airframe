@@ -324,7 +324,7 @@ impl ModelSpec {
             n_ctx: n_ctx.unwrap_or(2048),
             attn_logit_softcap: attn_softcap.unwrap_or(0.0),
             final_logit_softcap: final_softcap.unwrap_or(0.0),
-            has_qk_norm: false, // set in compute_derived() from arch
+            has_qk_norm: false,       // set in compute_derived() from arch
             post_norm_enabled: false, // set in compute_derived() from arch
             head_dim: head_dim_expl.unwrap_or(0),
             gqa_ratio: 0,

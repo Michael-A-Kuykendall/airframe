@@ -34,8 +34,8 @@ pub trait Observer: Send + Sync {
     fn observe(&self, data: &ObservationData);
 }
 
-/// Built-in observers for the vault pipeline:
-
+/// Built-in observers for the vault pipeline
+///
 /// VaultOracleObserver: captures layer outputs and logits for vault_seed.
 pub struct VaultOracleObserver {
     pub id: ObserverId,
@@ -52,6 +52,12 @@ impl VaultOracleObserver {
 
     pub fn drain(&self) -> Vec<ObservationData> {
         self.captured.lock().unwrap().drain(..).collect()
+    }
+}
+
+impl Default for VaultOracleObserver {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -81,6 +87,12 @@ impl CandleCompareObserver {
 
     pub fn take_logits(&self) -> Option<Vec<f32>> {
         self.logits.lock().unwrap().take()
+    }
+}
+
+impl Default for CandleCompareObserver {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

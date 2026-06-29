@@ -113,13 +113,22 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
         rms_eps: spec.rms_eps,
         ffn_dim: 5632,
         temp_stride: 16384,
-        quant_type: 0,
+        quant_qk: 0,
+        quant_v: 0,
+        quant_attn_out: 0,
+        quant_ffn_down: 0,
+        quant_ffn_gate: 0,
+        quant_ffn_up: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
         layer_norm_enabled: 0,
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 1,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);
@@ -159,7 +168,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
             layer_params,
         );
     }
-    kv_cache.increment(); // Increment once after all layers process the token
+    let _ = kv_cache.increment(); // Increment once after all layers process the token
     println!("      ✓ BOS processed through all 22 layers");
 
     // Process "Hello" token (position 1) - VERIFY THESE OUTPUTS
@@ -235,11 +244,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
             let layer_idx_shader = layer_output[2047] as u32;
 
             println!("   [SHADER READBACK] Layer {}:", layer_idx);
-            println!(
-                "      seq_len = {} (expected: {})",
-                seq_len_shader,
-                if layer_idx == 0 { 2 } else { 2 }
-            );
+            println!("      seq_len = {} (expected: {})", seq_len_shader, 2);
             println!(
                 "      current_pos = {} (expected: {})",
                 current_pos_shader, 1
@@ -318,7 +323,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
             // );
         }
     }
-    kv_cache.increment(); // Increment once after all layers process the token
+    let _ = kv_cache.increment(); // Increment once after all layers process the token
 
     println!("\n{}", "=".repeat(90));
     println!("[7/7] === VERDICT ===");

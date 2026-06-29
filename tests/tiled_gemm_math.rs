@@ -209,12 +209,12 @@ fn tiled_matmul_matches_scalar_4_rows() {
     // ── Scalar path (mirrors current sh_layer_v1.wgsl) ──────────────────────
     // One thread per output row; serially loops over all 256 weight elements.
     let mut scalar_out = [0.0f32; N_ROWS];
-    for row in 0..N_ROWS {
+    for out_val in scalar_out.iter_mut() {
         let mut acc = 0.0f32;
         for k in 0..TILE_K {
             acc += activation[k] * weights[k];
         }
-        scalar_out[row] = acc;
+        *out_val = acc;
     }
 
     // ── Tiled path (mirrors proposed tiled GEMM shader) ──────────────────────
@@ -223,12 +223,12 @@ fn tiled_matmul_matches_scalar_4_rows() {
     let tile_weights = dequantize_block(&block); // "workgroup shared memory load"
 
     let mut tiled_out = [0.0f32; N_ROWS];
-    for row in 0..N_ROWS {
+    for out_val in tiled_out.iter_mut() {
         let mut acc = 0.0f32;
         for k in 0..TILE_K {
             acc += activation[k] * tile_weights[k];
         }
-        tiled_out[row] = acc;
+        *out_val = acc;
     }
 
     // ── Both paths must agree ─────────────────────────────────────────────────
@@ -268,12 +268,12 @@ fn tiled_broadcast_8_rows_identical() {
     let activation: [f32; TILE_K] = std::array::from_fn(|i| i as f32 / 256.0);
 
     let mut out = [0.0f32; N_ROWS];
-    for row in 0..N_ROWS {
+    for out_val in out.iter_mut() {
         let mut acc = 0.0f32;
         for k in 0..TILE_K {
             acc += activation[k] * tile_weights[k];
         }
-        out[row] = acc;
+        *out_val = acc;
     }
 
     // All rows must be identical (same weight block, same activation)

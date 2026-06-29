@@ -920,7 +920,10 @@ impl BindlessPipeline {
                         cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
                     }
                     // Yield every QKV_YIELD_INTERVAL chunks for large batches to prevent TDR
-                    if batch_size > 1 && chunk_idx > 0 && chunk_idx % QKV_YIELD_INTERVAL == 0 {
+                    if batch_size > 1
+                        && chunk_idx > 0
+                        && chunk_idx.is_multiple_of(QKV_YIELD_INTERVAL)
+                    {
                         let label = format!("layer-{}-qkv-interval-{}", i, chunk_idx);
                         tdr.force_yield(&label)?;
                     }

@@ -5,9 +5,10 @@
 //!
 //! All types and functions here are private to the crate.
 
+#![allow(dead_code)]
+
 use crate::facts::InferenceFact;
 use dzero::{AlphaKey, ClosureProgram, RunBudget, SaturationFabric};
-use std::sync::Arc;
 
 /// TDR-specific facts (kept private).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -75,7 +76,7 @@ impl PrivateTdrNavigator {
         let program = build_tdr_program();
         let key_fn = tdr_alpha_key;
         let handler = |c: dzero::Consequent<InferenceFact>,
-                       store: &mut dzero::FactStore<InferenceFact>|
+                       _store: &mut dzero::FactStore<InferenceFact>|
          -> Vec<InferenceFact> {
             // Handle consequents: drive chunking, vault write, beads update.
             // This is where the "saturation fabric" actions live.

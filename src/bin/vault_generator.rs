@@ -12,7 +12,7 @@
 
 use serde::Serialize;
 use std::fs::{self, File};
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::PathBuf;
 
 // ─── Output Types ──────────────────────────────────────────────────────────
@@ -31,52 +31,52 @@ pub struct VaultManifest {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    
+
     let output_dir = if args.len() > 1 {
         PathBuf::from(&args[1])
     } else {
         PathBuf::from("vault/seeds")
     };
-    
+
     fs::create_dir_all(&output_dir)?;
-    
+
     println!("=== Vault Generator ===");
     println!("Generating vault from llmfit listings (NO DOWNLOADS!)");
     println!("Output directory: {}", output_dir.display());
     println!();
-    
+
     // Step 1: Get model list from llmfit or use comprehensive fallback
     println!("[1/3] Fetching model list from llmfit...");
-    
+
     let models = fetch_model_list()?;
     println!("Found {} commodity-friendly models", models.len());
     println!();
-    
+
     // Step 2: Extract metadata from HuggingFace API for each model
     println!("[2/3] Extracting metadata via HuggingFace API (no downloads)...");
-    
+
     let mut manifest_models = Vec::new();
-    
+
     for (i, model_id) in models.iter().enumerate() {
         let progress = format!("[{}/{}]", i + 1, models.len());
         println!("{} Processing: {}", progress, model_id);
-        
+
         // Extract metadata from HuggingFace API
         match extract_metadata_from_hf_api(model_id)? {
             Some(metadata) => {
-                let filename = model_id.split('/').last().unwrap_or("unknown");
+                let filename = model_id.split('/').next_back().unwrap_or("unknown");
                 let seed_path = output_dir.join(format!("{}.json", filename));
-                
+
                 println!("  ✅ Metadata extracted: {}", metadata.arch);
                 println!("     Quantization: {}", metadata.quant);
                 println!("     Layers: {}", metadata.n_layers);
-                
+
                 // Write vault seed (metadata-only, no forward pass)
                 write_vault_seed(&seed_path, &metadata)?;
-                
+
                 manifest_models.push(format!(
                     "\"{}\"",
-                    model_id.split('/').last().unwrap_or("unknown")
+                    model_id.split('/').next_back().unwrap_or("unknown")
                 ));
             }
             None => {
@@ -84,10 +84,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     // Step 3: Create vault manifest
     println!("[3/3] Creating vault manifest...");
-    
+
     let manifest = VaultManifest {
         version: 2,
         generated_at: chrono::Utc::now().to_rfc3339(),
@@ -96,11 +96,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         models: manifest_models,
         status: "metadata-only".to_string(),
     };
-    
+
     let manifest_path = output_dir.join("manifest.json");
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
-    File::create(manifest_path)?.write(manifest_json.as_bytes())?;
-    
+    File::create(manifest_path)?.write_all(manifest_json.as_bytes())?;
+
     println!();
     println!("=== Summary ===");
     println!("✅ Vault generated successfully!");
@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  1. Review seeds in {}", output_dir.display());
     println!("  2. Run 'vault_seed' on models you want oracle traces for");
     println!("  3. Commit the vault to your repo");
-    
+
     Ok(())
 }
 
@@ -123,29 +123,30 @@ fn fetch_model_list() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let output = std::process::Command::new("llmfit")
         .args(["list", "--json"])
         .output()?;
-    
+
     if output.status.success() {
         println!("   Using llmfit model database");
-        
+
         use serde_json::Value;
         let json: Value = serde_json::from_slice(&output.stdout)?;
         let models = match json.as_array() {
-            Some(arr) => arr.iter()
+            Some(arr) => arr
+                .iter()
                 .filter_map(|m| m.get("name").and_then(|n| n.as_str()))
                 .map(|s: &str| s.to_string()) // Convert &str to String
                 .take(20) // Limit to top 20 for initial vault
                 .collect(),
             None => Vec::new(),
         };
-        
+
         if !models.is_empty() {
             return Ok(models);
         }
     }
-    
+
     // Fallback: Comprehensive commodity-friendly model list
     println!("   Using fallback comprehensive list");
-    
+
     let models = vec![
         // Qwen family (primary target)
         "Qwen/Qwen3.5-9B-Q4_K_M".to_string(),
@@ -178,71 +179,81 @@ fn fetch_model_list() -> Result<Vec<String>, Box<dyn std::error::Error>> {
         "Qwen/Qwen2.5-1.5B-Instruct-Q4_K_M".to_string(),
         "Qwen/Qwen2-7B-Instruct-Q4_K_M".to_string(),
     ];
-    
+
     Ok(models)
 }
 
 /// Extract metadata from HuggingFace API (NO DOWNLOAD!)
-fn extract_metadata_from_hf_api(model_id: &str) -> Result<Option<ModelMetadata>, Box<dyn std::error::Error>> {
+fn extract_metadata_from_hf_api(
+    model_id: &str,
+) -> Result<Option<ModelMetadata>, Box<dyn std::error::Error>> {
     // Use curl to fetch model info from HuggingFace API
     let output = std::process::Command::new("curl")
         .args([
             "-s",
-            "--max-time", "10",
-            "-o", "/dev/null",
-            "-w", "%{http_code}",
+            "--max-time",
+            "10",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
             &format!("https://huggingface.co/api/models/{}", model_id),
         ])
         .output()?;
-    
+
     let status = String::from_utf8_lossy(&output.stdout);
-    
+
     if status == "200" {
         println!("   [HF API] Model exists: {}", model_id);
-        
+
         // Fetch full metadata
         let output = std::process::Command::new("curl")
             .args([
                 "-s",
-                "--max-time", "15",
+                "--max-time",
+                "15",
                 &format!("https://huggingface.co/api/models/{}", model_id),
             ])
             .output()?;
-        
+
         if output.status.success() {
             let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-            
+
             // Extract key fields
-            let filename = model_id.split('/').last().unwrap_or("unknown.gguf");
-            let tags: Vec<String> = json.get("tags")
+            let filename = model_id.split('/').next_back().unwrap_or("unknown.gguf");
+            let tags: Vec<String> = json
+                .get("tags")
                 .and_then(|t| t.as_array())
-                .map(|arr| arr.iter()
-                    .filter_map(|v| v.as_str())
-                    .flat_map(|s| s.split(',').map(String::from))
-                    .collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .flat_map(|s| s.split(',').map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
-            
+
             let quant = parse_quantization_from_tags(&tags);
             let arch = parse_architecture_from_name(model_id);
-            
+
             // Estimate file size (rough approximation)
-            let params_raw: f64 = json.get("author")
+            let params_raw: f64 = json
+                .get("author")
                 .and_then(|a| a.get("authorName"))
                 .and_then(|n| n.as_str())
                 .map(|s| s.parse::<f64>().unwrap_or(8.0)) // default 8B
                 .unwrap_or(8.0);
-            
+
             let size_gb = params_raw * 0.5; // Q4_K_M is ~50% of FP32
             let file_size_bytes = (size_gb * 1_073_741_824.0) as u64;
-            
+
             Ok(Some(ModelMetadata {
                 name: model_id.to_string(),
                 gguf_filename: filename.to_string(),
                 arch: parse_architecture_from_name(model_id),
                 quant,
                 n_layers: estimate_layers(params_raw), // Estimate from parameters
-                n_heads: 32, // default for most models
-                n_heads_kv: 8, // GQA default
+                n_heads: 32,                           // default for most models
+                n_heads_kv: 8,                         // GQA default
                 head_dim: 128,
                 n_embd: 5120,
                 ff_dim: 24576,
@@ -269,22 +280,37 @@ fn extract_metadata_from_hf_api(model_id: &str) -> Result<Option<ModelMetadata>,
 
 fn parse_quantization_from_tags(tags: &[String]) -> String {
     for tag in tags {
-        if tag.contains("q4_k_m") { return "Q4_K_M".to_string(); }
-        if tag.contains("q8_0") { return "Q8_0".to_string(); }
-        if tag.contains("f16") { return "F16".to_string(); }
+        if tag.contains("q4_k_m") {
+            return "Q4_K_M".to_string();
+        }
+        if tag.contains("q8_0") {
+            return "Q8_0".to_string();
+        }
+        if tag.contains("f16") {
+            return "F16".to_string();
+        }
     }
     "Q4_K_M".to_string() // default
 }
 
 fn parse_architecture_from_name(model_id: &str) -> String {
-    if model_id.contains("qwen35") || model_id.contains("qwen3.5") { "qwen3".to_string() }
-    else if model_id.contains("qwen3-") { "qwen3".to_string() }
-    else if model_id.contains("gemma") { "gemma".to_string() }
-    else if model_id.contains("phi") { "phi".to_string() }
-    else if model_id.contains("mistral") { "mistral".to_string() }
-    else if model_id.contains("llama") { "llama".to_string() }
-    else if model_id.contains("deepseek") { "qwen3".to_string() } // DeepSeek uses Qwen arch
-    else { "unknown".to_string() }
+    if model_id.contains("qwen35") || model_id.contains("qwen3.5") || model_id.contains("qwen3-") {
+        "qwen3".to_string()
+    } else if model_id.contains("gemma") {
+        "gemma".to_string()
+    } else if model_id.contains("phi") {
+        "phi".to_string()
+    } else if model_id.contains("mistral") {
+        "mistral".to_string()
+    } else if model_id.contains("llama") {
+        "llama".to_string()
+    } else if model_id.contains("deepseek") {
+        "qwen3".to_string()
+    }
+    // DeepSeek uses Qwen arch
+    else {
+        "unknown".to_string()
+    }
 }
 
 fn estimate_layers(params: f64) -> usize {
@@ -299,7 +325,10 @@ fn estimate_layers(params: f64) -> usize {
 }
 
 /// Write vault seed JSON
-fn write_vault_seed(path: &PathBuf, metadata: &ModelMetadata) -> Result<(), Box<dyn std::error::Error>> {
+fn write_vault_seed(
+    path: &PathBuf,
+    metadata: &ModelMetadata,
+) -> Result<(), Box<dyn std::error::Error>> {
     let seed = VaultSeedApi {
         seed_version: 2,
         source_gguf: metadata.name.clone(),
@@ -338,10 +367,10 @@ fn write_vault_seed(path: &PathBuf, metadata: &ModelMetadata) -> Result<(), Box<
             forward_error: String::new(),
         },
     };
-    
+
     let json = serde_json::to_string_pretty(&seed)?;
     fs::write(path, &json)?;
-    
+
     Ok(())
 }
 

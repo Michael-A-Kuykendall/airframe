@@ -30,7 +30,7 @@ fn test_exact_determinism_parity() -> Result<(), Box<dyn std::error::Error>> {
     let tokens = tokenizer.encode(prompt, true)?;
     let prompt_ids: Vec<usize> = tokens.iter().map(|&t| t as usize).collect();
 
-    let mut engine1 = Engine::new(llama_model.clone());
+    let mut engine1 = Engine::new(Box::new(llama_model.clone()));
     let sampler1 = Sampler::greedy();
     let mut logits1 = engine1.prefill(&prompt_ids, &model.weights)?;
     let mut out1 = String::new();
@@ -46,7 +46,7 @@ fn test_exact_determinism_parity() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Run 2
-    let mut engine2 = Engine::new(llama_model.clone());
+    let mut engine2 = Engine::new(Box::new(llama_model.clone()));
     let sampler2 = Sampler::greedy();
     let mut logits2 = engine2.prefill(&prompt_ids, &model.weights)?;
     let mut out2 = String::new();

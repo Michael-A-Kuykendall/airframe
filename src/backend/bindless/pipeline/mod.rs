@@ -1242,6 +1242,7 @@ impl BindlessPipeline {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     /// Workgroup ceil-div: (n + 255) / 256 must match the dispatch sizing used throughout.
     #[test]
@@ -1275,19 +1276,30 @@ mod tests {
 // ─── ISF Integration Spec (vault-derived, no model runs needed!) ──────────
 /// Derive TDR risk from model metadata (no model runs!)
 pub fn derive_tdr_risk_from_metadata(n_vocab: usize) -> &'static str {
-    if n_vocab > 200_000 { "High" } else if n_vocab > 100_000 { "Medium" } else { "Low" }
+    if n_vocab > 200_000 {
+        "High"
+    } else if n_vocab > 100_000 {
+        "Medium"
+    } else {
+        "Low"
+    }
 }
 
 /// Compute max safe workgroups for head blob dispatch from vault metadata  
 pub fn compute_max_safe_workgroups(n_vocab: usize, budget_ms: f64) -> u32 {
     let head_wgs = n_vocab / 32; // 32 tokens per WG
     if head_wgs > 4000 {
-        ((budget_ms * 1_000_000.0 - 500.0) / 500.0).min(head_wgs as f64).max(1.0) as u32
+        ((budget_ms * 1_000_000.0 - 500.0) / 500.0)
+            .min(head_wgs as f64)
+            .max(1.0) as u32
     } else {
-        ((budget_ms * 1_000_000.0 - 500.0) / 100.0).min(head_wgs as f64).max(1.0) as u32
+        ((budget_ms * 1_000_000.0 - 500.0) / 100.0)
+            .min(head_wgs as f64)
+            .max(1.0) as u32
     }
 }
 
+#[allow(clippy::items_after_test_module)]
 /// ISF Rule: YieldNow — derived from TDR risk and dispatch timing
 pub fn should_yield_now(gpu_ms: f64, n_vocab: usize) -> bool {
     let risk = derive_tdr_risk_from_metadata(n_vocab);

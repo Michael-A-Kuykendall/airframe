@@ -71,6 +71,10 @@ async fn test_kv_cache_after_bos() -> Result<(), Box<dyn std::error::Error>> {
         layer_norm_enabled: 0,
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 1,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);
@@ -110,7 +114,7 @@ async fn test_kv_cache_after_bos() -> Result<(), Box<dyn std::error::Error>> {
             layer_params,
         );
     }
-    kv_cache.increment();
+    let _ = kv_cache.increment();
     println!(
         "      ✓ BOS processed, cache seq_len = {}",
         kv_cache.get_seq_len()

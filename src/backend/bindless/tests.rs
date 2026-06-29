@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod tests_inner {
     use super::super::loader::BindlessModel;
     use super::super::pipeline::BindlessPipeline;
     use crate::core::spec::ModelSpec;
@@ -83,9 +83,7 @@ mod tests {
         content.extend_from_slice(&magic.to_le_bytes());
         content.extend_from_slice(&ver.to_le_bytes());
         // Pad with junk
-        for _ in 0..100 {
-            content.push(0);
-        }
+        content.resize(content.len() + 100, 0);
 
         tmp.write_all(&content).unwrap();
         let path = tmp.path();
@@ -135,9 +133,7 @@ mod tests {
         block_bytes.push(0x0F);
 
         // Fill rest with 0x88 (zeros)
-        for _ in 2..16 {
-            block_bytes.push(0x88);
-        }
+        block_bytes.extend([0x88; 14]);
 
         // Padding to 4-byte alignment (wgpu STORAGE buffer requirement)
         block_bytes.push(0x00); // padding byte 0
@@ -224,16 +220,12 @@ mod tests {
         block_bytes.push(0x00);
         block_bytes.push(0x3C); // 1.0
         block_bytes.push(0x97);
-        for _ in 1..16 {
-            block_bytes.push(0x88);
-        } // Zeros
+        block_bytes.extend([0x88; 15]);
 
         // Row 0, Block 1 (Cols 32..63): All Zeros
         block_bytes.push(0x00);
         block_bytes.push(0x3C); // 1.0
-        for _ in 0..16 {
-            block_bytes.push(0x88);
-        }
+        block_bytes.extend([0x88; 16]);
 
         // Row 1, Block 0 (Cols 0..31):
         // Scale 2.0 (0x4000)
@@ -241,16 +233,12 @@ mod tests {
         block_bytes.push(0x00);
         block_bytes.push(0x40); // 2.0
         block_bytes.push(0x99);
-        for _ in 1..16 {
-            block_bytes.push(0x88);
-        }
+        block_bytes.extend([0x88; 15]);
 
         // Row 1, Block 1: All Zeros
         block_bytes.push(0x00);
         block_bytes.push(0x40); // 2.0
-        for _ in 0..16 {
-            block_bytes.push(0x88);
-        }
+        block_bytes.extend([0x88; 16]);
 
         assert_eq!(block_bytes.len(), 72);
 
@@ -392,7 +380,7 @@ mod tests {
         // Offset 0: RMSNorm Weights (32 x F32) = 128 bytes. All 1.0.
         // Offset 128: MatMul Weights (1 x Q4_0 Block) = 18 bytes. All 1.0.
 
-        let mut block_bytes: Vec<u8> = Vec::new();
+        let mut block_bytes: Vec<u8> = Vec::with_capacity(32 * 4 + 18);
 
         // RMSNorm Weights: 32 * 1.0
         for _ in 0..32 {
@@ -404,9 +392,7 @@ mod tests {
         block_bytes.push(0x00);
         block_bytes.push(0x3C);
         // Quants: 0x99 (since (9-8)*1.0 = 1.0)
-        for _ in 0..16 {
-            block_bytes.push(0x99);
-        }
+        block_bytes.extend([0x99; 16]);
 
         // Upload Model
         let gpu_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

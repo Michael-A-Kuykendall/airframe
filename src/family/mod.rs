@@ -1,9 +1,9 @@
 pub mod llama;
 
+use crate::core::spec::ModelSpec;
 use crate::core::{error::Result, tensor::Tensor, weight_id::WeightId};
 use crate::ops::dispatch::OpDispatcher;
 use crate::runtime::kvcache::KvCache;
-use crate::core::spec::ModelSpec;
 use std::collections::HashMap;
 
 /// Interface every model family must implement.

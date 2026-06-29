@@ -1,6 +1,5 @@
 #[cfg(test)]
-mod tests {
-    // used imports only
+mod tests_inner {
     use crate::backend::pipeline::LogitMaskPipeline;
     use crate::backend::wgpu::WgpuContext;
     use wgpu::util::DeviceExt;

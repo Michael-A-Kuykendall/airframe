@@ -309,7 +309,9 @@ impl BindlessMetadata {
                 let lqt_up = t(&tensor_types, layer_idx, "ffn_up.weight");
                 // Non-gated FFN (StarCoder2 etc): ffn_gate.weight absent; use ffn_up's quant type
                 // since the shader reads ffn_up weights for both gate and up slots.
-                let lqt_gate = if absolute_offsets.contains_key(&format!("blk.{}.ffn_gate.weight", layer_idx)) {
+                let lqt_gate = if absolute_offsets
+                    .contains_key(&format!("blk.{}.ffn_gate.weight", layer_idx))
+                {
                     t(&tensor_types, layer_idx, "ffn_gate.weight")
                 } else {
                     lqt_up
@@ -348,7 +350,7 @@ impl BindlessMetadata {
         let mut spec = ModelSpec::from_gguf_metadata(&self.gguf_metadata);
         // If head_dim was not in GGUF metadata (e.g. Qwen3 omits attention.key_length),
         // infer it from the Q weight shape: blk.0.attn_q.weight dims = [n_embd, n_head * head_dim]
-        if spec.n_head > 0 {
+        if spec.n_head.checked_div(spec.n_head).is_some() {
             // Try direct key first, then search for any blk.0.attn_q key
             let q_key = "blk.0.attn_q.weight";
             let dims_opt = self.tensor_dims.get(q_key).or_else(|| {

@@ -10,9 +10,7 @@
 //! 4. Call saturate() to run dzero to fixpoint
 //! 5. Read results from observers
 
-use crate::facts::{
-    alpha_key_of, InferenceFact, KernelKind, YieldReason, KEY_DISPATCH_TIMING, KEY_TDR_RISK_HIGH,
-};
+use crate::facts::{alpha_key_of, InferenceFact, KernelKind, YieldReason, KEY_DISPATCH_TIMING};
 use crate::observers::{CandleCompareObserver, LayerStabilityObserver, VaultOracleObserver};
 use dzero::{AlphaKey, ClosureProgram, ReactiveGraph, RunBudget, RunResult};
 use std::sync::{Arc, Mutex};
@@ -279,6 +277,7 @@ impl ObservationSession {
     }
 
     /// Emit per-tensor output fact (for Q/K/V/post/ffn/output stats per layer/position).
+    #[allow(clippy::too_many_arguments)]
     pub fn emit_per_tensor_output(
         &mut self,
         layer_idx: u32,

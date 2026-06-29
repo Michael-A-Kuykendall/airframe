@@ -2,7 +2,6 @@
 // Tests ONLY weight reading from GGUF blob for Layer 0 vs Layer 1
 
 use airframe::backend::bindless::metadata::BindlessMetadata;
-use airframe::core::spec::ModelSpec;
 use std::fs::File;
 use std::path::PathBuf;
 
@@ -13,7 +12,6 @@ async fn debug_weight_read_layer1() -> Result<(), Box<dyn std::error::Error>> {
 
     let model_path =
         PathBuf::from("D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf");
-    let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
 
     // Load metadata
     let mut file = File::open(&model_path)?;

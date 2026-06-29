@@ -940,6 +940,7 @@ fn passes_integer_guard(text: &str) -> bool {
 ///   2. FSE scan — any Reject → false immediately
 ///   3. Integer guard — fewer than 2 digit-sequences → false
 ///   4. At least one Record hit → true
+///
 /// Split text on hard clause boundaries so a suppress in one clause
 /// cannot kill a math match in a different clause.
 ///

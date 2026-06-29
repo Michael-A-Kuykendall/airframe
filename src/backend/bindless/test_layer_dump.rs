@@ -173,7 +173,7 @@ mod layer_dump_tests {
             }
 
             // Increment cache
-            kv_cache.increment();
+            let _ = kv_cache.increment();
             position_data["cache_len_after"] = serde_json::json!(kv_cache.get_seq_len());
 
             all_results["positions"]

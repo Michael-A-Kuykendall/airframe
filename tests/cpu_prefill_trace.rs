@@ -28,7 +28,7 @@ fn test_cpu_prefill_hello() {
 
     // Create engine
     let llama_model = LlamaModel::from_spec(model.spec.clone());
-    let mut engine = Engine::new(llama_model);
+    let mut engine = Engine::new(Box::new(llama_model));
 
     // Process tokens ONE AT A TIME to get separate L0.1 entries
     println!("\n=== Position 0: BOS (Token 1) ===");

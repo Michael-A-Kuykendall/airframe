@@ -86,7 +86,7 @@ fn generate_22layer_oracle_checkpoints() -> Result<(), Box<dyn std::error::Error
     println!("      ✓ BOS embedding: shape {:?}", hidden_states.shape);
 
     let position_ids = vec![0usize];
-    for (layer_idx, layer) in layers.iter().enumerate() {
+    for layer in layers.iter() {
         hidden_states = layer.forward(
             &hidden_states,
             &model_data.weights,

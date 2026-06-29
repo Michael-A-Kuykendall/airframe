@@ -97,13 +97,22 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
         rms_eps: spec.rms_eps,
         ffn_dim: 5632,
         temp_stride: 16384,
-        quant_type: 0,
+        quant_qk: 0,
+        quant_v: 0,
+        quant_attn_out: 0,
+        quant_ffn_down: 0,
+        quant_ffn_gate: 0,
+        quant_ffn_up: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
         layer_norm_enabled: 0,
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 1,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);
@@ -135,7 +144,7 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
             layer_params,
         );
     }
-    kv_cache.increment();
+    let _ = kv_cache.increment();
 
     // Hello embedding
     let hello_offset = embd_weight_offset + (tokens[1] as u64 * row_bytes as u64);
@@ -226,8 +235,8 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
     let s1 = dot1 * scale;
     let (w0, w1) = softmax2(s0, s1);
 
-    let v0 = v_cache_vals[(kv_head * head_dim)];
-    let v1 = v_cache_vals[((n_head_kv * head_dim) + (kv_head * head_dim))];
+    let v0 = v_cache_vals[kv_head * head_dim];
+    let v1 = v_cache_vals[(n_head_kv + kv_head) * head_dim];
     let context_d0 = w0 * v0 + w1 * v1;
 
     // GQA sanity: head 0 and head 8 should both map to kv_head 0 (ratio=8)

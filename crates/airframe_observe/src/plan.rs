@@ -100,7 +100,7 @@ impl ObservationPlan {
                 let key = SelectorKey::from(&selector);
                 selector_index
                     .entry(key)
-                    .or_insert_with(|| vec![])
+                    .or_default()
                     .push(reg.observer.clone());
             }
         }

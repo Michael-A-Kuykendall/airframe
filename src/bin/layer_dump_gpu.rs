@@ -137,7 +137,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let pipeline = BindlessPipeline::new(&device);
 
     let n_layers = gpu_model.metadata.compiled_layers.len();
-    eprintln!("[Layer Dump] Model loaded to VRAM ({}, {} layers)", spec.model_name, n_layers);
+    eprintln!(
+        "[Layer Dump] Model loaded to VRAM ({}, {} layers)",
+        spec.model_name, n_layers
+    );
 
     // === Tokenize ===
     let prompt_tokens = tokenizer.encode(prompt, true)?;
@@ -159,19 +162,23 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("token_embd.weight not found");
 
     let embd_row_bytes = match embd_quant_type {
-        0 => dim * 4,                                  // F32
-        1 => dim * 2,                                  // F16
-        2 => (dim / 32) * 18,                          // Q4_0
-        6 => (dim / 32) * 22,                          // Q5_0
-        8 => (dim / 32) * 34,                          // Q8_0
-        12 => (dim / 256) * 144,                       // Q4_K
-        13 => (dim / 256) * 176,                       // Q5_K
-        14 => (dim / 256) * 210,                       // Q6_K
+        0 => dim * 4,            // F32
+        1 => dim * 2,            // F16
+        2 => (dim / 32) * 18,    // Q4_0
+        6 => (dim / 32) * 22,    // Q5_0
+        8 => (dim / 32) * 34,    // Q8_0
+        12 => (dim / 256) * 144, // Q4_K
+        13 => (dim / 256) * 176, // Q5_K
+        14 => (dim / 256) * 210, // Q6_K
         _ => panic!("unsupported embedding quant type: {}", embd_quant_type),
     };
 
     let head_dim = (spec.n_embd / spec.n_head) as u32;
-    let rope_dim = if spec.rope_dim > 0 { spec.rope_dim as u32 } else { head_dim };
+    let rope_dim = if spec.rope_dim > 0 {
+        spec.rope_dim as u32
+    } else {
+        head_dim
+    };
 
     let layer_params_base = LayerParams {
         dim,
@@ -216,13 +223,23 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get embedding (handles all quant types via dequant_any_hot)
     let row_offset = embd_weight_offset + (token_id as u64 * embd_row_bytes as u64);
-    let mut layer_output =
-        pipeline.run_dequant_any_hot(&device, &queue, &gpu_model, row_offset as u32, dim, embd_quant_type);
+    let mut layer_output = pipeline.run_dequant_any_hot(
+        &device,
+        &queue,
+        &gpu_model,
+        row_offset as u32,
+        dim,
+        embd_quant_type,
+    );
 
-    eprintln!("[Layer Dump] Embedding complete (min={:.6}, max={:.6}, mean={:.6})",
+    eprintln!(
+        "[Layer Dump] Embedding complete (min={:.6}, max={:.6}, mean={:.6})",
         layer_output.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
-        layer_output.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-        layer_output.iter().sum::<f32>() / layer_output.len() as f32);
+        layer_output
+            .iter()
+            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+        layer_output.iter().sum::<f32>() / layer_output.len() as f32
+    );
 
     // Capture embedding layer (Layer 0 input)
     layers.push(LayerOutput {

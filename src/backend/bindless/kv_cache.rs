@@ -466,9 +466,9 @@ mod tests {
 
         // Test increment
         assert_eq!(cache.get_seq_len(), 0);
-        cache.increment();
+        let _ = cache.increment();
         assert_eq!(cache.get_seq_len(), 1);
-        cache.increment();
+        let _ = cache.increment();
         assert_eq!(cache.get_seq_len(), 2);
 
         // Test reset

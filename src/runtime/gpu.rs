@@ -301,6 +301,7 @@ impl GpuRuntime {
     /// Patent Notice: Implements FSE + D0 Saturation Fabric.
     /// Pending patent by Michael A. Kuykendall. All rights reserved.
     #[cfg(feature = "isf")]
+    #[allow(clippy::type_complexity)]
     pub fn generate_isf(
         &self,
         prompt: &str,

@@ -179,10 +179,11 @@ mod tests {
     fn default_budget_is_platform_aware() {
         // On Windows the default must be < 2000ms (the TDR timeout).
         // On other platforms it should be >> 2000ms (effectively never).
+        let budget = DEFAULT_TDR_BUDGET_MS;
         #[cfg(windows)]
-        assert!(DEFAULT_TDR_BUDGET_MS < 2000);
+        assert!(budget < 2000);
         #[cfg(not(windows))]
-        assert!(DEFAULT_TDR_BUDGET_MS > 10_000);
+        assert!(budget > 10_000);
     }
 
     #[test]

@@ -409,8 +409,7 @@ mod int4_parity_tests {
         let mut head_k_vals: Vec<Vec<f32>> = Vec::new();
         let mut head_v_vals: Vec<Vec<f32>> = Vec::new();
 
-        for h in 0..4usize {
-            let amp = amplitudes[h];
+        for (h, &amp) in amplitudes.iter().enumerate() {
             let k: Vec<f32> = (0..head_dim as usize)
                 .map(|d| amp * ((d as f32 / head_dim as f32) * 2.0 - 1.0))
                 .collect();
