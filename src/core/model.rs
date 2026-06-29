@@ -1440,7 +1440,7 @@ fn create_weight_mapping(n_layer: usize) -> HashMap<String, WeightId> {
             format!("blk.{}.ffn_norm.weight", layer),
             WeightId::FfnNorm { layer },
         );
-        // Optional per-head QK norm weights (Qwen3)
+        // Optional per-head QK norm and attention scale weights (Qwen3)
         mapping.insert(
             format!("blk.{}.attn_q_norm.weight", layer),
             WeightId::AttnQNorm { layer },
@@ -1448,6 +1448,10 @@ fn create_weight_mapping(n_layer: usize) -> HashMap<String, WeightId> {
         mapping.insert(
             format!("blk.{}.attn_k_norm.weight", layer),
             WeightId::AttnKNorm { layer },
+        );
+        mapping.insert(
+            format!("blk.{}.attention.scale", layer),
+            WeightId::AttentionScale { layer },
         );
     }
 
@@ -1626,9 +1630,9 @@ mod tests {
             Some(&WeightId::FfnNorm { layer: 21 })
         );
 
-        // Should have correct total count: 1 token + 1 output + 22*(9+2) layer weights + 1 output_norm = 245
-        // The +2 per layer accounts for optional attn_q_norm and attn_k_norm (Qwen3)
-        assert_eq!(mapping.len(), 1 + 1 + 22 * 11 + 1);
+        // Should have correct total count: 1 token + 1 output + 22*(9+3) layer weights + 1 output_norm = 267
+        // The +3 per layer accounts for optional attn_q_norm, attn_k_norm, and attention.scale (Qwen3)
+        assert_eq!(mapping.len(), 1 + 1 + 22 * 12 + 1);
     }
 
     #[test]

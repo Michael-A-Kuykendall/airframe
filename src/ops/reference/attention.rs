@@ -129,6 +129,7 @@ pub fn attention_with_cache_f32(
     layer_idx: usize,
     kv_cache: &mut KvCache,
     qk_norm: Option<(&Tensor, &Tensor)>, // (q_norm_weight, k_norm_weight) for Qwen3
+    attention_scale: Option<&Tensor>,    // per-head scale [n_head] for Qwen3
 ) -> Result<Tensor> {
     // Validate GQA configuration
     if !n_head.is_multiple_of(n_head_kv) {
@@ -261,9 +262,13 @@ pub fn attention_with_cache_f32(
             );
         }
 
-        // Scale by sqrt(head_dim)
-        let scale = 1.0 / (head_dim as f32).sqrt();
-        let scaled_scores = scale_tensor(&scores, scale)?;
+        // Scale by sqrt(head_dim), then optionally multiply by per-head attention.scale (Qwen3)
+        let base_scale = 1.0 / (head_dim as f32).sqrt();
+        let head_scale = attention_scale
+            .and_then(|s| s.data.get(h))
+            .copied()
+            .unwrap_or(1.0);
+        let scaled_scores = scale_tensor(&scores, base_scale * head_scale)?;
 
         // Apply softmax with causal mask
         // For causal mask with cache: each query position can only attend to

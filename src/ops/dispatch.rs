@@ -95,6 +95,7 @@ impl OpDispatcher {
     /// - Decode: Stores new K, V, attends to ALL cached tokens + new token
     // too_many_arguments: cache-aware attention requires all tensor weights, cache ref, and rope params
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn attention_with_cache(
         &self,
         input: &Tensor,
@@ -112,6 +113,7 @@ impl OpDispatcher {
         layer_idx: usize,
         kv_cache: &mut KvCache,
         qk_norm: Option<(&Tensor, &Tensor)>,
+        attention_scale: Option<&Tensor>,
     ) -> Result<Tensor> {
         attention::attention_with_cache_f32(
             input,
@@ -129,6 +131,7 @@ impl OpDispatcher {
             layer_idx,
             kv_cache,
             qk_norm,
+            attention_scale,
         )
     }
 

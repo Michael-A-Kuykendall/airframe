@@ -1524,6 +1524,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         0,
         &mut kv_cache,
         None, // no QK norm for non-Qwen3
+        None, // no attention.scale for non-Qwen3
     )?;
 
     let post_attn = ops.add(&input_tensor, &attn_output)?;

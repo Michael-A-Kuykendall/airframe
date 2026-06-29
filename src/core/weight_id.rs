@@ -33,6 +33,11 @@ pub enum WeightId {
     AttnKNorm {
         layer: usize,
     },
+    /// Per-head attention logit scale (Qwen3). Shape: [n_head]. GGUF: blk.N.attention.scale
+    /// Multiplies attention scores after 1/sqrt(head_dim). Defaults to 1.0/sqrt(head_dim) when absent.
+    AttentionScale {
+        layer: usize,
+    },
 
     FfnGate {
         layer: usize,
