@@ -12,7 +12,6 @@ pub fn silu_f32(input: &Tensor) -> Result<Tensor> {
     Tensor::new(output_data, input.shape.clone())
 }
 
-/// Element-wise multiplication of two tensors
 pub fn multiply_f32(a: &Tensor, b: &Tensor) -> Result<Tensor> {
     a.validate_shape_eq(b)?;
 
@@ -26,7 +25,6 @@ pub fn multiply_f32(a: &Tensor, b: &Tensor) -> Result<Tensor> {
     Tensor::new(output_data, a.shape.clone())
 }
 
-/// Element-wise addition of two tensors (for residual connections)
 pub fn add_f32(a: &Tensor, b: &Tensor) -> Result<Tensor> {
     a.validate_shape_eq(b)?;
 

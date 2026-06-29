@@ -297,8 +297,8 @@ impl BindlessMetadata {
                     ffn_down: p(&absolute_offsets, layer_idx, "ffn_down.weight"),
                     ffn_up: p(&absolute_offsets, layer_idx, "ffn_up.weight"),
                     layer_idx: layer_idx as u32,
-                    v_is_q4k: if lqt_v == 12 { 1 } else { 0 },
-                    ffn_down_is_q4k: if lqt_down == 12 { 1 } else { 0 },
+                    v_is_q4k: (lqt_v == 12) as u32,
+                    ffn_down_is_q4k: (lqt_down == 12) as u32,
                     attn_q_norm: opt(&absolute_offsets, layer_idx, "attn_q_norm.weight"),
                     attn_k_norm: opt(&absolute_offsets, layer_idx, "attn_k_norm.weight"),
                     attn_q_bias: attn_q_bias_off,
@@ -477,12 +477,12 @@ impl BindlessMetadata {
             v_is_q4k: self
                 .tensor_types
                 .get(&format!("blk.{}.attn_v.weight", layer_idx))
-                .map(|&t| if t == 12 { 1 } else { 0 })
+                .map(|&t| (t == 12) as u32)
                 .unwrap_or(0),
             ffn_down_is_q4k: self
                 .tensor_types
                 .get(&format!("blk.{}.ffn_down.weight", layer_idx))
-                .map(|&t| if t == 12 { 1 } else { 0 })
+                .map(|&t| (t == 12) as u32)
                 .unwrap_or(0),
         })
     }

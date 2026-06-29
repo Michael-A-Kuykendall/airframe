@@ -174,7 +174,9 @@ impl PreflightResources {
         // post_attention_norm / post_ffw_norm only exist in Gemma / Gemma2 architectures.
         // For all other models (Llama, Mistral, Phi, Qwen…) their absence is expected and
         // should not produce a warning.
-        let has_post_norms = matches!(spec.arch, crate::core::spec::ModelArch::Gemma);
+        let has_post_norms = spec.post_norm_enabled;
+        // Phi-family checkpoints may omit a distinct FFN norm tensor.
+        // This is detected by checking for ffn_norm presence below.
         let is_phi_arch = matches!(spec.arch, crate::core::spec::ModelArch::Phi);
 
         // Helper to copy — warn on missing only when `warn` is true.
@@ -256,6 +258,7 @@ mod tests {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
         }
     }
 

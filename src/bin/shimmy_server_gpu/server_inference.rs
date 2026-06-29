@@ -600,7 +600,7 @@ fn run_inference_completion(
     let dim = spec.n_embd as u32;
     // Gemma / Gemma-2 scales input embeddings by sqrt(hidden_size) before the first layer.
     // Other architectures (LLaMA, etc.) do not apply this scale.
-    let emb_scale: f32 = if spec.arch_string().contains("gemma") {
+    let emb_scale: f32 = if spec.post_norm_enabled {
         (spec.n_embd as f32).sqrt()
     } else {
         1.0
@@ -623,7 +623,7 @@ fn run_inference_completion(
         .get_tensor_type("blk.0.ffn_down.weight")
         .unwrap_or(qt_main);
     let packed_quant_type = qt_main | (qt_v << 8) | (qt_ffn_down << 16);
-    let layer_norm_mode = if spec.uses_layer_norm() { 1 } else { 0 };
+    let layer_norm_mode = spec.uses_layer_norm() as u32;
     eprintln!(
         "[GPU Server] Norm mode: arch={} layer_norm_enabled={} output_norm_type={} eps={} quant=0x{:08x}",
         spec.arch_string(),
@@ -648,12 +648,8 @@ fn run_inference_completion(
         quant_ffn_gate: (packed_quant_type >> 24) & 0xFF,
         quant_ffn_up: (packed_quant_type >> 24) & 0xFF,
         attn_logit_softcap: spec.attn_logit_softcap,
-        post_norm_enabled: if spec.arch_string().contains("gemma") {
-            1
-        } else {
-            0
-        },
-        qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
+        post_norm_enabled: spec.post_norm_enabled as u32,
+        qk_norm_enabled: spec.has_qk_norm as u32,
         layer_norm_enabled: layer_norm_mode,
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,

@@ -5,26 +5,27 @@
 use crate::control::{ControlDecision, InferenceControl, InferenceEvent, NoopControl};
 use crate::core::weight_id::WeightId;
 use crate::core::{error::Result, tensor::Tensor};
-use crate::family::llama::LlamaModel;
+use crate::family::ModelFamily;
 use crate::ops::dispatch::OpDispatcher;
 use crate::runtime::kvcache::KvCache;
 use std::collections::HashMap;
 
 /// Transformer inference engine with KV cache.
 pub struct Engine {
-    pub model: LlamaModel,
+    pub model: Box<dyn ModelFamily>,
     pub kv_cache: KvCache,
     pub ops: OpDispatcher,
 }
 
 impl Engine {
     /// Create new engine with model and cache
-    pub fn new(model: LlamaModel) -> Self {
+    pub fn new(model: Box<dyn ModelFamily>) -> Self {
+        let spec = model.spec();
         let kv_cache = KvCache::new(
-            model.spec.n_ctx,
-            model.spec.n_layer,
-            model.spec.n_head_kv,
-            model.spec.n_embd / model.spec.n_head, // head_dim
+            spec.n_ctx,
+            spec.n_layer,
+            spec.n_head_kv,
+            spec.n_embd / spec.n_head, // head_dim
         );
 
         Self {
@@ -278,6 +279,7 @@ mod tests {
     use crate::core::error::LibshimmyError;
     use crate::core::spec::ModelSpec;
     use crate::core::tensor::Tensor;
+    use crate::family::llama::LlamaModel;
     use std::collections::HashMap;
 
     fn create_toy_spec() -> ModelSpec {
@@ -307,6 +309,7 @@ mod tests {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
         }
         .compute_derived()
     }
@@ -410,7 +413,7 @@ mod tests {
 
     #[test]
     fn test_extract_last_token_logits_rejects_3d_logits() {
-        let model = LlamaModel::from_spec(create_toy_spec());
+        let model = Box::new(LlamaModel::from_spec(create_toy_spec()));
         let engine = Engine::new(model);
 
         let logits = Tensor::zeros(vec![1, 2, 10]);
@@ -425,7 +428,7 @@ mod tests {
     #[test]
     fn test_engine_creation() {
         let spec = create_toy_spec();
-        let model = LlamaModel::from_spec(spec.clone());
+        let model = Box::new(LlamaModel::from_spec(spec.clone()));
         let engine = Engine::new(model);
 
         assert_eq!(engine.current_len(), 0);
@@ -436,7 +439,7 @@ mod tests {
     #[test]
     fn test_engine_prefill() {
         let spec = create_toy_spec();
-        let model = LlamaModel::from_spec(spec.clone());
+        let model = Box::new(LlamaModel::from_spec(spec.clone()));
         let mut engine = Engine::new(model);
         let weights = create_toy_weights(&spec);
 
@@ -456,7 +459,7 @@ mod tests {
     #[test]
     fn test_engine_decode() {
         let spec = create_toy_spec();
-        let model = LlamaModel::from_spec(spec.clone());
+        let model = Box::new(LlamaModel::from_spec(spec.clone()));
         let mut engine = Engine::new(model);
         let weights = create_toy_weights(&spec);
 
@@ -479,7 +482,7 @@ mod tests {
     #[test]
     fn test_engine_generate() {
         let spec = create_toy_spec();
-        let model = LlamaModel::from_spec(spec.clone());
+        let model = Box::new(LlamaModel::from_spec(spec.clone()));
         let mut engine = Engine::new(model);
         let weights = create_toy_weights(&spec);
 
@@ -499,7 +502,7 @@ mod tests {
     #[test]
     fn test_engine_capacity_limits() {
         let spec = create_toy_spec();
-        let model = LlamaModel::from_spec(spec.clone());
+        let model = Box::new(LlamaModel::from_spec(spec.clone()));
         let mut engine = Engine::new(model);
         let weights = create_toy_weights(&spec);
 
@@ -517,7 +520,7 @@ mod tests {
     #[test]
     fn test_engine_reset() {
         let spec = create_toy_spec();
-        let model = LlamaModel::from_spec(spec.clone());
+        let model = Box::new(LlamaModel::from_spec(spec.clone()));
         let mut engine = Engine::new(model);
         let weights = create_toy_weights(&spec);
 
@@ -534,7 +537,7 @@ mod tests {
     #[test]
     fn test_greedy_sampling() {
         let spec = create_toy_spec();
-        let model = LlamaModel::from_spec(spec.clone());
+        let model = Box::new(LlamaModel::from_spec(spec.clone()));
         let engine = Engine::new(model);
 
         // Create logits with clear maximum

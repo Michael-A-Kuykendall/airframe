@@ -100,6 +100,8 @@ pub struct ModelSpec {
     pub final_logit_softcap: f32,
     /// Per-head Q and K RMSNorm before RoPE (Qwen3). False for all other architectures.
     pub has_qk_norm: bool,
+    /// Gemma-2 has post-attention and post-FFW norms. False for others.
+    pub post_norm_enabled: bool,
 
     // Derived dimensions (computed once, used everywhere)
     pub head_dim: usize,  // n_embd / n_head
@@ -134,6 +136,8 @@ impl ModelSpec {
         self.kv_dim = self.n_head_kv * self.head_dim;
         // Qwen3 uses per-head Q and K RMSNorm before RoPE
         self.has_qk_norm = matches!(self.arch, ModelArch::Qwen3);
+        // Gemma-2 has post-attention and post-FFW norms
+        self.post_norm_enabled = matches!(self.arch, ModelArch::Gemma);
 
         // Temp buffer layout (must fit ALL intermediates at once):
         //   [0..n_embd]              = attn_norm output / activation copy
@@ -321,6 +325,7 @@ impl ModelSpec {
             attn_logit_softcap: attn_softcap.unwrap_or(0.0),
             final_logit_softcap: final_softcap.unwrap_or(0.0),
             has_qk_norm: false, // set in compute_derived() from arch
+            post_norm_enabled: false, // set in compute_derived() from arch
             head_dim: head_dim_expl.unwrap_or(0),
             gqa_ratio: 0,
             kv_dim: 0,
@@ -353,6 +358,7 @@ impl ModelSpec {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
@@ -635,6 +641,7 @@ mod tests {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,

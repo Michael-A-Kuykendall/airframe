@@ -193,7 +193,7 @@ impl CpuEvalEngine {
         let weights = container.weights;
 
         let llama_model = LlamaModel::from_spec(spec);
-        let engine = CpuCore::new(llama_model);
+        let engine = CpuCore::new(Box::new(llama_model));
 
         Ok(Self {
             inner: engine,
@@ -1619,7 +1619,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
 
     // L0.22 probe (final logits for single token)
     let llama_model = LlamaModel::from_spec(spec.clone());
-    let mut cpu_engine = CpuCore::new(llama_model);
+    let mut cpu_engine = CpuCore::new(Box::new(llama_model));
     let cpu_logits_tensor = cpu_engine.prefill(&[token_id], &weights)?;
     let cpu_l22 = cpu_logits_tensor.data;
 

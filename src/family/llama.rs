@@ -7,6 +7,7 @@
 use crate::core::{error::Result, spec::ModelSpec, tensor::Tensor, weight_id::WeightId};
 use crate::ops::dispatch::OpDispatcher;
 use crate::runtime::kvcache::KvCache;
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -557,6 +558,30 @@ impl LlamaModel {
     }
 }
 
+impl super::ModelFamily for LlamaModel {
+    fn forward(
+        &self,
+        input_ids: &[usize],
+        weights: &HashMap<WeightId, Tensor>,
+        kv_cache: &mut KvCache,
+        ops: &OpDispatcher,
+    ) -> Result<Tensor> {
+        self.forward(input_ids, weights, kv_cache, ops)
+    }
+
+    fn required_weights(&self) -> Vec<WeightId> {
+        self.required_weights()
+    }
+
+    fn validate_weights(&self, weights: &HashMap<WeightId, Tensor>) -> Result<()> {
+        self.validate_weights(weights)
+    }
+
+    fn spec(&self) -> &ModelSpec {
+        &self.spec
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,6 +615,7 @@ mod tests {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
         }
         .compute_derived()
     }

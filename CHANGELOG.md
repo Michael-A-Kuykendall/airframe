@@ -81,7 +81,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   CPU reference traces from any GGUF. Internal tool; not published to crates.io.
 
 - **FSE inference observation layer** () — Selector-first,
-  single-pass inference capture powered by d0-engine. Multiple observers sharing a
+  single-pass inference capture powered by dzero. Multiple observers sharing a
   selector cost zero additional extraction (FSE invariant). Internal; not published.
 
 ## [0.2.1] — 2026-06-02

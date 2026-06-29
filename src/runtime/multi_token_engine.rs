@@ -1,7 +1,7 @@
 use crate::control::{ControlDecision, InferenceControl, InferenceEvent, NoopControl};
 use crate::core::weight_id::WeightId;
 use crate::core::{error::Result, spec::ModelSpec, tensor::Tensor};
-use crate::family::llama::LlamaModel;
+use crate::family::{llama::LlamaModel, ModelFamily};
 use crate::fixtures::PromptFixture;
 use crate::runtime::{engine::Engine, sampling::Sampler};
 use crate::validation::{DeterminismProof, LogitInfo};
@@ -17,8 +17,8 @@ pub struct MultiTokenEngine {
 
 impl MultiTokenEngine {
     /// Create new multi-token engine with greedy sampling
-    pub fn new(llama_model: LlamaModel) -> Self {
-        let engine = Engine::new(llama_model);
+    pub fn new(model: Box<dyn ModelFamily>) -> Self {
+        let engine = Engine::new(model);
         let sampler = Sampler::greedy(); // GreedyOnly for V2
 
         Self { engine, sampler }
@@ -27,7 +27,7 @@ impl MultiTokenEngine {
     /// Create new multi-token engine from model spec
     pub fn from_spec(spec: ModelSpec) -> Self {
         let llama_model = LlamaModel::from_spec(spec);
-        Self::new(llama_model)
+        Self::new(Box::new(llama_model))
     }
 
     /// Reset engine state for new sequence
@@ -335,6 +335,7 @@ mod tests {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
         }
         .compute_derived()
     }

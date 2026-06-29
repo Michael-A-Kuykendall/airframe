@@ -826,6 +826,7 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
         attn_logit_softcap: attn_softcap.unwrap_or(0.0),
         final_logit_softcap: final_softcap.unwrap_or(0.0),
         has_qk_norm: false, // set by compute_derived via arch
+        post_norm_enabled: false, // set by compute_derived via arch
         head_dim: head_dim_explicit.unwrap_or(0),
         gqa_ratio: 0,
         kv_dim: 0,
@@ -1581,6 +1582,7 @@ mod tests {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
         }
         .compute_derived();
 

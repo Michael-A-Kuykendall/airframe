@@ -144,17 +144,14 @@ impl OpDispatcher {
         ffn::ffn_swiglu_f32(input, gate_weight, up_weight, down_weight)
     }
 
-    /// SiLU activation function
     pub fn silu(&self, input: &Tensor) -> Result<Tensor> {
         activations::silu_f32(input)
     }
 
-    /// Element-wise multiplication
     pub fn multiply(&self, a: &Tensor, b: &Tensor) -> Result<Tensor> {
         activations::multiply_f32(a, b)
     }
 
-    /// Element-wise addition (for residual connections)
     pub fn add(&self, a: &Tensor, b: &Tensor) -> Result<Tensor> {
         activations::add_f32(a, b)
     }

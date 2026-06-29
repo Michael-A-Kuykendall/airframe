@@ -189,7 +189,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         quant_ffn_gate: 0,
         quant_ffn_up: 0,
         attn_logit_softcap: spec.attn_logit_softcap,
-        post_norm_enabled: spec.arch_string().contains("gemma") as u32,
+        post_norm_enabled: spec.post_norm_enabled as u32,
         qk_norm_enabled: spec.has_qk_norm as u32,
         layer_norm_enabled: spec.uses_layer_norm() as u32,
         ffn_kind_policy: 0,
