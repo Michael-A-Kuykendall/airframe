@@ -2,10 +2,9 @@ pub mod kv_cache;
 pub mod loader;
 pub mod metadata;
 pub mod pipeline;
+pub mod pool_encoder;
+pub mod pool_timestamp;
 pub mod preflight;
-// pool_encoder and pool_timestamp need fixes before being wired in:
-// pub mod pool_encoder;
-// pub mod pool_timestamp;
 
 pub mod pipeline_shift;
 #[cfg(test)]

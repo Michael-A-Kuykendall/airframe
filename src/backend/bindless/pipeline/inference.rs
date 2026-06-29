@@ -289,7 +289,7 @@ impl BindlessPipeline {
         //
         // Patent Notice: FSE + D0 Saturation Fabric scheduling.
         // Pending patent by Michael A. Kuykendall. All rights reserved.
-        let mut tdr = TdrScheduler::new(device, queue, "Full Model");
+        let mut tdr = TdrScheduler::new(device, queue, "Full Model", None);
         let tdr_log = std::env::var("AIRFRAME_LOG_TDR_POLLS")
             .map(|v| v == "1")
             .unwrap_or(false);

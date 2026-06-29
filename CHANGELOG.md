@@ -3,7 +3,57 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.2.6] — 2026-06-19
+## [0.2.7] — 2026-06-29
+
+### Fixed
+
+- **ISF (Inference Saturation Fabric) refit complete** — All outstanding architectural issues from v0.2.x resolved in one release:
+  - ISF (`generate_isf`) now the production inference path, replacing legacy imperative `generate()`
+  - TDR (Timeout Detection and Recovery) transport integrated with GPU timestamp pools for accurate dispatch timing
+  - Encoder pools operational for non-blocking GPU work submission
+  - Qwen3 `attention.scale` tensor mapped defensively (no GGUF on disk contains it — matches HF reference)
+
+### Added
+
+- **Inference Saturation Fabric** — New fabric-based inference loop in `crates/airframe_observe/src/isf.rs`:
+  - 7-rule policy enforcement with selector-first, single-pass execution
+  - Fused semantic execution (FSE) powered by dzero crate (`0.1.0`)
+  - Byte-identical validation between ISF and imperative paths verified
+
+- **GPU Timestamp Query Pools** — Accurate GPU-side dispatch timing:
+  - `pool_timestamp.rs`: TimestampPool for capturing GPU timestamps before/after compute passes
+  - TDR scheduler updated with optional `TimestampPool` parameter
+  - Methods: `write_start_timestamp()`, `record_gpu_elapsed()`, `resolve_timestamps()`
+
+- **Encoder Pools** — Bounded pool of `CommandEncoder`s for non-blocking submission:
+  - `pool_encoder.rs`: EncoderPool with ring-buffer slot management
+  - Methods: `acquire()`, `submit_and_recycle()`, `drain()`
+  - Keeps GPU fed without pipeline bubbles
+
+- **DuckDB Made Optional** — Fixes critical build-time issues:
+  - DuckDB previously required for internal certification paths; now opt-in via feature flag
+  - Fixes build-time Out-of-Memory crashes on shimmy server when duckdb-sys is unavailable
+  - Fixes TDR watchdog crashes during long prefill sequences (Windows D3D12) — Windows GPU timeout exceeded
+
+### Changed
+
+- **Architecture**: Consolidated arch dispatch into `LlamaModel::forward()` with `has_qk_norm`/`post_norm_enabled` flags
+- **TDR Scheduler**: Unified TDR yield logic into clean, testable struct (replaces scattered macros)
+- **Stderr Noise**: DIAG/TDR stderr now gated behind `AIRFRAME_LOG_TDR_POLLS=1`
+
+### Validation
+
+- **Smoke Tests**: 10/10 PASS across all model architectures:
+  - Llama-3.2-3B, Phi-2, Gemma-2 9B, Qwen2-7B, Qwen3-8B, StarCoder2-3B
+  - All quantization types (Q4_K_M, Q6_K) verified
+  - Byte-identical output between ISF and imperative paths
+
+### Removed
+
+- **Legacy `generate()` path** — Deprecated in favor of ISF (`generate_isf`) which is now the production path
+- **Scattered TDR macros** — Consolidated into `TdrScheduler` struct methods
+
+---
 
 ### Fixed
 

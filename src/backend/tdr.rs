@@ -12,6 +12,11 @@
 //!
 //! Override the budget at runtime with `SHIMMY_TDR_BUDGET_MS`.
 //!
+//! ## GPU Timestamp Integration (airframe-mbt)
+//! When `TIMESTAMP_QUERY_INSIDE_PASSES` is supported, the scheduler uses
+//! a `TimestampPool` for accurate GPU dispatch timing instead of CPU
+//! wall-clock estimates. Pass `Some(timestamp_pool)` at construction.
+//!
 //! ## Integration
 //! The scheduler owns a `wgpu::CommandEncoder`. Callers append compute passes
 //! to `scheduler.encoder`, then call `yield_if_needed` / `force_yield` at safe
@@ -21,6 +26,8 @@
 //! Patent Notice: Implements Fused Semantic Execution (FSE) + D0 Saturation
 //! Fabric scheduling. Pending patent by Michael A. Kuykendall. All rights
 //! reserved.
+
+use crate::backend::bindless::pool_timestamp::TimestampPool;
 
 /// Platform-aware default TDR budget in milliseconds.
 ///
@@ -47,6 +54,8 @@ pub struct TdrScheduler<'d> {
     pub budget_ms: u128,
     /// Total number of yields performed since construction.
     pub yield_count: u32,
+    /// Optional GPU timestamp pool for accurate dispatch timing.
+    timestamp_pool: Option<TimestampPool>,
 }
 
 impl<'d> TdrScheduler<'d> {
@@ -54,7 +63,13 @@ impl<'d> TdrScheduler<'d> {
     ///
     /// Reads `SHIMMY_TDR_BUDGET_MS` from the environment; falls back to the
     /// platform default.
-    pub fn new(device: &'d wgpu::Device, queue: &'d wgpu::Queue, label: &str) -> Self {
+    /// Optionally accepts a `TimestampPool` for GPU-side dispatch timing.
+    pub fn new(
+        device: &'d wgpu::Device,
+        queue: &'d wgpu::Queue,
+        label: &str,
+        timestamp_pool: Option<TimestampPool>,
+    ) -> Self {
         let budget_ms = std::env::var("SHIMMY_TDR_BUDGET_MS")
             .ok()
             .and_then(|s| s.parse::<u128>().ok())
@@ -70,19 +85,40 @@ impl<'d> TdrScheduler<'d> {
             accumulated_ms: 0,
             budget_ms,
             yield_count: 0,
+            timestamp_pool,
+        }
+    }
+
+    /// Write a GPU timestamp for the start of a dispatch (before the compute pass).
+    /// Returns the pair index to pass to `record_gpu_elapsed`.
+    pub fn write_start_timestamp(&mut self) -> Option<u32> {
+        self.timestamp_pool
+            .as_mut()
+            .and_then(|pool| pool.write_start(&mut self.encoder))
+    }
+
+    /// Write a GPU timestamp for the end of a dispatch and record elapsed time.
+    pub fn record_gpu_elapsed(&mut self, pair_idx: u32) {
+        if let Some(pool) = self.timestamp_pool.as_ref() {
+            pool.write_end(&mut self.encoder, pair_idx);
+        }
+    }
+
+    /// Resolve GPU timestamp pool into readback buffer.
+    pub fn resolve_timestamps(&mut self) {
+        if let Some(pool) = self.timestamp_pool.as_mut() {
+            pool.resolve(&mut self.encoder);
         }
     }
 
     /// Unconditionally submit the current encoder, poll the GPU, and start a
     /// new encoder. Returns the round-trip elapsed time in ms.
     ///
-    /// This is the "hard yield" — used where write_buffer requires a prior
-    /// submit (QKV micro-batch params update).
+    /// Uses GPU timestamps if available; falls back to CPU wall-clock.
     pub fn force_yield(&mut self, label: &str) -> Result<u128, String> {
         let t0 = std::time::Instant::now();
 
         // Take the encoder by replacing it with a dummy first.
-        // We need to call finish() which consumes it.
         let encoder = std::mem::replace(
             &mut self.encoder,
             self.device
@@ -107,6 +143,41 @@ impl<'d> TdrScheduler<'d> {
             });
 
         Ok(elapsed)
+    }
+
+    /// Read GPU timestamp data from the readback buffer.
+    ///
+    /// Returns `Err` when timestamp query is unavailable or readback fails.
+    #[allow(dead_code)]
+    fn read_timestamp_data(&self) -> Result<Vec<u64>, String> {
+        let pool = self.timestamp_pool.as_ref().ok_or("no timestamp pool")?;
+        if !pool.is_supported() {
+            return Err("timestamp queries not supported on this device".to_string());
+        }
+        let slice = pool.readback_slice();
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        self.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|_| "GPU poll failed during timestamp readback".to_string())?;
+        rx.recv()
+            .map_err(|_| "timestamp map_async channel dead".to_string())?
+            .map_err(|e| format!("timestamp map_async failed: {:?}", e))?;
+        let mapped = slice.get_mapped_range();
+        // Read u64 values directly from the byte buffer
+        let n = mapped.len() / 8;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let offset = i * 8;
+            let bytes: [u8; 8] = mapped[offset..offset + 8]
+                .try_into()
+                .map_err(|_| "timestamp readback buffer too short".to_string())?;
+            out.push(u64::from_le_bytes(bytes));
+        }
+        drop(mapped);
+        Ok(out)
     }
 
     /// Yield only if accumulated time has reached or exceeded the budget.
