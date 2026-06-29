@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "rust-lang.rustana",
+    "rust-analyzer",
+    "ms-vscode.cpptools",
+    "scoop.aider-chat"
+  ]
+}

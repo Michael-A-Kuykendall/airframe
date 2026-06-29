@@ -118,7 +118,12 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn info(dims: Vec<usize>) -> GgufTensorInfo {
-        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 6, offset: 0 }
+        GgufTensorInfo {
+            name: "t".to_string(),
+            dimensions: dims,
+            ggml_type: 6,
+            offset: 0,
+        }
     }
 
     fn write_q5_0_block(f: &mut NamedTempFile, scale_bits: u16, qh: u32, qs: &[u8; 16]) {

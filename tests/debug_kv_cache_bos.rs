@@ -55,13 +55,26 @@ async fn test_kv_cache_after_bos() -> Result<(), Box<dyn std::error::Error>> {
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
         head_dim: (spec.n_embd / spec.n_head) as u32,
+        rope_dim: spec.rope_dim as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: 5632,
         temp_stride: 16384,
-        quant_type: 0,
+        quant_qk: 0,
+        quant_v: 0,
+        quant_attn_out: 0,
+        quant_ffn_down: 0,
+        quant_ffn_gate: 0,
+        quant_ffn_up: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
+        layer_norm_enabled: 0,
+        ffn_kind_policy: 0,
+        qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 1,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);
@@ -89,7 +102,7 @@ async fn test_kv_cache_after_bos() -> Result<(), Box<dyn std::error::Error>> {
         let layer_offsets = gpu_model
             .metadata
             .get_layer_offsets(layer_idx, "tinyllama")
-            .expect(&format!("Layer {} not found", layer_idx));
+            .unwrap_or_else(|| panic!("Layer {} not found", layer_idx));
         layer_output = pipeline.run_layer_with_cache(
             &device,
             &queue,
@@ -101,7 +114,7 @@ async fn test_kv_cache_after_bos() -> Result<(), Box<dyn std::error::Error>> {
             layer_params,
         );
     }
-    kv_cache.increment();
+    let _ = kv_cache.increment();
     println!(
         "      ✓ BOS processed, cache seq_len = {}",
         kv_cache.get_seq_len()

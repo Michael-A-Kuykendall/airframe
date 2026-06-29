@@ -3,8 +3,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::analysis::{ProjectAnalysisTool, SyntaxCheckTool};
-    use super::super::{Tool, ToolArgs};
-    use std::collections::HashMap;
+    use super::super::Tool;
 
     #[tokio::test]
     async fn test_project_analysis_tool_name() {

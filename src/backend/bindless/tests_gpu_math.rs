@@ -38,9 +38,7 @@ mod tests {
         block_bytes.push(0x40);
 
         // Quants (16 bytes)
-        for _ in 0..16 {
-            block_bytes.push(0xBA); // 186
-        }
+        block_bytes.extend([0xBA; 16]);
 
         // Pad to u32 alignment (2 bytes needed to reach 20)
         block_bytes.push(0x00);
@@ -51,8 +49,8 @@ mod tests {
             .chunks(4)
             .map(|c| {
                 let mut val = 0u32;
-                for i in 0..c.len() {
-                    val |= (c[i] as u32) << (i * 8);
+                for (i, &byte) in c.iter().enumerate() {
+                    val |= (byte as u32) << (i * 8);
                 }
                 val
             })
@@ -229,20 +227,20 @@ mod tests {
         // Indices 0..15 -> Low Nibbles -> All 4.0
         // Indices 16..31 -> High Nibbles -> All 6.0
 
-        for i in 0..16 {
+        for (i, &val) in result[..16].iter().enumerate() {
             assert!(
-                (result[i] - 4.0).abs() < 1e-5,
+                (val - 4.0).abs() < 1e-5,
                 "Idx {} (Low Group) Expected 4.0, got {}",
                 i,
-                result[i]
+                val
             );
         }
-        for i in 16..32 {
+        for (i, &val) in result[16..32].iter().enumerate() {
             assert!(
-                (result[i] - 6.0).abs() < 1e-5,
+                (val - 6.0).abs() < 1e-5,
                 "Idx {} (High Group) Expected 6.0, got {}",
                 i,
-                result[i]
+                val
             );
         }
     }

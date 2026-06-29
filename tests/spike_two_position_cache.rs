@@ -43,7 +43,6 @@ fn spike_two_position_kv_cache() {
     println!();
 
     // TinyLlama attention params
-    const D_MODEL: usize = 2048;
     const N_HEADS: usize = 32;
     const HEAD_DIM: usize = 64; // D_MODEL / N_HEADS
     const SEQ_LEN: usize = 2; // BOS + "Hello"

@@ -79,10 +79,8 @@ fn dequantize_q6_k_superblock(data: &[u8]) -> [f32; 256] {
     let d_bytes = [data[208], data[209]];
 
     // FP16 to FP32 conversion for global scale
-    let d = f16_bits_to_f32(u16::from_le_bytes(d_bytes));
-
-    // The Q6_K dequantization processes 256 elements in two 128-element chunks
-    // Each chunk uses 64 bytes of ql, 32 bytes of qh, and 8 scales
+    let d = f16_bits_to_f32(u16::from_le_bytes(d_bytes)); // The Q6_K dequantization processes 256 elements in two 128-element chunks
+                                                          // Each chunk uses 64 bytes of ql, 32 bytes of qh, and 8 scales
 
     // Process two 128-element halves
     for n in 0..2 {
@@ -157,7 +155,12 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn info_q6k(dims: Vec<usize>) -> GgufTensorInfo {
-        GgufTensorInfo { name: "t".to_string(), dimensions: dims, ggml_type: 14, offset: 0 }
+        GgufTensorInfo {
+            name: "t".to_string(),
+            dimensions: dims,
+            ggml_type: 14,
+            offset: 0,
+        }
     }
 
     #[test]

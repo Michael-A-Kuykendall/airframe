@@ -43,7 +43,10 @@ pub fn apply_rope_scaled_f32(
     }
 
     crate::ensure!(rope_dim > 0, "rope_dim must be > 0");
-    crate::ensure!(rope_dim % 2 == 0, "rope_dim must be even (got {rope_dim})");
+    crate::ensure!(
+        rope_dim.is_multiple_of(2),
+        "rope_dim must be even (got {rope_dim})"
+    );
 
     let mut output = tensor.data.clone();
 
@@ -125,6 +128,7 @@ pub fn apply_rope_scaled_f32(
 }
 
 /// Apply RoPE to 3D tensor data in-place
+#[allow(clippy::too_many_arguments)]
 fn apply_rope_3d(
     data: &mut [f32],
     _seq_len: usize,
@@ -161,13 +165,13 @@ fn apply_rope_3d(
             // Use the standard YaRN formula with dimensionless lambda normalised to rope_base.
             // lambda_normalised = 2*pi*base^(2i/D) / (2*pi) = base^(2i/D)
             let lambda = 1.0_f32 / theta; // base^(2i/D), proportional to wavelength
-            // L_train proxy: rope_scale tells us the stretch factor (1/scale = L_target/L_train)
-            // Ramp transitions between no-scale (lambda >> L_train) and full-scale (lambda << L_train/beta).
-            // Since we lack absolute L_train, use scale-relative thresholds:
-            //   high_threshold = 1/YARN_BETA  (wavelength < this fraction of base → full scale)
-            //   low_threshold  = 1/YARN_ALPHA  (wavelength > this fraction → no scale)
-            let ramp = ((1.0 / lambda - YARN_ALPHA * rope_scale) /
-                        (YARN_BETA * rope_scale - YARN_ALPHA * rope_scale))
+                                          // L_train proxy: rope_scale tells us the stretch factor (1/scale = L_target/L_train)
+                                          // Ramp transitions between no-scale (lambda >> L_train) and full-scale (lambda << L_train/beta).
+                                          // Since we lack absolute L_train, use scale-relative thresholds:
+                                          //   high_threshold = 1/YARN_BETA  (wavelength < this fraction of base → full scale)
+                                          //   low_threshold  = 1/YARN_ALPHA  (wavelength > this fraction → no scale)
+            let ramp = ((1.0 / lambda - YARN_ALPHA * rope_scale)
+                / (YARN_BETA * rope_scale - YARN_ALPHA * rope_scale))
                 .clamp(0.0, 1.0);
             theta * (ramp * rope_scale + (1.0 - ramp))
         })

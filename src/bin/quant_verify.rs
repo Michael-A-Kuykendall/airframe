@@ -48,10 +48,10 @@ fn main() {
 
         let adapter_limits = adapter.limits();
         let mut limits = wgpu::Limits::downlevel_defaults();
-        limits.max_storage_buffer_binding_size =
-            adapter_limits.max_storage_buffer_binding_size;
+        limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
         limits.max_buffer_size = adapter_limits.max_buffer_size;
-        limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage;
+        limits.max_storage_buffers_per_shader_stage =
+            adapter_limits.max_storage_buffers_per_shader_stage;
         limits.max_compute_invocations_per_workgroup = 256;
 
         let (device, queue) = adapter
@@ -82,10 +82,10 @@ fn main() {
 
     // --- Types to test: (ggml_type, name) ---
     let quant_types: &[(u32, &str)] = &[
-        (0,  "F32"),
-        (1,  "F16"),
-        (2,  "Q4_0"),
-        (8,  "Q8_0"),
+        (0, "F32"),
+        (1, "F16"),
+        (2, "Q4_0"),
+        (8, "Q8_0"),
         (12, "Q4_K"),
         (13, "Q5_K"),
         (14, "Q6_K"),
@@ -183,7 +183,9 @@ fn main() {
                 continue;
             }
             let err = (c - g).abs();
-            if err > max_err { max_err = err; }
+            if err > max_err {
+                max_err = err;
+            }
             sum_err += err;
         }
         let mean_err = if n > 0 { sum_err / n as f32 } else { 0.0 };
@@ -193,9 +195,7 @@ fn main() {
         let pass = max_err <= tolerance && nan_count == 0;
 
         if pass {
-            println!(
-                "  PASS  max_err={max_err:.2e}  mean_err={mean_err:.2e}  nan={nan_count}"
-            );
+            println!("  PASS  max_err={max_err:.2e}  mean_err={mean_err:.2e}  nan={nan_count}");
         } else {
             println!(
                 "  FAIL  max_err={max_err:.2e}  mean_err={mean_err:.2e}  nan={nan_count}  (tolerance={tolerance:.2e})"
@@ -212,7 +212,9 @@ fn main() {
                         cpu_full[j], gpu_out[j], err
                     );
                     printed += 1;
-                    if printed >= 8 { break; }
+                    if printed >= 8 {
+                        break;
+                    }
                 }
             }
         }
@@ -234,7 +236,7 @@ fn cpu_dequant_f32(mmap: &Mmap, byte_offset: usize, count: usize) -> Vec<f32> {
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let b = byte_offset + i * 4;
-        let bits = u32::from_le_bytes([mmap[b], mmap[b+1], mmap[b+2], mmap[b+3]]);
+        let bits = u32::from_le_bytes([mmap[b], mmap[b + 1], mmap[b + 2], mmap[b + 3]]);
         out.push(f32::from_bits(bits));
     }
     out
@@ -244,7 +246,7 @@ fn cpu_dequant_f16(mmap: &Mmap, byte_offset: usize, count: usize) -> Vec<f32> {
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let b = byte_offset + i * 2;
-        let bits = u16::from_le_bytes([mmap[b], mmap[b+1]]);
+        let bits = u16::from_le_bytes([mmap[b], mmap[b + 1]]);
         out.push(f16_bits_to_f32(bits));
     }
     out
@@ -261,7 +263,7 @@ fn f16_bits_to_f32(bits: u16) -> f32 {
         }
         // Subnormal
         let leading = mant.leading_zeros() - 22; // leading zeros above 10 bits
-        let f32_exp = (127 - 14 - leading) as u32;
+        let f32_exp = 127 - 14 - leading;
         let f32_mant = (mant << (leading + 1)) & 0x7FFFFF;
         return f32::from_bits(sign | (f32_exp << 23) | f32_mant);
     } else if exp == 31 {
@@ -269,6 +271,6 @@ fn f16_bits_to_f32(bits: u16) -> f32 {
         return f32::from_bits(sign | 0x7F800000 | (mant << 13));
     }
     let f32_exp = ((exp + 127 - 15) as u32) << 23;
-    let f32_mant = (mant as u32) << 13;
+    let f32_mant = mant << 13;
     f32::from_bits(sign | f32_exp | f32_mant)
 }

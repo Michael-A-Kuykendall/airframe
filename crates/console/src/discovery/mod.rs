@@ -16,6 +16,7 @@ pub enum HealthStatus {
     Unhealthy,
 }
 
+#[allow(dead_code)]
 pub struct PortDiscovery {
     scan_range: std::ops::Range<u16>,
     discovered_ports: HashMap<String, u16>,

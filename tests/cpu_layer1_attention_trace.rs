@@ -19,7 +19,7 @@ fn cpu_layer1_attention_trace() -> Result<(), Box<dyn std::error::Error>> {
 
     let cpu_model = CpuModel::from_tinylama_q4_0_gguf(&model_path)?;
     let llama_model = LlamaModel::from_spec(spec);
-    let mut engine = Engine::new(llama_model);
+    let mut engine = Engine::new(Box::new(llama_model));
 
     std::env::set_var("LIBSHIMMY_TRACE_ATTENTION", "1");
     std::env::set_var("LIBSHIMMY_TRACE_ATTENTION_LAYER", "1");

@@ -178,7 +178,10 @@ mod tests {
         let gen = ArtifactGenerator::new(td.path());
         let p = gen.generate_filename("slice01_decode16", "abcdef01234567890", "prompt_a");
         let name = p.file_name().unwrap().to_string_lossy();
-        assert!(name.starts_with("v2_slice01_decode16_abcdef01"), "got: {name}");
+        assert!(
+            name.starts_with("v2_slice01_decode16_abcdef01"),
+            "got: {name}"
+        );
         assert!(name.ends_with("_prompt_a.json"), "got: {name}");
     }
 
@@ -191,7 +194,10 @@ mod tests {
         let name = p.file_name().unwrap().to_string_lossy();
         // Only first 8 chars of sha appear in the name
         assert!(name.contains("da3087fb"), "got: {name}");
-        assert!(!name.contains("14aede55"), "should only use first 8: {name}");
+        assert!(
+            !name.contains("14aede55"),
+            "should only use first 8: {name}"
+        );
     }
 
     // ── Property: SHA prefix is always exactly 8 chars regardless of input length ──
@@ -202,9 +208,9 @@ mod tests {
         let gen = ArtifactGenerator::new(td.path());
         // SHA strings of varying lengths (all ≥ 8)
         let shas = [
-            "12345678",                                                          // exactly 8
-            "123456789",                                                         // 9
-            "abcdef0011223344",                                                  // 16
+            "12345678",                                                         // exactly 8
+            "123456789",                                                        // 9
+            "abcdef0011223344",                                                 // 16
             "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556", // 64 (real sha256)
         ];
         for sha in &shas {
@@ -216,19 +222,20 @@ mod tests {
             assert_eq!(parts.len(), 4, "unexpected stem format: {stem}");
             let sha_segment = parts[2];
             assert_eq!(
-                sha_segment.len(), 8,
+                sha_segment.len(),
+                8,
                 "sha segment in filename is {} chars, expected 8 (sha input: {sha}, stem: {stem})",
                 sha_segment.len()
             );
             assert_eq!(
-                sha_segment, &sha[..8],
+                sha_segment,
+                &sha[..8],
                 "sha segment '{}' != first 8 chars '{}' of sha '{sha}'",
-                sha_segment, &sha[..8]
+                sha_segment,
+                &sha[..8]
             );
         }
     }
-
-
 
     #[test]
     fn test_write_read_roundtrip_decode_artifact() {
@@ -240,8 +247,18 @@ mod tests {
             prompt_token_ids: vec![1, 2, 3],
             generated_token_ids: vec![10, 11, 12, 13],
             per_step_logits: vec![
-                LogitInfo { step: 0, max_logit_index: 10, max_logit_value: Some(5.0), finite: true },
-                LogitInfo { step: 1, max_logit_index: 11, max_logit_value: Some(4.0), finite: true },
+                LogitInfo {
+                    step: 0,
+                    max_logit_index: 10,
+                    max_logit_value: Some(5.0),
+                    finite: true,
+                },
+                LogitInfo {
+                    step: 1,
+                    max_logit_index: 11,
+                    max_logit_value: Some(4.0),
+                    finite: true,
+                },
             ],
             determinism_proof: DeterminismProof {
                 run1_tokens: vec![10, 11],
@@ -270,7 +287,8 @@ mod tests {
             run2_tokens: vec![1],
             identical: true,
         };
-        gen.write_artifact(&artifact, &path).expect("should create dirs");
+        gen.write_artifact(&artifact, &path)
+            .expect("should create dirs");
         assert!(path.exists());
     }
 
@@ -322,7 +340,10 @@ mod tests {
         gen.write_artifact(&artifact, &path).expect("write");
         let back: OracleArtifact = gen.read_artifact(&path).expect("read");
         assert_eq!(back.oracle_tool, "llama.cpp");
-        assert!(matches!(back.conformance_result, ConformanceResult::ExactMatch));
+        assert!(matches!(
+            back.conformance_result,
+            ConformanceResult::ExactMatch
+        ));
     }
 
     #[test]
@@ -346,7 +367,10 @@ mod tests {
         gen.write_artifact(&artifact, &path).expect("write");
         let back: OracleArtifact = gen.read_artifact(&path).expect("read");
         match back.conformance_result {
-            ConformanceResult::Mismatch { first_divergence_step, .. } => {
+            ConformanceResult::Mismatch {
+                first_divergence_step,
+                ..
+            } => {
                 assert_eq!(first_divergence_step, 3);
             }
             other => panic!("expected Mismatch, got {other:?}"),
@@ -385,7 +409,9 @@ mod tests {
             model_sha256: "sha_fail".to_string(),
             model_file_size: 0,
             timestamp: chrono::Utc::now(),
-            validation_result: ValidationOutcome::Fail { reason: "bad stuff".to_string() },
+            validation_result: ValidationOutcome::Fail {
+                reason: "bad stuff".to_string(),
+            },
         };
 
         let path = gen.generate_filename("slicefail", "sha_fXXX", "pf");

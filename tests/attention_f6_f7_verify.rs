@@ -90,7 +90,7 @@ async fn test_f6_f7_gpu_attention_verification() -> Result<(), Box<dyn std::erro
     println!("[3/6] Model loaded");
 
     // Process tokens: [1 (BOS), 15043 ("Hello")]
-    let tokens = vec![1u32, 15043u32];
+    let tokens = [1u32, 15043u32];
 
     let dim = spec.n_embd as u32;
     let embd_weight_offset = gpu_model
@@ -104,13 +104,26 @@ async fn test_f6_f7_gpu_attention_verification() -> Result<(), Box<dyn std::erro
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
         head_dim: (spec.n_embd / spec.n_head) as u32,
+        rope_dim: spec.rope_dim as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: 5632,
         temp_stride: 16384,
-        quant_type: 0,
+        quant_qk: 0,
+        quant_v: 0,
+        quant_attn_out: 0,
+        quant_ffn_down: 0,
+        quant_ffn_gate: 0,
+        quant_ffn_up: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
+        layer_norm_enabled: 0,
+        ffn_kind_policy: 0,
+        qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 1,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);
@@ -130,7 +143,7 @@ async fn test_f6_f7_gpu_attention_verification() -> Result<(), Box<dyn std::erro
         .metadata
         .get_layer_offsets(0, "tinyllama")
         .expect("Layer 0 not found");
-    layer_output = pipeline.run_layer_with_cache(
+    pipeline.run_layer_with_cache(
         &device,
         &queue,
         &gpu_model,
@@ -140,7 +153,7 @@ async fn test_f6_f7_gpu_attention_verification() -> Result<(), Box<dyn std::erro
         layer_offsets,
         layer_params,
     );
-    kv_cache.increment();
+    let _ = kv_cache.increment();
 
     // Process "Hello" token (position 1) - this is what we'll verify
     println!("[5/6] Processing \"Hello\" token (id=15043, pos=1)...");

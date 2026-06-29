@@ -26,7 +26,8 @@ mod layer_dump_tests {
         let mut limits = wgpu::Limits::downlevel_defaults();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
         limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
-        limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage; // INT4 bind group uses 14 bindings; use adapter max
+        limits.max_storage_buffers_per_shader_stage =
+            adapter_limits.max_storage_buffers_per_shader_stage; // INT4 bind group uses 14 bindings; use adapter max
         limits.max_compute_invocations_per_workgroup = 256;
 
         let (device, queue) = adapter
@@ -53,7 +54,8 @@ mod layer_dump_tests {
                     "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
                     "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf",
                 ];
-                candidates.iter()
+                candidates
+                    .iter()
                     .find(|p| PathBuf::from(p).exists())
                     .map(PathBuf::from)
                     .ok_or("Model not found")
@@ -87,13 +89,26 @@ mod layer_dump_tests {
             head_count: 32,
             head_count_kv: 4,
             head_dim: 64,
+            rope_dim: 64,
             rms_eps: 1e-5,
             ffn_dim: 5632,
             temp_stride: 16384,
-            quant_type: 0,
+            quant_qk: 0,
+            quant_v: 0,
+            quant_attn_out: 0,
+            quant_ffn_down: 0,
+            quant_ffn_gate: 0,
+            quant_ffn_up: 0,
             attn_logit_softcap: 0.0,
             post_norm_enabled: 0,
             qk_norm_enabled: 0,
+            layer_norm_enabled: 0,
+            ffn_kind_policy: 0,
+            qkv_layout_policy: 0,
+            batch_offset: 0,
+            batch_count: 0,
+            q_weight_k: 0,
+            k_weight_k: 0,
         };
 
         // Process sequence: BOS (1), "Hello" (15043), then 1 decode step
@@ -127,7 +142,7 @@ mod layer_dump_tests {
                 let layer_offsets = model
                     .metadata
                     .get_layer_offsets(layer_idx, "tinyllama")
-                    .expect(&format!("Layer {} offsets not found", layer_idx));
+                    .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
 
                 layer_input = pipeline.run_layer_with_cache(
                     &device,
@@ -158,7 +173,7 @@ mod layer_dump_tests {
             }
 
             // Increment cache
-            kv_cache.increment();
+            let _ = kv_cache.increment();
             position_data["cache_len_after"] = serde_json::json!(kv_cache.get_seq_len());
 
             all_results["positions"]
@@ -189,7 +204,7 @@ mod layer_dump_tests {
             let layer_offsets = model
                 .metadata
                 .get_layer_offsets(layer_idx, "tinyllama")
-                .expect(&format!("Layer {} offsets not found", layer_idx));
+                .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
 
             layer_input = pipeline.run_layer_with_cache(
                 &device,

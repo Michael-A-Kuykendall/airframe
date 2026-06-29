@@ -295,6 +295,7 @@ mod tests {
             timestamp: chrono::Utc::now().to_rfc3339(),
             tool_calls: None,
             tool_results: None,
+            kv_snapshot: None,
         };
 
         storage.store_message("session1", &msg).unwrap();
@@ -324,6 +325,7 @@ mod tests {
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 tool_calls: None,
                 tool_results: None,
+                kv_snapshot: None,
             };
             storage.store_message("session1", &msg).unwrap();
             // Small delay to ensure different timestamps

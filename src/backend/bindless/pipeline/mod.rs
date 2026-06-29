@@ -41,8 +41,9 @@ pub struct MatMulParams {
 pub struct RMSNormParams {
     pub count: u32,
     pub weights_offset: u32,
+    pub bias_offset: u32, // 0 = disabled; otherwise word index (byte_offset / 4)
     pub eps: f32,
-    pub padding: u32,
+    pub norm_type: u32, // 0 = RMSNorm, 1 = LayerNorm (mean+variance)
 }
 
 /// Offsets for a single Transformer Layer (TinyLlama/Llama 2).
@@ -51,17 +52,24 @@ pub struct RMSNormParams {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LayerOffsets {
     pub attn_norm: u32,
+    pub attn_norm_bias: u32, // byte offset of attn norm bias (F32); 0 = disabled
     pub attn_q: u32,
     pub attn_k: u32,
     pub attn_v: u32,
     pub attn_out: u32,
     pub ffn_norm: u32,
+    pub ffn_norm_bias: u32, // byte offset of ffn norm bias (F32); 0 = disabled
     pub ffn_gate: u32,
     pub ffn_down: u32,
     pub ffn_up: u32,
-    pub layer_idx: u32,        // was padding[0] — layer index for norm_bank lookup
-    pub attn_q_norm: u32,      // byte offset of Q-norm weights in GGUF blob (0 = disabled)
-    pub attn_k_norm: u32,      // byte offset of K-norm weights in GGUF blob (0 = disabled)
+    pub layer_idx: u32,       // was padding[0] — layer index for norm_bank lookup
+    pub attn_q_norm: u32,     // byte offset of Q-norm weights in GGUF blob (0 = disabled)
+    pub attn_k_norm: u32,     // byte offset of K-norm weights in GGUF blob (0 = disabled)
+    pub attn_q_bias: u32,     // byte offset of Q bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    pub attn_k_bias: u32,     // byte offset of K bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    pub attn_v_bias: u32,     // byte offset of V bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    pub v_is_q4k: u32,        // 1 if attn_v uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
+    pub ffn_down_is_q4k: u32, // 1 if ffn_down uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
 }
 
 #[repr(C)]
@@ -71,36 +79,66 @@ pub struct LayerParams {
     pub head_count: u32,
     pub head_count_kv: u32,
     pub head_dim: u32,
+    pub rope_dim: u32,
     pub rms_eps: f32,
     pub ffn_dim: u32, // Feed-forward intermediate dimension (e.g. 5632 for TinyLlama)
     pub temp_stride: u32, // Per-token temp buffer stride in floats (e.g. 16384)
-    pub quant_type: u32, // GGML type: 2=Q4_0, 12=Q4_K
+    pub quant_qk: u32, // attn_q / attn_k
+    pub quant_v: u32, // attn_v
+    pub quant_attn_out: u32, // attn_output
+    pub quant_ffn_down: u32, // ffn_down
+    pub quant_ffn_gate: u32, // ffn_gate
+    pub quant_ffn_up: u32, // ffn_up
+    // (old quant_type removed; use per-tensor selectors above for FSE dispatch)
     pub attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
     pub post_norm_enabled: u32,  // 1 = apply post-attn and post-ffw norm (Gemma-2); 0 = disabled
     pub qk_norm_enabled: u32,    // 1 = apply per-head Q/K RMSNorm before RoPE (Qwen3); 0 = disabled
+    pub layer_norm_enabled: u32, // 1 = use LayerNorm math in layer norms (Phi-family)
+    pub ffn_kind_policy: u32,    // 0 = infer from offsets (compat), 1 = gated, 2 = non-gated
+    pub qkv_layout_policy: u32,  // 0 = infer from offsets (compat), 1 = separate, 2 = fused
+    /// Micro-batch offset: first token index in this QKV chunk (0 for non-chunked dispatches)
+    pub batch_offset: u32,
+    /// Micro-batch count: number of tokens in this QKV chunk (== batch_size for non-chunked)
+    pub batch_count: u32,
+    /// Stored K (in-dim) for attn_q.weight tensor (packed Qwen3 GGUF etc; 0 = use dim; for correct blocks_per_row/stride in Q4K qkv stage 0)
+    pub q_weight_k: u32,
+    /// Stored K for attn_k.weight (packed case)
+    pub k_weight_k: u32,
 }
 
 /// Uniform params for the quantize_kv.wgsl dispatch (TurboQuant).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct QuantizeKvParams {
-    pub n_head_kv:  u32,  // Number of KV heads
-    pub head_dim:   u32,  // Elements per head-vector (must be multiple of 8)
-    pub pos_offset: u32,  // Base position: actual pos = pos_offset + global_id.y
-    pub _pad:       u32,
+    pub n_head_kv: u32,  // Number of KV heads
+    pub head_dim: u32,   // Elements per head-vector (must be multiple of 8)
+    pub pos_offset: u32, // Base position: actual pos = pos_offset + global_id.y
+    pub _pad: u32,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CacheParams {
-    pub current_pos: u32, // Position to write new K/V (0-based)
-    pub seq_len: u32,     // Total cached positions (current_pos + 1)
-    pub max_seq_len: u32, // 2048 (context window)
-    pub batch_size: u32,  // Number of tokens in current batch
+    pub current_pos: u32,      // Position to write new K/V (0-based)
+    pub seq_len: u32,          // Total cached positions (current_pos + 1)
+    pub max_seq_len: u32,      // 2048 (context window)
+    pub batch_size: u32,       // Number of tokens in current batch
     pub logical_pos_base: u32, // Logical base of the compacted sliding window
     pub pad1: u32,
     pub pad2: u32,
     pub pad3: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct HeadBlobParams {
+    pub vocab_size: u32, // rows of output.weight (= n_vocab)
+    pub dim: u32,        // cols of output.weight (= n_embd)
+    pub weight_off: u32, // word offset (byte_offset / 4) of output.weight inside the GGUF blob
+    pub quant_type: u32, // GGML type: 0=F32 1=F16 2=Q4_0 8=Q8_0 12=Q4_K 13=Q5_K 14=Q6_K
+    pub softcap: f32,    // final_logit_softcap (0.0 = disabled)
+    pub base_row: u32,   // output row offset for dispatch splitting (TDR tiles)
+    pub _pad: u32,
 }
 
 /// Pre-compiled per-layer lookup table entry.
@@ -111,9 +149,12 @@ pub struct CacheParams {
 pub struct CompiledLayerEntry {
     /// All tensor byte-offsets for this layer, ready to upload to GPU.
     pub offsets: LayerOffsets,
-    /// Packed quant types: bits[7:0]=attn_q, bits[15:8]=attn_v, bits[23:16]=ffn_down.
-    /// Matches the `quant_type` field layout expected by LayerParams.
-    pub quant_type_packed: u32,
+    pub quant_qk: u32,
+    pub quant_v: u32,
+    pub quant_attn_out: u32,
+    pub quant_ffn_down: u32,
+    pub quant_ffn_gate: u32,
+    pub quant_ffn_up: u32,
 }
 
 /// The Control Plane for Bindless Inference.
@@ -122,6 +163,10 @@ pub struct BindlessPipeline {
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub dequant_pipeline: wgpu::ComputePipeline,
     pub dequant_bind_group_layout: wgpu::BindGroupLayout,
+    /// Pre-compiled multi-type dequant pipeline (Q4_0/Q8_0/Q4_K/Q5_K/Q6_K/F16/F32).
+    /// Hot-path safe — compiled once at startup, reused for all embedding dequants.
+    pub dequant_any_pipeline: wgpu::ComputePipeline,
+    pub dequant_any_bind_group_layout: wgpu::BindGroupLayout,
     pub matmul_pipeline: wgpu::ComputePipeline,
     pub matmul_layout: wgpu::BindGroupLayout,
     pub matmul_f32_pipeline: wgpu::ComputePipeline,
@@ -135,11 +180,16 @@ pub struct BindlessPipeline {
     pub layer_pipeline_qk_norm: wgpu::ComputePipeline,
     pub layer_pipeline_attn_out: wgpu::ComputePipeline,
     pub layer_pipeline_attn_proj: wgpu::ComputePipeline,
+    pub layer_pipeline_ffn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_ffn_proj: wgpu::ComputePipeline,
     pub layer_pipeline_ffn_down: wgpu::ComputePipeline,
     pub layer_pipeline_post_attn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_post_ffw_norm: wgpu::ComputePipeline,
     pub layer_layout: wgpu::BindGroupLayout,
+
+    // Blob-based LM head pipeline (quantized matmul, reads directly from GGUF blob)
+    pub lm_head_blob_pipeline: wgpu::ComputePipeline,
+    pub lm_head_blob_layout: wgpu::BindGroupLayout,
 
     // INT4 KV Cache pipelines (TurboQuant — feat/turboquant-wgsl)
     // Compiled unconditionally at startup; selected at runtime by SHIMMY_KV_QUANT=int4.
@@ -150,7 +200,6 @@ pub struct BindlessPipeline {
 }
 
 impl BindlessPipeline {
-
     /// Creates the pipeline with a "Probe" kernel to verify connectivity.
     pub fn new(device: &wgpu::Device) -> Self {
         // --- 1. Probe Pipeline ---
@@ -283,6 +332,66 @@ impl BindlessPipeline {
             compilation_options: Default::default(),
             cache: None,
         });
+
+        // --- 4b. DequantAny Pipeline (pre-compiled, hot-path safe) ---
+        // Same binding layout as dequant_layout but uses sh_dequant_any.wgsl
+        // which dispatches on quant_type: Q4_0/Q8_0/Q4_K/Q5_K/Q6_K/F16/F32.
+        // Used for token_embd.weight which may be Q4_K on mixed-quant models.
+        let dequant_any_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("DequantAny Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let dequant_any_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("DequantAny Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../sh_dequant_any.wgsl").into()),
+        });
+        let dequant_any_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("DequantAny Pipeline Layout"),
+                bind_group_layouts: &[&dequant_any_layout],
+                push_constant_ranges: &[],
+            });
+        let dequant_any_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("DequantAny Pipeline"),
+                layout: Some(&dequant_any_pipeline_layout),
+                module: &dequant_any_shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
         // --- 5. MatMul Pipeline ---
         // Bindings: 0=GGUF Blob read-only, 1=Input Vector read-only,
@@ -482,6 +591,28 @@ impl BindlessPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    // GGUF Blob chunk 1: bytes [2GB, 4GB)
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    // GGUF Blob chunk 2: bytes [4GB, end)
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -624,6 +755,28 @@ impl BindlessPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    // GGUF Blob chunk 1: bytes [2GB, 4GB)
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    // GGUF Blob chunk 2: bytes [4GB, end)
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -656,10 +809,102 @@ impl BindlessPipeline {
         let layer_pipeline_qk_norm = mk_pipeline("main_qk_norm");
         let layer_pipeline_attn_out = mk_pipeline("main_attn_out");
         let layer_pipeline_attn_proj = mk_pipeline("main_attn_proj");
+        let layer_pipeline_ffn_norm = mk_pipeline("main_ffn_norm");
         let layer_pipeline_ffn_proj = mk_pipeline("main_ffn_proj");
         let layer_pipeline_ffn_down = mk_pipeline("main_ffn_down");
         let layer_pipeline_post_attn_norm = mk_pipeline("main_post_attn_norm");
         let layer_pipeline_post_ffw_norm = mk_pipeline("main_post_ffw_norm");
+
+        // --- LM Head (blob-based quantized matmul) ---
+        // Layout: binding 0 = blob_0, 1 = act_in (read), 2 = logits (write), 3 = params,
+        //         10 = blob_1, 11 = blob_2
+        let lm_head_blob_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("LM Head Blob Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 10,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 11,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let lm_head_blob_src = include_str!("../sh_head_blob.wgsl");
+        let lm_head_blob_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("LM Head Blob Shader"),
+            source: wgpu::ShaderSource::Wgsl(lm_head_blob_src.into()),
+        });
+        let lm_head_blob_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("LM Head Blob Pipeline Layout"),
+                bind_group_layouts: &[&lm_head_blob_layout],
+                push_constant_ranges: &[],
+            });
+        let lm_head_blob_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("LM Head Blob Pipeline"),
+                layout: Some(&lm_head_blob_pipeline_layout),
+                module: &lm_head_blob_shader,
+                entry_point: Some("main_lm_head"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
         // --- 8. INT4 KV Cache Layout (bindings 0-13) ---
         // Bindings 0-9 identical to layer_layout.
@@ -710,16 +955,106 @@ impl BindlessPipeline {
         // (re-use the 10 base entries from layer_layout pattern)
         let layer_layout_int4 = {
             let base = [
-                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true },  min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true },  min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 6, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true },  min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 7, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 8, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 9, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, min_binding_size: None, has_dynamic_offset: false }, count: None },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
                 int4_extra_entries[0],
                 int4_extra_entries[1],
                 int4_extra_entries[2],
@@ -741,28 +1076,93 @@ impl BindlessPipeline {
             bind_group_layouts: &[&layer_layout_int4],
             push_constant_ranges: &[],
         });
-        let layer_pipeline_attn_out_int4 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Layer V1 INT4 attn_out Pipeline"),
-            layout: Some(&int4_pipeline_layout),
-            module: &int4_shader,
-            entry_point: Some("main_attn_out_int4"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let layer_pipeline_attn_out_int4 =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Layer V1 INT4 attn_out Pipeline"),
+                layout: Some(&int4_pipeline_layout),
+                module: &int4_shader,
+                entry_point: Some("main_attn_out_int4"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
         // --- 9. Quantize KV Pipeline (7 bindings: f32_k, f32_v, packed_k, packed_v, scale_k, scale_v, params) ---
-        let quantize_kv_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Quantize KV Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true },  min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true },  min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, min_binding_size: None, has_dynamic_offset: false }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 6, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, min_binding_size: None, has_dynamic_offset: false }, count: None },
-            ],
-        });
+        let quantize_kv_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Quantize KV Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
         let quant_kv_src = include_str!("../sh_quantize_kv.wgsl");
         let quant_kv_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Quantize KV Shader"),
@@ -773,20 +1173,23 @@ impl BindlessPipeline {
             bind_group_layouts: &[&quantize_kv_layout],
             push_constant_ranges: &[],
         });
-        let quantize_kv_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Quantize KV Pipeline"),
-            layout: Some(&quant_kv_pl_layout),
-            module: &quant_kv_shader,
-            entry_point: Some("quantize_kv"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let quantize_kv_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Quantize KV Pipeline"),
+                layout: Some(&quant_kv_pl_layout),
+                module: &quant_kv_shader,
+                entry_point: Some("quantize_kv"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
         Self {
             pipeline,
             bind_group_layout,
             dequant_pipeline,
             dequant_bind_group_layout: dequant_layout,
+            dequant_any_pipeline,
+            dequant_any_bind_group_layout: dequant_any_layout,
             matmul_pipeline,
             matmul_layout,
             matmul_f32_pipeline,
@@ -798,11 +1201,14 @@ impl BindlessPipeline {
             layer_pipeline_qk_norm,
             layer_pipeline_attn_out,
             layer_pipeline_attn_proj,
+            layer_pipeline_ffn_norm,
             layer_pipeline_ffn_proj,
             layer_pipeline_ffn_down,
             layer_pipeline_post_attn_norm,
-            layer_pipeline_post_ffw_norm,
+            layer_pipeline_post_ffw_norm: layer_pipeline_post_ffw_norm.clone(),
             layer_layout,
+            lm_head_blob_pipeline,
+            lm_head_blob_layout,
             layer_layout_int4,
             layer_pipeline_attn_out_int4,
             quantize_kv_layout,
@@ -818,7 +1224,9 @@ impl BindlessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
 
         loop {
-            device.poll(wgpu::PollType::Poll).expect("GPU device lost during readback poll");
+            device
+                .poll(wgpu::PollType::Poll)
+                .expect("GPU device lost during readback poll");
             if let Ok(res) = rx.try_recv() {
                 res.expect("Buffer map failed");
                 break;
@@ -833,15 +1241,15 @@ impl BindlessPipeline {
     }
 }
 
-
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     /// Workgroup ceil-div: (n + 255) / 256 must match the dispatch sizing used throughout.
     #[test]
     fn workgroup_ceil_div_rounds_up_correctly() {
         assert_eq!((256 + 255) / 256, 1); // exact multiple
         assert_eq!((257 + 255) / 256, 2); // one over
-        assert_eq!((1 + 255) / 256, 1);   // minimum
+        assert_eq!((1 + 255) / 256, 1); // minimum
         assert_eq!((512 + 255) / 256, 2); // exact double
     }
 
@@ -862,5 +1270,57 @@ mod tests {
             let idx = pos % ctx;
             assert!(idx < ctx, "ring index {idx} out of bounds for ctx={ctx}");
         }
+    }
+}
+
+// ─── ISF Integration Spec (vault-derived, no model runs needed!) ──────────
+/// Derive TDR risk from model metadata (no model runs!)
+pub fn derive_tdr_risk_from_metadata(n_vocab: usize) -> &'static str {
+    if n_vocab > 200_000 {
+        "High"
+    } else if n_vocab > 100_000 {
+        "Medium"
+    } else {
+        "Low"
+    }
+}
+
+/// Compute max safe workgroups for head blob dispatch from vault metadata  
+pub fn compute_max_safe_workgroups(n_vocab: usize, budget_ms: f64) -> u32 {
+    let head_wgs = n_vocab / 32; // 32 tokens per WG
+    if head_wgs > 4000 {
+        ((budget_ms * 1_000_000.0 - 500.0) / 500.0)
+            .min(head_wgs as f64)
+            .max(1.0) as u32
+    } else {
+        ((budget_ms * 1_000_000.0 - 500.0) / 100.0)
+            .min(head_wgs as f64)
+            .max(1.0) as u32
+    }
+}
+
+#[allow(clippy::items_after_test_module)]
+/// ISF Rule: YieldNow — derived from TDR risk and dispatch timing
+pub fn should_yield_now(gpu_ms: f64, n_vocab: usize) -> bool {
+    let risk = derive_tdr_risk_from_metadata(n_vocab);
+    match risk {
+        "High" => gpu_ms > 10.0,
+        "Medium" => gpu_ms > 20.0,
+        _ => gpu_ms > 50.0,
+    }
+}
+
+/// ISF Rule: IncreaseTileCount — when head consistently close to budget  
+pub fn should_increase_tiles(current_wgs: u32, n_vocab: usize) -> bool {
+    let max_safe = compute_max_safe_workgroups(n_vocab, 100.0); // 100ms default budget
+    (current_wgs as f64 / (max_safe.max(1) as f64)) > 0.8
+}
+
+/// Risk level string for logging/debugging (for ISF fact emission)
+pub fn risk_level_string(n_vocab: usize) -> String {
+    match derive_tdr_risk_from_metadata(n_vocab) {
+        "High" => "TDR_RISK_HIGH".to_string(),
+        "Medium" => "TDR_RISK_MEDIUM".to_string(),
+        _ => "TDR_RISK_LOW".to_string(),
     }
 }

@@ -56,7 +56,8 @@ impl Tool for ReadImageTool {
         };
         
         // Base64 encode the image
-        let base64 = base64::encode(&bytes);
+        use base64::Engine as _;
+        let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         
         // Build response based on mode
         match mode {
@@ -112,135 +113,74 @@ impl Tool for ReadImageTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{ToolArgs, ExecutionContext};
-    use std::collections::HashMap;
     use std::fs;
+
+    fn make_args(pairs: &[(&str, &str)]) -> ToolArgs {
+        let mut args = ToolArgs::new();
+        for (k, v) in pairs {
+            args.args.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+        }
+        args
+    }
 
     #[tokio::test]
     async fn test_read_image_missing_path() {
         let tool = ReadImageTool;
-        let args = ToolArgs {
-            parameters: HashMap::new(),
-            context: ExecutionContext {
-                working_directory: ".".to_string(),
-                user_id: None,
-                session_id: "test".to_string(),
-            },
-        };
-        
-        let result = tool.execute(args).await;
+        let result = tool.execute(ToolArgs::new()).await;
         assert!(result.is_err());
         match result {
-            Err(ToolError::MissingArgument(msg)) => {
-                assert!(msg.contains("path"));
-            }
-            _ => panic!("Expected InvalidParameters error"),
+            Err(ToolError::MissingArgument(msg)) => assert!(msg.contains("path")),
+            _ => panic!("Expected MissingArgument error"),
         }
     }
 
     #[tokio::test]
     async fn test_read_image_invalid_mode() {
         let tool = ReadImageTool;
-        let mut params = HashMap::new();
-        params.insert("path".to_string(), "test.png".to_string());
-        params.insert("mode".to_string(), "invalid".to_string());
-        
-        let args = ToolArgs {
-            parameters: params,
-            context: ExecutionContext {
-                working_directory: ".".to_string(),
-                user_id: None,
-                session_id: "test".to_string(),
-            },
-        };
-        
+        let args = make_args(&[("path", "test.png"), ("mode", "invalid")]);
         let result = tool.execute(args).await;
         assert!(result.is_err());
         match result {
-            Err(ToolError::MissingArgument(msg)) => {
-                assert!(msg.contains("Invalid mode"));
-            }
-            _ => panic!("Expected InvalidParameters error"),
+            Err(ToolError::InvalidArgument(_, msg)) => assert!(msg.contains("invalid")),
+            _ => panic!("Expected InvalidArgument error"),
         }
     }
 
     #[tokio::test]
     async fn test_read_image_file_not_found() {
         let tool = ReadImageTool;
-        let mut params = HashMap::new();
-        params.insert("path".to_string(), "nonexistent.png".to_string());
-        
-        let args = ToolArgs {
-            parameters: params,
-            context: ExecutionContext {
-                working_directory: std::env::temp_dir().to_string_lossy().to_string(),
-                user_id: None,
-                session_id: "test".to_string(),
-            },
-        };
-        
+        let args = make_args(&[("path", "nonexistent_shimmy_test_12345.png")]);
         let result = tool.execute(args).await;
         assert!(result.is_err());
         match result {
-            Err(ToolError::ExecutionFailed(msg)) => {
-                assert!(msg.contains("Failed to read"));
-            }
+            Err(ToolError::ExecutionFailed(msg)) => assert!(msg.contains("Failed to read")),
             _ => panic!("Expected ExecutionFailed error"),
         }
     }
 
     #[tokio::test]
     async fn test_read_image_success() {
-        // Create a minimal 1x1 PNG image for testing
+        // Use a real valid PNG — create it via the image crate
         let temp_dir = std::env::temp_dir();
-        let test_image_path = temp_dir.join("test_image_shimmy.png");
-        
-        // 1x1 red PNG (minimal valid PNG)
-        let png_bytes = vec![
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
-            0x00, 0x00, 0x00, 0x0D, // IHDR chunk length
-            0x49, 0x48, 0x44, 0x52, // IHDR
-            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
-            0x08, 0x02, 0x00, 0x00, 0x00, // bit depth 8, RGB
-            0x90, 0x77, 0x53, 0xDE, // CRC
-            0x00, 0x00, 0x00, 0x0C, // IDAT chunk length
-            0x49, 0x44, 0x41, 0x54, // IDAT
-            0x08, 0x99, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00,
-            0x18, 0xDD, 0x8D, 0xB4, // CRC
-            0x00, 0x00, 0x00, 0x00, // IEND chunk length
-            0x49, 0x45, 0x4E, 0x44, // IEND
-            0xAE, 0x42, 0x60, 0x82, // CRC
-        ];
-        
-        fs::write(&test_image_path, &png_bytes).unwrap();
-        
+        let test_image_path = temp_dir.join("test_image_shimmy_valid.png");
+
+        // Create a 2x2 red image using the image crate (already a dependency)
+        let img = image::RgbImage::from_fn(2, 2, |_, _| image::Rgb([255u8, 0u8, 0u8]));
+        img.save(&test_image_path).expect("Should save test image");
+
         let tool = ReadImageTool;
-        let mut params = HashMap::new();
-        params.insert("path".to_string(), test_image_path.to_string_lossy().to_string());
-        
-        let args = ToolArgs {
-            parameters: params,
-            context: ExecutionContext {
-                working_directory: temp_dir.to_string_lossy().to_string(),
-                user_id: None,
-                session_id: "test".to_string(),
-            },
-        };
-        
+        let args = make_args(&[("path", &test_image_path.to_string_lossy())]);
         let result = tool.execute(args).await;
-        assert!(result.is_ok());
-        
-        let tool_result = result.unwrap();
-        assert!(tool_result.success);
-        assert!(tool_result.data.is_some());
-        
-        let data = tool_result.data.unwrap();
+        assert!(result.is_ok(), "Expected Ok but got: {:?}", result);
+        let tr = result.unwrap();
+        assert!(tr.success);
+        assert!(tr.data.is_some());
+        let data = tr.data.unwrap();
         assert!(data.get("mime").is_some());
-        assert_eq!(data.get("width").and_then(|v| v.as_u64()), Some(1));
-        assert_eq!(data.get("height").and_then(|v| v.as_u64()), Some(1));
         assert!(data.get("base64").is_some());
-        
-        // Cleanup
+        assert_eq!(data.get("width").and_then(|v| v.as_u64()), Some(2));
+        assert_eq!(data.get("height").and_then(|v| v.as_u64()), Some(2));
+
         fs::remove_file(&test_image_path).ok();
     }
 }

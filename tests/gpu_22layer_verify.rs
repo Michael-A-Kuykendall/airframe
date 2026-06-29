@@ -109,19 +109,32 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
         head_dim: (spec.n_embd / spec.n_head) as u32,
+        rope_dim: spec.rope_dim as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: 5632,
         temp_stride: 16384,
-        quant_type: 0,
+        quant_qk: 0,
+        quant_v: 0,
+        quant_attn_out: 0,
+        quant_ffn_down: 0,
+        quant_ffn_gate: 0,
+        quant_ffn_up: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
+        layer_norm_enabled: 0,
+        ffn_kind_policy: 0,
+        qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 1,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);
 
     // Process tokens: [1 (BOS), 15043 ("Hello")]
-    let tokens = vec![1u32, 15043u32];
+    let tokens = [1u32, 15043u32];
     let embd_weight_offset = gpu_model
         .metadata
         .get_tensor_offset("token_embd.weight")
@@ -143,7 +156,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
         let layer_offsets = gpu_model
             .metadata
             .get_layer_offsets(layer_idx, "tinyllama")
-            .expect(&format!("Layer {} not found", layer_idx));
+            .unwrap_or_else(|| panic!("Layer {} not found", layer_idx));
         layer_output = pipeline.run_layer_with_cache(
             &device,
             &queue,
@@ -155,7 +168,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
             layer_params,
         );
     }
-    kv_cache.increment(); // Increment once after all layers process the token
+    let _ = kv_cache.increment(); // Increment once after all layers process the token
     println!("      ✓ BOS processed through all 22 layers");
 
     // Process "Hello" token (position 1) - VERIFY THESE OUTPUTS
@@ -180,7 +193,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
         let layer_offsets = gpu_model
             .metadata
             .get_layer_offsets(layer_idx, "tinyllama")
-            .expect(&format!("Layer {} not found", layer_idx));
+            .unwrap_or_else(|| panic!("Layer {} not found", layer_idx));
 
         // DIAGNOSTIC: Print input state for first 2 layers
         if layer_idx <= 1 {
@@ -231,11 +244,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
             let layer_idx_shader = layer_output[2047] as u32;
 
             println!("   [SHADER READBACK] Layer {}:", layer_idx);
-            println!(
-                "      seq_len = {} (expected: {})",
-                seq_len_shader,
-                if layer_idx == 0 { 2 } else { 2 }
-            );
+            println!("      seq_len = {} (expected: {})", seq_len_shader, 2);
             println!(
                 "      current_pos = {} (expected: {})",
                 current_pos_shader, 1
@@ -282,7 +291,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
         // Compare against oracle
         let (oracle_rms, oracle_first20) = oracle
             .get(&layer_idx)
-            .expect(&format!("Oracle for layer {} not found", layer_idx));
+            .unwrap_or_else(|| panic!("Oracle for layer {} not found", layer_idx));
 
         let shimmy_rms = calc_rms(&layer_output);
         let rms_diff = (oracle_rms - shimmy_rms).abs();
@@ -314,7 +323,7 @@ async fn test_gpu_22layer_verification() -> Result<(), Box<dyn std::error::Error
             // );
         }
     }
-    kv_cache.increment(); // Increment once after all layers process the token
+    let _ = kv_cache.increment(); // Increment once after all layers process the token
 
     println!("\n{}", "=".repeat(90));
     println!("[7/7] === VERDICT ===");

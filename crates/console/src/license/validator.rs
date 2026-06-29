@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+#[allow(dead_code)]
 pub struct LicenseValidator {
     client: UniversalLicenseClient,
     cache: LicenseCache,
 }
 
+#[allow(dead_code)]
 pub struct UniversalLicenseClient {
     base_url: String,
     product_id: String,

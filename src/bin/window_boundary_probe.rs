@@ -93,8 +93,7 @@ fn make_noise_words(count: usize, prefix: &str) -> String {
     if count == 0 {
         String::new()
     } else {
-        std::iter::repeat(token.to_string())
-            .take(count)
+        std::iter::repeat_n(token.to_string(), count)
             .collect::<Vec<_>>()
             .join(" ")
     }

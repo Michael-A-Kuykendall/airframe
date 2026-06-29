@@ -17,29 +17,29 @@ pub fn shannon_entropy(probs: &[f32]) -> f32 {
 pub fn shannon_entropy_from_logits(logits: &[f32]) -> f32 {
     // 1. Find max for numerical stability
     let max_logit = logits.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-    
+
     // 2. Compute sum(exp(x - max))
     let mut sum_exp = 0.0;
     for &logit in logits {
         sum_exp += (logit - max_logit).exp();
     }
-    
+
     // 3. Compute log_sum_exp
     // log(sum(exp(x_i))) = max + log(sum(exp(x_i - max)))
     let log_z = max_logit + sum_exp.ln();
-    
+
     // 4. Compute entropy: - sum(p * log(p))
     // p = exp(x - log_z)
     // log(p) = x - log_z
     // entropy = - sum(exp(x - log_z) * (x - log_z))
-    
+
     let mut entropy = 0.0;
     for &logit in logits {
         let log_p = logit - log_z;
         let p = log_p.exp();
         entropy -= p * log_p;
     }
-    
+
     entropy
 }
 
@@ -48,11 +48,13 @@ pub fn shannon_entropy_from_logits(logits: &[f32]) -> f32 {
 #[inline]
 pub fn logit_variance(logits: &[f32]) -> f32 {
     let n = logits.len() as f32;
-    if n == 0.0 { return 0.0; }
-    
+    if n == 0.0 {
+        return 0.0;
+    }
+
     let mean = logits.iter().sum::<f32>() / n;
     let sum_sq_diff: f32 = logits.iter().map(|&x| (x - mean).powi(2)).sum();
-    
+
     sum_sq_diff / n
 }
 

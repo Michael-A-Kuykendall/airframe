@@ -1,8 +1,8 @@
 // src/store.rs
 
 use crate::{ControlOp, FseOpcode, Rule};
-use aho_corasick::dfa::DFA;
 use aho_corasick::automaton::Automaton;
+use aho_corasick::dfa::DFA;
 use aho_corasick::Anchored;
 use std::collections::VecDeque;
 
@@ -15,10 +15,19 @@ pub struct ActionRange {
 #[derive(Clone, Copy, Debug)]
 pub enum PackedAction {
     Ignore,
-    Record { word_idx: u16, bit_mask: u64 },
-    Reject { rule_id: u32, pattern_index: u32, pattern_len: u16 },
+    Record {
+        word_idx: u16,
+        bit_mask: u64,
+    },
+    Reject {
+        rule_id: u32,
+        pattern_index: u32,
+        pattern_len: u16,
+    },
     ControlResetRuleState,
-    IntegrityError { pattern_index: u32 },
+    IntegrityError {
+        pattern_index: u32,
+    },
 }
 
 /// FseMap: compiled DFA + dense opcode table + fused action tables.
@@ -70,7 +79,6 @@ impl FseMap {
         })
     }
 
-
     #[inline]
     pub fn dfa(&self) -> &DFA {
         &self.dfa
@@ -79,9 +87,13 @@ impl FseMap {
     #[inline]
     pub fn actions_for_state(&self, sid: aho_corasick::automaton::StateID) -> &[PackedAction] {
         let idx = sid.as_usize();
-        if idx >= self.state_actions.len() { return &[]; }
+        if idx >= self.state_actions.len() {
+            return &[];
+        }
         let r = self.state_actions[idx];
-        if r.len == 0 { return &[]; }
+        if r.len == 0 {
+            return &[];
+        }
         let start = r.start as usize;
         let end = start + (r.len as usize);
         &self.actions[start..end]
@@ -104,10 +116,16 @@ impl FseMap {
     /// Initialise a fresh `ScanCursor` at the DFA start state.
     pub fn new_cursor(&self) -> Result<crate::scanner::ScanCursor, crate::scanner::ScanError> {
         use aho_corasick::automaton::Automaton;
-        let sid = self.dfa.start_state(aho_corasick::Anchored::No)
+        let sid = self
+            .dfa
+            .start_state(aho_corasick::Anchored::No)
             .map_err(crate::scanner::ScanError::StartState)?;
         let words = self.rule_count.saturating_add(63) / 64;
-        Ok(crate::scanner::ScanCursor { sid, rule_bits: vec![0u64; words], rules_recorded: 0 })
+        Ok(crate::scanner::ScanCursor {
+            sid,
+            rule_bits: vec![0u64; words],
+            rules_recorded: 0,
+        })
     }
 
     /// Advance `cursor` over `input` bytes using the compiled DFA + opcode table.
@@ -126,13 +144,15 @@ impl FseMap {
         let aut = &self.dfa;
         let mut sid = cursor.sid;
         let mut match_states_seen: u64 = 0;
-        let mut pattern_hits:      u64 = 0;
+        let mut pattern_hits: u64 = 0;
 
         for (at, &b) in input.iter().enumerate() {
             sid = aut.next_state(aho_corasick::Anchored::No, sid, b);
 
             let acts = self.actions_for_state(sid);
-            if acts.is_empty() { continue; }
+            if acts.is_empty() {
+                continue;
+            }
 
             match_states_seen += 1;
             let end = at + 1;
@@ -155,7 +175,11 @@ impl FseMap {
                             });
                         }
                     }
-                    PackedAction::Reject { rule_id, pattern_index, pattern_len } => {
+                    PackedAction::Reject {
+                        rule_id,
+                        pattern_index,
+                        pattern_len,
+                    } => {
                         let start = end.saturating_sub(pattern_len as usize);
                         cursor.sid = sid;
                         return Err(crate::scanner::Violation::PolicyReject {
@@ -181,11 +205,11 @@ impl FseMap {
 
         cursor.sid = sid;
         Ok(crate::scanner::ScanSummary {
-            bytes_scanned:       input.len(),
+            bytes_scanned: input.len(),
             match_states_seen,
             pattern_hits,
-            rules_recorded:      cursor.rules_recorded,
-            rules_rejected:      0,
+            rules_recorded: cursor.rules_recorded,
+            rules_rejected: 0,
         })
     }
 }
@@ -196,7 +220,8 @@ fn build_state_tables(
 ) -> Result<(Vec<ActionRange>, Vec<PackedAction>), BuildError> {
     let aut = dfa;
 
-    let start = aut.start_state(Anchored::No)
+    let start = aut
+        .start_state(Anchored::No)
         .map_err(BuildError::StartState)?;
 
     // BFS to discover reachable states
@@ -217,7 +242,9 @@ fn build_state_tables(
             if !seen[u] {
                 seen[u] = true;
                 q.push_back(ns);
-                if u > max_sid { max_sid = u; }
+                if u > max_sid {
+                    max_sid = u;
+                }
             }
         }
     }
@@ -229,8 +256,10 @@ fn build_state_tables(
     // Note: iterating 0..=max_sid assumes StateID::from_usize is valid/safe for these indices
     // because they were returned by next_state() previously.
     for sid_usize in 0..=max_sid {
-        if sid_usize >= seen.len() || !seen[sid_usize] { continue; }
-        
+        if sid_usize >= seen.len() || !seen[sid_usize] {
+            continue;
+        }
+
         // Safety: We only iterate indices we discovered from the DFA itself.
         // Aho-corasick StateID is generally just an index wrapper.
         // If StateID info is hidden we loop over q... but here we assume indexability.
@@ -241,15 +270,15 @@ fn build_state_tables(
         // Let's refine: We iterate over all valid StateIDs. Since we cannot forge them easily,
         // we'll actually use the queue to build the map, or we accept that we need to store them.
     }
-    
+
     // Correct Approach: Re-traverse or just collect unique StateIDs into a list during BFS
     // Re-run the BFS logic but simplified to just collecting the list of unique SIDs.
     // Actually, we already set `seen`. But we can't map `i -> StateID`.
     // So we change the valid-loop above.
-    
+
     // REDO: Collect list of SIDs during BFS.
     let mut unique_sids = Vec::with_capacity(max_sid);
-    
+
     // Reset BFS
     let mut seen_bfs = vec![false; start.as_usize() + 1];
     let mut q_bfs = VecDeque::new();
@@ -274,11 +303,15 @@ fn build_state_tables(
 
     // Now populate tables
     for sid in unique_sids {
-        if !aut.is_match(sid) { continue; }
+        if !aut.is_match(sid) {
+            continue;
+        }
 
         let base = actions.len() as u32;
         let mlen = aut.match_len(sid);
-        if mlen == 0 { continue; }
+        if mlen == 0 {
+            continue;
+        }
 
         let mut rejects = Vec::new();
         let mut records = Vec::new();
@@ -288,17 +321,19 @@ fn build_state_tables(
             let pid = aut.match_pattern(sid, i);
             let pidx = pid.as_usize();
 
-            let op = opcodes.get(pidx).copied()
+            let op = opcodes
+                .get(pidx)
+                .copied()
                 .ok_or(BuildError::MissingOpcode(pidx))?;
 
             match op {
                 FseOpcode::Ignore => rest.push(PackedAction::Ignore),
                 FseOpcode::Record(rule_id) => {
-                     // Precompute bitmasks here
+                    // Precompute bitmasks here
                     let word_idx = (rule_id >> 6) as u16;
                     let bit_mask = 1u64 << (rule_id & 63);
                     records.push(PackedAction::Record { word_idx, bit_mask });
-                },
+                }
                 FseOpcode::Reject(rule_id) => {
                     let plen = aut.pattern_len(pid);
                     rejects.push(PackedAction::Reject {
@@ -349,9 +384,13 @@ impl core::fmt::Display for BuildError {
             BuildError::EmptyRuleSet => write!(f, "cannot compile empty rule set"),
             BuildError::EmptyPattern => write!(f, "cannot compile empty pattern"),
             BuildError::AhoBuild(e) => write!(f, "aho-corasick build error: {e}"),
-            BuildError::RuleIdTooLarge(id) => write!(f, "RuleId {id} exceeds maximum allowed (65535)"),
+            BuildError::RuleIdTooLarge(id) => {
+                write!(f, "RuleId {id} exceeds maximum allowed (65535)")
+            }
             BuildError::StartState(e) => write!(f, "failed to get start state: {e}"),
-            BuildError::MissingOpcode(idx) => write!(f, "internal error: missing opcode for pattern {idx}"),
+            BuildError::MissingOpcode(idx) => {
+                write!(f, "internal error: missing opcode for pattern {idx}")
+            }
         }
     }
 }

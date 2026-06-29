@@ -3,8 +3,6 @@
 //! This test writes a simple shader that reads uniforms and writes them to output.
 //! If this fails, the uniform binding is broken at the WGPU level.
 
-use wgpu;
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct TestUniforms {
@@ -32,7 +30,7 @@ async fn test_uniform_passthrough() -> Result<(), Box<dyn std::error::Error>> {
     let test_data = TestUniforms {
         value_a: 42,
         value_b: 12345,
-        value_c: 3.14159,
+        value_c: std::f32::consts::PI,
         padding: 0,
     };
 
@@ -173,13 +171,13 @@ fn main() {
     println!("      Shader wrote:");
     println!("      output[0] = {:.1} (expected 42.0)", results[0]);
     println!("      output[1] = {:.1} (expected 12345.0)", results[1]);
-    println!("      output[2] = {:.5} (expected 3.14159)", results[2]);
+    println!("      output[2] = {:.5} (expected PI)", results[2]);
     println!("      output[3] = {:.1} (expected 999.0)", results[3]);
 
     println!("\n[4/4] === VERDICT ===");
     let a_match = (results[0] - 42.0).abs() < 0.1;
     let b_match = (results[1] - 12345.0).abs() < 0.1;
-    let c_match = (results[2] - 3.14159).abs() < 0.01;
+    let c_match = (results[2] - std::f32::consts::PI).abs() < 0.01;
     let sentinel_match = (results[3] - 999.0).abs() < 0.1;
 
     if a_match && b_match && c_match && sentinel_match {

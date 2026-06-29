@@ -101,7 +101,7 @@ impl InferenceControl for FseControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::{ControlDecision, InferenceControl, InferenceEvent, NoopControl};
+    use crate::control::{ControlDecision, InferenceControl, InferenceEvent};
     use crate::runtime::kvcache::KvSnapshot;
     use libfse::{FseMap, FseOpcode, Rule};
 
@@ -118,10 +118,10 @@ mod tests {
 
     fn dummy_event<'a>(text: &'a str) -> InferenceEvent<'a> {
         InferenceEvent {
-            tokens:          &[],
+            tokens: &[],
             candidate_token: 0,
-            step:            0,
-            kv:              KvSnapshot { len: 0, version: 0 },
+            step: 0,
+            kv: KvSnapshot { len: 0, version: 0 },
             text,
         }
     }

@@ -74,7 +74,11 @@ impl PreflightResources {
         let n_pairs = dim / 2;
         let max_dist = spec.n_ctx;
 
-        let l_train = if scale < 1.0 { (max_dist as f32 * scale).round() as usize } else { max_dist };
+        let l_train = if scale < 1.0 {
+            (max_dist as f32 * scale).round() as usize
+        } else {
+            max_dist
+        };
         let alpha = spec.yarn_alpha;
         let beta = spec.yarn_beta;
         let use_yarn = scale < 1.0 && alpha > 0.0 && beta > alpha;
@@ -87,9 +91,9 @@ impl PreflightResources {
                     return theta * scale; // plain linear or native
                 }
                 let lambda = std::f32::consts::TAU / theta; // wavelength = 2*pi / theta
-                // ramp: 1.0 at short wavelengths, 0.0 at long wavelengths.
-                // Per YaRN: high-freq dims skip scaling; low-freq dims get full linear scaling.
-                // Lerp: ramp drives theta toward 1.0 for high-freq, toward scale for low-freq.
+                                                            // ramp: 1.0 at short wavelengths, 0.0 at long wavelengths.
+                                                            // Per YaRN: high-freq dims skip scaling; low-freq dims get full linear scaling.
+                                                            // Lerp: ramp drives theta toward 1.0 for high-freq, toward scale for low-freq.
                 let ramp = ((l_train as f32 / lambda - alpha) / (beta - alpha)).clamp(0.0, 1.0);
                 theta * ((1.0 - ramp) * scale + ramp)
             })
@@ -98,8 +102,8 @@ impl PreflightResources {
         let table_len = max_dist * n_pairs * 2;
         let mut table = Vec::with_capacity(table_len);
         for d in 0..max_dist {
-            for p in 0..n_pairs {
-                let angle = d as f32 * effective_thetas[p];
+            for theta in effective_thetas.iter().take(n_pairs) {
+                let angle = d as f32 * theta;
                 table.push(angle.cos());
                 table.push(angle.sin());
             }
@@ -107,12 +111,23 @@ impl PreflightResources {
         table
     }
 
-    fn upload_rope_table(device: &wgpu::Device, rope_floats: &[f32], scale: f32, spec: &ModelSpec) -> wgpu::Buffer {
+    fn upload_rope_table(
+        device: &wgpu::Device,
+        rope_floats: &[f32],
+        scale: f32,
+        spec: &ModelSpec,
+    ) -> wgpu::Buffer {
         let n_pairs = spec.rope_dim / 2;
         let max_dist = spec.n_ctx;
         let table_len = max_dist * n_pairs * 2;
         let use_yarn = scale < 1.0 && spec.yarn_alpha > 0.0 && spec.yarn_beta > spec.yarn_alpha;
-        let scaling_mode = if scale >= 1.0 { "native" } else if use_yarn { "YaRN" } else { "linear" };
+        let scaling_mode = if scale >= 1.0 {
+            "native"
+        } else if use_yarn {
+            "YaRN"
+        } else {
+            "linear"
+        };
         println!(
             "[Preflight] RoPE Lookup Table: {}×{} = {} entries ({:.1} KB, Base={}, Dim={}, Scale={}, Mode={})",
             max_dist, n_pairs, table_len,
@@ -146,7 +161,7 @@ impl PreflightResources {
         // Layout:
         // Layers: [AttnNorm, FfnNorm, PostAttnNorm, PostFfwNorm] interleaved (4 slots/layer)
         // End: [OutputNorm]
-        let total_size = (n_layers * 4 + 1) * (block_size as usize);
+        let total_size = (n_layers * 4 + 1) * block_size;
 
         let mut bank = vec![0u8; total_size];
 
@@ -159,21 +174,20 @@ impl PreflightResources {
         // post_attention_norm / post_ffw_norm only exist in Gemma / Gemma2 architectures.
         // For all other models (Llama, Mistral, Phi, Qwen…) their absence is expected and
         // should not produce a warning.
-        let has_post_norms = matches!(
-            spec.arch,
-            crate::core::spec::ModelArch::Gemma
-                | crate::core::spec::ModelArch::Other(_)
-        );
+        let has_post_norms = spec.post_norm_enabled;
+        // Phi-family checkpoints may omit a distinct FFN norm tensor.
+        // This is detected by checking for ffn_norm presence below.
+        let is_phi_arch = matches!(spec.arch, crate::core::spec::ModelArch::Phi);
 
         // Helper to copy — warn on missing only when `warn` is true.
         let mut copy_tensor_inner = |name: &str, dest_offset_bytes: usize, warn: bool| {
             if let Some(offset) = metadata.get_tensor_offset(name) {
                 let start = offset as usize;
-                let end = start + (block_size as usize);
+                let end = start + block_size;
                 if end > raw_data.len() {
                     eprintln!("CRITICAL ERROR: Tensor {} out of bounds!", name);
                 } else {
-                    bank[dest_offset_bytes..dest_offset_bytes + (block_size as usize)]
+                    bank[dest_offset_bytes..dest_offset_bytes + block_size]
                         .copy_from_slice(&raw_data[start..end]);
                 }
             } else if warn {
@@ -187,15 +201,20 @@ impl PreflightResources {
             let post_attn_name = format!("blk.{}.post_attention_norm.weight", i);
             let post_ffw_name = format!("blk.{}.post_ffw_norm.weight", i);
 
-            let layer_base = i * 4 * (block_size as usize);
+            let layer_base = i * 4 * block_size;
             copy_tensor_inner(&attn_name, layer_base, true);
-            copy_tensor_inner(&ffn_name, layer_base + (block_size as usize), true);
-            copy_tensor_inner(&post_attn_name, layer_base + 2 * (block_size as usize), has_post_norms);
-            copy_tensor_inner(&post_ffw_name, layer_base + 3 * (block_size as usize), has_post_norms);
+            if is_phi_arch && metadata.get_tensor_offset(&ffn_name).is_none() {
+                // Phi-family checkpoints may omit a distinct FFN norm tensor.
+                copy_tensor_inner(&attn_name, layer_base + block_size, false);
+            } else {
+                copy_tensor_inner(&ffn_name, layer_base + block_size, true);
+            }
+            copy_tensor_inner(&post_attn_name, layer_base + 2 * block_size, has_post_norms);
+            copy_tensor_inner(&post_ffw_name, layer_base + 3 * block_size, has_post_norms);
         }
 
         // Final Norm
-        let final_base = n_layers * 4 * (block_size as usize);
+        let final_base = n_layers * 4 * block_size;
         copy_tensor_inner("output_norm.weight", final_base, true);
 
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -209,7 +228,7 @@ impl PreflightResources {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::spec::{ModelArch, GgufFileType};
+    use crate::core::spec::{GgufFileType, ModelArch};
 
     /// Minimal spec for RoPE math tests — no GPU required.
     fn tiny_spec(rope_scale: f32, yarn_alpha: f32, yarn_beta: f32) -> ModelSpec {
@@ -233,11 +252,13 @@ mod tests {
             arch: ModelArch::Llama,
             file_type: GgufFileType::Q4_0,
             model_name: "test".to_string(),
+            chat_template: None,
             temp_buffer_size: 64,
             kv_cache_size_per_layer: 64,
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
         }
     }
 
@@ -271,7 +292,7 @@ mod tests {
         // theta_0 = 1 / base^(0 / dim) = 1 / 10000^0 = 1.0; effective = 1.0 * 0.5 = 0.5
         let expected_cos = 0.5_f32.cos();
         let n_pairs = spec.rope_dim / 2;
-        let cos_val = table[1 * n_pairs * 2 + 0 * 2]; // d=1, p=0, cos
+        let cos_val = table[n_pairs * 2]; // d=1, p=0, cos (0 * 2 = 0)
         assert!(
             (cos_val - expected_cos).abs() < 1e-6,
             "linear scale cos mismatch: expected {expected_cos}, got {cos_val}"
@@ -301,8 +322,8 @@ mod tests {
         let n_pairs = spec.rope_dim / 2;
         // At high-freq dim p=0, d=1: YaRN keeps theta unscaled (cos(1.0)),
         // linear halves it (cos(0.5)). They must differ.
-        let yarn_cos = table_yarn[1 * n_pairs * 2 + 0 * 2];
-        let linear_cos = table_linear[1 * n_pairs * 2 + 0 * 2];
+        let yarn_cos = table_yarn[n_pairs * 2];
+        let linear_cos = table_linear[n_pairs * 2];
         assert!(
             (yarn_cos - linear_cos).abs() > 1e-3,
             "YaRN high-freq dim should differ from linear scaling: yarn_cos={yarn_cos:.6}, linear_cos={linear_cos:.6}"

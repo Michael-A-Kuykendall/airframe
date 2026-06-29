@@ -3,7 +3,136 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.7] — 2026-06-29
+
+### Fixed
+
+- **ISF (Inference Saturation Fabric) refit complete** — All outstanding architectural issues from v0.2.x resolved in one release:
+  - ISF (`generate_isf`) now the production inference path, replacing legacy imperative `generate()`
+  - TDR (Timeout Detection and Recovery) transport integrated with GPU timestamp pools for accurate dispatch timing
+  - Encoder pools operational for non-blocking GPU work submission
+  - Qwen3 `attention.scale` tensor mapped defensively (no GGUF on disk contains it — matches HF reference)
+
+### Added
+
+- **Inference Saturation Fabric** — New fabric-based inference loop in `crates/airframe_observe/src/isf.rs`:
+  - 7-rule policy enforcement with selector-first, single-pass execution
+  - Fused semantic execution (FSE) powered by dzero crate (`0.1.0`)
+  - Byte-identical validation between ISF and imperative paths verified
+
+- **GPU Timestamp Query Pools** — Accurate GPU-side dispatch timing:
+  - `pool_timestamp.rs`: TimestampPool for capturing GPU timestamps before/after compute passes
+  - TDR scheduler updated with optional `TimestampPool` parameter
+  - Methods: `write_start_timestamp()`, `record_gpu_elapsed()`, `resolve_timestamps()`
+
+- **Encoder Pools** — Bounded pool of `CommandEncoder`s for non-blocking submission:
+  - `pool_encoder.rs`: EncoderPool with ring-buffer slot management
+  - Methods: `acquire()`, `submit_and_recycle()`, `drain()`
+  - Keeps GPU fed without pipeline bubbles
+
+- **DuckDB Made Optional** — Fixes critical build-time issues:
+  - DuckDB previously required for internal certification paths; now opt-in via feature flag
+  - Fixes build-time Out-of-Memory crashes on shimmy server when duckdb-sys is unavailable
+  - Fixes TDR watchdog crashes during long prefill sequences (Windows D3D12) — Windows GPU timeout exceeded
+
+### Changed
+
+- **Architecture**: Consolidated arch dispatch into `LlamaModel::forward()` with `has_qk_norm`/`post_norm_enabled` flags
+- **TDR Scheduler**: Unified TDR yield logic into clean, testable struct (replaces scattered macros)
+- **Stderr Noise**: DIAG/TDR stderr now gated behind `AIRFRAME_LOG_TDR_POLLS=1`
+
+### Validation
+
+- **Smoke Tests**: 10/10 PASS across all model architectures:
+  - Llama-3.2-3B, Phi-2, Gemma-2 9B, Qwen2-7B, Qwen3-8B, StarCoder2-3B
+  - All quantization types (Q4_K_M, Q6_K) verified
+  - Byte-identical output between ISF and imperative paths
+
+### Removed
+
+- **Legacy `generate()` path** — Deprecated in favor of ISF (`generate_isf`) which is now the production path
+- **Scattered TDR macros** — Consolidated into `TdrScheduler` struct methods
+
 ---
+
+### Fixed
+
+- **TDR crash on large-vocab models (Gemma-2 256K, Qwen3, Llama-3.2-3B)** — LM head
+  dispatch now splits into safe-sized tiles using the cache-calibrated workgroup limit.
+  - `sh_head_blob.wgsl`: added `base_row` param for tile offset (output indexing now
+    `base_row + global_id.x` instead of `global_id.x`).
+  - `HeadBlobParams` struct extended with `base_row: u32` field.
+  - `run_lm_head_blob_tiled()`: dispatches head in tiles of `max_safe_wgs` workgroups,
+    each writing to the correct output region.
+  - Production hot path (`inference.rs`): `dispatch_workgroups(wg_head_blob, 1, 1)`
+    replaced with tiled loop using `tdr_calibration::ensure_calibrated()`.
+  - Disk cache (`tdr_calibration.rs`): per-(pipeline, n_embd) safe WG limits stored at
+    `%LOCALAPPDATA%/Airframe/tdr-calibration.json` (Win) or `~/.cache/airframe/` (Linux),
+    with conservative 512-WG default fallback.
+  - Validated on TinyLlama Q6_K (32K vocab): tiled vs unsplit **MAE=0.00000000, PASS**.
+  - `frontier_compare --validate-head-tile` flag added for regression testing.
+
+---
+
+## [0.2.5] — 2026-06-12
+
+### Fixed (rolled-up hotfix — includes all v0.2.3 and v0.2.4 fixes)
+
+- **Critical: GPU temp buffer underallocated for all GQA models** (`src/core/spec.rs`)
+  - Formula `ff_dim*2+n_embd` was missing Q/K/V vectors — 13312 vs 15872 needed for TinyLlama.
+  - All GQA models affected: TinyLlama, Qwen3, LLaMA 3.2, Gemma2, DeepSeek, Qwen2.
+  - Symptom: single garbage token output on every inference call.
+
+- **frontier_compare: tied-embedding crash** (`src/bin/frontier_compare.rs`)
+  - `load_output_head_f32` now falls back to `token_embd.weight` when `output.weight` absent.
+  - Supports all quant types (was Q6_K only).
+  - `CpuKvCache` uses `spec.head_dim` not `n_embd/n_head` (wrong for GQA head_dim=128).
+  - Unblocks diagnostic tracing for Qwen3, LLaMA-3.2.
+
+---
+
+## [0.2.3] — 2026-06-11
+
+### Fixed
+- **Critical: GPU temp buffer underallocated for all GQA models** (`src/core/spec.rs`)
+  - `compute_derived()` used `ff_dim*2 + n_embd` (e.g. 13312 for TinyLlama) but the
+    GPU temp layout requires `n_embd + q_len + kv_len*2 + ff_dim*2` (15872 minimum).
+  - GPU writes past buffer end → silent memory corruption → all-NaN layer outputs →
+    single garbage token per inference call.
+  - Fix: correct formula produces 16384 for TinyLlama; all GQA models now sufficient.
+  - Models affected: TinyLlama, Qwen3, LLaMA 3.2, Gemma2, DeepSeek (any with GQA).
+  - Models unaffected: StarCoder2, GPT-2, Phi-2 (MHA, n_head == n_head_kv).
+  - Property tests: `tests/temp_buffer_invariant.rs` (4 tests, guards invariant forever).
+  - Vault: `temp_buffer_audit` view shows correct vs old formula for all known models.
+
+---
+
+## [0.2.2] — 2026-06-09
+
+### Fixed
+
+- **Multi-architecture GGUF loading** —  hardcoded 
+  key prefix, silently failing on every non-Llama model. Now uses suffix-based matching,
+  correctly loading Qwen3, Qwen2, Gemma2, Phi3, StarCoder2, GPT-2, and all other
+  non-Llama architectures from GGUF metadata.
+
+- **Tied embeddings (Qwen3)** — Qwen3 models have no separate  — they
+  reuse the token embedding. Loading now correctly aliases  as the
+  output projection. Previously crashed with .
+
+- **Context cap safety** — Large-context models like Qwen2-7B (n_ctx=32768) would
+  allocate 28+ GB KV cache on CPU oracle runs. Added a safe default cap (4096) for
+  CPU inference paths. GPU server operation is unaffected.
+
+### Added
+
+- **Golden Reference Vault** — Internal DuckDB certification database with oracle traces
+  for 22 models across 6 architectures. Includes  binary for generating
+  CPU reference traces from any GGUF. Internal tool; not published to crates.io.
+
+- **FSE inference observation layer** () — Selector-first,
+  single-pass inference capture powered by dzero. Multiple observers sharing a
+  selector cost zero additional extraction (FSE invariant). Internal; not published.
 
 ## [0.2.1] — 2026-06-02
 
@@ -125,11 +254,10 @@ The following work lands in Shimmy after airframe 0.2.0 is published:
 - Version: `0.1.1` → `0.2.0`.
 - `shimmyjinja` dependency: `0.2.1` → `0.5.0`.
 
----
-
 ## [0.1.1] — 2026-05-15
 
 Initial public release: Bindless WebGPU pipeline, FSE subsystem, OpenAI-compatible HTTP
 server (`shimmy_server_gpu`). Supports Llama, Gemma, Phi, Qwen2, Qwen3 architectures via
 GGUF Q4_K_M and related quantization types. Ships `shimmyjinja` (Jinja2 chat_template
 renderer) and `shimmytok` (GGUF-native tokenizer) as zero-dependency companion crates.
+

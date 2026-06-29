@@ -13,14 +13,14 @@ mod tests {
     fn test_f16_subnormal_min() {
         // 0x0001 = smallest FP16 subnormal = 2^-24 ≈ 5.96046448e-8
         let v = f16_bits_to_f32(0x0001);
-        assert!((v - 5.96046448e-8).abs() < 1e-12);
+        assert!((v - 5.960_464_5e-8).abs() < 1e-12);
     }
 
     #[test]
     fn test_f16_subnormal_max() {
         // 0x03FF = largest FP16 subnormal = (1023/1024) * 2^-14 = 1023 * 2^-24
         let v = f16_bits_to_f32(0x03FF);
-        assert!((v - 6.09755516e-5).abs() < 1e-10);
+        assert!((v - 6.097_555e-5).abs() < 1e-10);
     }
 
     #[test]

@@ -1,6 +1,5 @@
 //! Verify each layer binds to its own KV cache buffer
 use airframe::backend::bindless::kv_cache::KVCache;
-use wgpu;
 
 #[tokio::test]
 #[ignore]

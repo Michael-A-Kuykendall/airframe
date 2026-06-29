@@ -17,7 +17,10 @@ use std::path::{Path, PathBuf};
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "cert_check", about = "FSE single-pass cert checker for Rust source")]
+#[command(
+    name = "cert_check",
+    about = "FSE single-pass cert checker for Rust source"
+)]
 struct Cli {
     /// Source file(s) to check
     #[arg(required_unless_present = "list")]
@@ -42,29 +45,29 @@ struct Cli {
 // pattern — the dispatch match statement is the broadcast table.
 
 const PAT: &[&str] = &[
-    ".clone()",          //  0  B1  clone_pressure
-    ".unwrap()",         //  1  B3  unwrap_density  |  C4  gpu_unwrap
-    "TODO",              //  2  B2  todo_desert
-    "FIXME",             //  3  B2  todo_desert
-    "println!",          //  4  B6  debug_prints
-    "eprintln!",         //  5  B6  debug_prints
-    "dbg!(",             //  6  B6  debug_prints
-    "#[allow(",          //  7  B4  lint_suppress  |  C6  dead_code_bare
-    "dead_code",         //  8  C6  (context — used alongside PAT[7])
-    "todo!()",           //  9  B8  prod_panics
-    "unimplemented!()",  // 10  B8  prod_panics
-    "panic!(",           // 11  B8  prod_panics
-    "pub fn ",           // 12  B5  pub_pressure
-    "pub struct ",       // 13  B5  pub_pressure
-    "pub enum ",         // 14  B5  pub_pressure
-    "pub trait ",        // 15  B5  pub_pressure
-    "pub type ",         // 16  B5  pub_pressure
-    "pub const ",        // 17  B5  pub_pressure
-    "create_buffer(",    // 18  C5  buffer_labels
-    "device.create_",    // 19  C4  GPU call-site context
-    "queue.write_",      // 20  C4  GPU call-site context
-    "queue.submit(",     // 21  C4  GPU call-site context
-    "device.poll(",      // 22  C4  GPU call-site context
+    ".clone()",         //  0  B1  clone_pressure
+    ".unwrap()",        //  1  B3  unwrap_density  |  C4  gpu_unwrap
+    "TODO",             //  2  B2  todo_desert
+    "FIXME",            //  3  B2  todo_desert
+    "println!",         //  4  B6  debug_prints
+    "eprintln!",        //  5  B6  debug_prints
+    "dbg!(",            //  6  B6  debug_prints
+    "#[allow(",         //  7  B4  lint_suppress  |  C6  dead_code_bare
+    "dead_code",        //  8  C6  (context — used alongside PAT[7])
+    "todo!()",          //  9  B8  prod_panics
+    "unimplemented!()", // 10  B8  prod_panics
+    "panic!(",          // 11  B8  prod_panics
+    "pub fn ",          // 12  B5  pub_pressure
+    "pub struct ",      // 13  B5  pub_pressure
+    "pub enum ",        // 14  B5  pub_pressure
+    "pub trait ",       // 15  B5  pub_pressure
+    "pub type ",        // 16  B5  pub_pressure
+    "pub const ",       // 17  B5  pub_pressure
+    "create_buffer(",   // 18  C5  buffer_labels
+    "device.create_",   // 19  C4  GPU call-site context
+    "queue.write_",     // 20  C4  GPU call-site context
+    "queue.submit(",    // 21  C4  GPU call-site context
+    "device.poll(",     // 22  C4  GPU call-site context
 ];
 
 const P_CLONE: usize = 0;
@@ -103,8 +106,8 @@ struct ScanState {
     // Criterion counters
     clone_count: usize,
     unwrap_prod: usize,
-    fn_count: usize,        // fn keyword occurrences — used for C11 threshold
-    pub_count: usize,       // pub-qualified declarations — B5 numerator
+    fn_count: usize,         // fn keyword occurrences — used for C11 threshold
+    pub_count: usize,        // pub-qualified declarations — B5 numerator
     total_decl_count: usize, // all declarations (pub+private) — B5 denominator
 
     // Flags
@@ -118,8 +121,8 @@ struct ScanState {
     vague_expect_lines: Vec<(usize, String)>,
     prod_panic_lines: Vec<(usize, String)>,
     placeholder_lines: Vec<(usize, String)>,
-    create_buf_lines: Vec<usize>,       // raw positions for C5 post-process
-    create_buf_unlabeled: Vec<usize>,   // filled after scan
+    create_buf_lines: Vec<usize>, // raw positions for C5 post-process
+    create_buf_unlabeled: Vec<usize>, // filled after scan
     commented_block_issues: Vec<usize>,
 
     // Per-line context (updated at end of each iteration)
@@ -153,9 +156,16 @@ fn looks_like_code(comment_line: &str) -> bool {
 }
 
 const VAGUE_SUFFIXES: &[&str] = &[
-    "\"error\"", "\"failed\"", "\"should", "\"unwrap\"",
-    "\"none\"",  "\"some\"",   "\"ok\"",   "\"must\"",
-    "\"todo\"",  "\"fixme\"",
+    "\"error\"",
+    "\"failed\"",
+    "\"should",
+    "\"unwrap\"",
+    "\"none\"",
+    "\"some\"",
+    "\"ok\"",
+    "\"must\"",
+    "\"todo\"",
+    "\"fixme\"",
 ];
 
 fn is_vague_expect(line: &str) -> bool {
@@ -167,9 +177,8 @@ fn is_vague_expect(line: &str) -> bool {
 }
 
 const PLACEHOLDER_NAMES: &[&str] = &[
-    "data", "buf", "tmp", "res", "result", "output",
-    "handler", "value", "info", "ctx", "manager", "helper",
-    "service", "util", "obj", "item",
+    "data", "buf", "tmp", "res", "result", "output", "handler", "value", "info", "ctx", "manager",
+    "helper", "service", "util", "obj", "item",
 ];
 
 /// Compute byte ranges of double-quoted string literals on a single line.
@@ -184,7 +193,7 @@ fn string_literal_spans(line: &[u8]) -> Vec<std::ops::Range<usize>> {
             i += 1;
             while i < line.len() {
                 match line[i] {
-                    b'\\' => i += 2,  // skip escaped char — won't overrun; clamped below
+                    b'\\' => i += 2, // skip escaped char — won't overrun; clamped below
                     b'"' => {
                         i += 1;
                         spans.push(start..i);
@@ -326,14 +335,14 @@ fn scan(content: &str, ac: &AhoCorasick) -> ScanState {
                 }
                 P_UNWRAP => {
                     if !is_comment && !skip_prod {
-                        st.unwrap_prod += 1;            // B3
+                        st.unwrap_prod += 1; // B3
                         if st.gpu_call_on_line {
                             st.gpu_unwrap_lines.push((lineno, tr.to_string())); // C4
                         }
                     }
                 }
                 P_TODO | P_FIXME => {
-                    st.found_todo = true;               // B2
+                    st.found_todo = true; // B2
                 }
                 P_PRINTLN | P_EPRINTLN | P_DBG => {
                     if !is_comment && !is_doc && !skip_prod {
@@ -342,11 +351,11 @@ fn scan(content: &str, ac: &AhoCorasick) -> ScanState {
                 }
                 P_ALLOW => {
                     if !is_comment {
-                        saw_allow = true;               // B4, C6 — resolved after loop
+                        saw_allow = true; // B4, C6 — resolved after loop
                     }
                 }
                 P_DEAD_CODE => {
-                    saw_dead_code = true;               // C6 context
+                    saw_dead_code = true; // C6 context
                 }
                 P_TODO_MACRO | P_UNIMPL => {
                     if !is_comment && !skip_prod {
@@ -361,7 +370,7 @@ fn scan(content: &str, ac: &AhoCorasick) -> ScanState {
                 P_PUB_FN..=17 => {
                     // Covers pub fn / pub struct / pub enum / pub trait / pub type / pub const
                     if !is_comment {
-                        st.pub_count += 1;              // B5
+                        st.pub_count += 1; // B5
                     }
                 }
                 P_CREATE_BUF => {
@@ -383,7 +392,7 @@ fn scan(content: &str, ac: &AhoCorasick) -> ScanState {
                 st.allow_no_comment.push((lineno, tr.to_string())); // B4
             }
             if saw_dead_code && !st.prev_is_comment {
-                st.dead_code_bare.push((lineno, tr.to_string()));   // C6
+                st.dead_code_bare.push((lineno, tr.to_string())); // C6
             }
         }
 
@@ -453,7 +462,11 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
             } else {
                 $detail
             };
-            results.push(CriterionResult { id: $id, status, detail });
+            results.push(CriterionResult {
+                id: $id,
+                status,
+                detail,
+            });
         }};
     }
 
@@ -467,60 +480,109 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
                 st.total_lines, HARD_CAP_LINES))
         } else if st.total_lines > LINE_COUNT_MAX {
             if let Some(reason) = waivers.get("C3") {
-                (Status::Waived, format!("{} lines (max {}) [waiver: {}]", st.total_lines, LINE_COUNT_MAX, reason))
+                (
+                    Status::Waived,
+                    format!(
+                        "{} lines (max {}) [waiver: {}]",
+                        st.total_lines, LINE_COUNT_MAX, reason
+                    ),
+                )
             } else {
-                (Status::Fail, format!("{} lines (max {})", st.total_lines, LINE_COUNT_MAX))
+                (
+                    Status::Fail,
+                    format!("{} lines (max {})", st.total_lines, LINE_COUNT_MAX),
+                )
             }
         } else {
-            (Status::Pass, format!("{} lines (max {})", st.total_lines, LINE_COUNT_MAX))
+            (
+                Status::Pass,
+                format!("{} lines (max {})", st.total_lines, LINE_COUNT_MAX),
+            )
         };
-        results.push(CriterionResult { id: "C3", status, detail });
+        results.push(CriterionResult {
+            id: "C3",
+            status,
+            detail,
+        });
     }
 
     // C4: gpu_unwrap
     criterion!(
         "C4",
-        if st.gpu_unwrap_lines.is_empty() { Status::Pass } else { Status::Fail },
+        if st.gpu_unwrap_lines.is_empty() {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
         if st.gpu_unwrap_lines.is_empty() {
             "no .unwrap() on GPU call sites".to_string()
         } else {
-            format!("{} unwrap(s) on GPU call sites: lines {:?}", st.gpu_unwrap_lines.len(),
-                st.gpu_unwrap_lines.iter().map(|(l, _)| l).collect::<Vec<_>>())
+            format!(
+                "{} unwrap(s) on GPU call sites: lines {:?}",
+                st.gpu_unwrap_lines.len(),
+                st.gpu_unwrap_lines
+                    .iter()
+                    .map(|(l, _)| l)
+                    .collect::<Vec<_>>()
+            )
         }
     );
 
     // C5: buffer_labels
     criterion!(
         "C5",
-        if st.create_buf_unlabeled.is_empty() { Status::Pass } else { Status::Fail },
         if st.create_buf_unlabeled.is_empty() {
-            format!("all {} create_buffer() calls labeled", st.create_buf_lines.len())
+            Status::Pass
         } else {
-            format!("unlabeled create_buffer at lines {:?}", st.create_buf_unlabeled)
+            Status::Fail
+        },
+        if st.create_buf_unlabeled.is_empty() {
+            format!(
+                "all {} create_buffer() calls labeled",
+                st.create_buf_lines.len()
+            )
+        } else {
+            format!(
+                "unlabeled create_buffer at lines {:?}",
+                st.create_buf_unlabeled
+            )
         }
     );
 
     // C6: dead_code_bare
     criterion!(
         "C6",
-        if st.dead_code_bare.is_empty() { Status::Pass } else { Status::Fail },
+        if st.dead_code_bare.is_empty() {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
         if st.dead_code_bare.is_empty() {
             "no bare #[allow(dead_code)]".to_string()
         } else {
-            format!("{} bare dead_code suppress(es) at lines {:?}",
+            format!(
+                "{} bare dead_code suppress(es) at lines {:?}",
                 st.dead_code_bare.len(),
-                st.dead_code_bare.iter().map(|(l, _)| l).collect::<Vec<_>>())
+                st.dead_code_bare.iter().map(|(l, _)| l).collect::<Vec<_>>()
+            )
         }
     );
 
     // C7: commented_blocks
     criterion!(
         "C7",
-        if st.commented_block_issues.is_empty() { Status::Pass } else { Status::Fail },
+        if st.commented_block_issues.is_empty() {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
         if st.commented_block_issues.is_empty() {
             "no commented-out code blocks".to_string()
         } else {
-            format!("commented-out code blocks starting at lines {:?}", st.commented_block_issues)
+            format!(
+                "commented-out code blocks starting at lines {:?}",
+                st.commented_block_issues
+            )
         }
     );
 
@@ -532,8 +594,15 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
     };
     criterion!(
         "B1",
-        if clone_rate <= CLONE_PER_100_MAX { Status::Pass } else { Status::Fail },
-        format!("{} .clone()s = {:.1}/100 lines (max {:.0})", st.clone_count, clone_rate, CLONE_PER_100_MAX)
+        if clone_rate <= CLONE_PER_100_MAX {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
+        format!(
+            "{} .clone()s = {:.1}/100 lines (max {:.0})",
+            st.clone_count, clone_rate, CLONE_PER_100_MAX
+        )
     );
 
     // B2: todo_desert — FAIL for large files (> 1000 lines) with no TODO/FIXME; WARN otherwise
@@ -541,7 +610,7 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
     let b2_status = if st.found_todo {
         Status::Pass
     } else if st.total_lines > TODO_DESERT_LARGE {
-        Status::Fail  // large file + no acknowledged debt = implausible; P1 AI signal
+        Status::Fail // large file + no acknowledged debt = implausible; P1 AI signal
     } else {
         Status::Warn
     };
@@ -564,25 +633,41 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
     } else {
         0.0
     };
-    let b3_status = if unwrap_rate <= UNWRAP_PER_1K_MAX { Status::Pass }
-        else if unwrap_rate <= UNWRAP_PER_1K_MAX * 1.5 { Status::Warn }
-        else { Status::Fail };
+    let b3_status = if unwrap_rate <= UNWRAP_PER_1K_MAX {
+        Status::Pass
+    } else if unwrap_rate <= UNWRAP_PER_1K_MAX * 1.5 {
+        Status::Warn
+    } else {
+        Status::Fail
+    };
     criterion!(
         "B3",
         b3_status,
-        format!("{} unwrap(s) = {:.1}/1k prod lines (max {})", st.unwrap_prod, unwrap_rate, UNWRAP_PER_1K_MAX)
+        format!(
+            "{} unwrap(s) = {:.1}/1k prod lines (max {})",
+            st.unwrap_prod, unwrap_rate, UNWRAP_PER_1K_MAX
+        )
     );
 
     // B4: lint_suppress
     criterion!(
         "B4",
-        if st.allow_no_comment.is_empty() { Status::Pass } else { Status::Fail },
+        if st.allow_no_comment.is_empty() {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
         if st.allow_no_comment.is_empty() {
             "all #[allow(..)] have justification comments".to_string()
         } else {
-            format!("{} unjustified #[allow(..)] at lines {:?}",
+            format!(
+                "{} unjustified #[allow(..)] at lines {:?}",
                 st.allow_no_comment.len(),
-                st.allow_no_comment.iter().map(|(l, _)| l).collect::<Vec<_>>())
+                st.allow_no_comment
+                    .iter()
+                    .map(|(l, _)| l)
+                    .collect::<Vec<_>>()
+            )
         }
     );
 
@@ -592,13 +677,36 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
     // Using fn_count alone was a bug: pub structs/enums inflated the numerator
     // against a fn-only denominator, producing ratios > 100% on type-heavy files.
     let b5 = if st.total_decl_count < MIN_FN_COUNT {
-        (Status::Skip, format!("too few declarations ({} < {})", st.total_decl_count, MIN_FN_COUNT))
+        (
+            Status::Skip,
+            format!(
+                "too few declarations ({} < {})",
+                st.total_decl_count, MIN_FN_COUNT
+            ),
+        )
     } else {
         let ratio = st.pub_count as f64 / st.total_decl_count as f64;
         if ratio <= PUB_PRESSURE_MAX {
-            (Status::Pass, format!("{}/{} = {:.0}%", st.pub_count, st.total_decl_count, ratio * 100.0))
+            (
+                Status::Pass,
+                format!(
+                    "{}/{} = {:.0}%",
+                    st.pub_count,
+                    st.total_decl_count,
+                    ratio * 100.0
+                ),
+            )
         } else {
-            (Status::Fail, format!("{}/{} = {:.0}% > {:.0}% (C3 AI signal)", st.pub_count, st.total_decl_count, ratio * 100.0, PUB_PRESSURE_MAX * 100.0))
+            (
+                Status::Fail,
+                format!(
+                    "{}/{} = {:.0}% > {:.0}% (C3 AI signal)",
+                    st.pub_count,
+                    st.total_decl_count,
+                    ratio * 100.0,
+                    PUB_PRESSURE_MAX * 100.0
+                ),
+            )
         }
     };
     criterion!("B5", b5.0, b5.1);
@@ -606,52 +714,88 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
     // B6: debug_prints
     criterion!(
         "B6",
-        if st.debug_print_lines.is_empty() { Status::Pass } else { Status::Fail },
+        if st.debug_print_lines.is_empty() {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
         if st.debug_print_lines.is_empty() {
             "no raw println!/eprintln!/dbg!".to_string()
         } else {
-            format!("{} debug print(s) at lines {:?} (A6 perfect discriminator)",
+            format!(
+                "{} debug print(s) at lines {:?} (A6 perfect discriminator)",
                 st.debug_print_lines.len(),
-                st.debug_print_lines.iter().map(|(l, _)| l).collect::<Vec<_>>())
+                st.debug_print_lines
+                    .iter()
+                    .map(|(l, _)| l)
+                    .collect::<Vec<_>>()
+            )
         }
     );
 
     // B7: vague_expects
     criterion!(
         "B7",
-        if st.vague_expect_lines.is_empty() { Status::Pass } else { Status::Fail },
+        if st.vague_expect_lines.is_empty() {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
         if st.vague_expect_lines.is_empty() {
             "no vague .expect() messages".to_string()
         } else {
-            format!("{} vague expect(s) at lines {:?}",
+            format!(
+                "{} vague expect(s) at lines {:?}",
                 st.vague_expect_lines.len(),
-                st.vague_expect_lines.iter().map(|(l, _)| l).collect::<Vec<_>>())
+                st.vague_expect_lines
+                    .iter()
+                    .map(|(l, _)| l)
+                    .collect::<Vec<_>>()
+            )
         }
     );
 
     // B8: prod_panics
     criterion!(
         "B8",
-        if st.prod_panic_lines.is_empty() { Status::Pass } else { Status::Fail },
+        if st.prod_panic_lines.is_empty() {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
         if st.prod_panic_lines.is_empty() {
             "no todo!()/unimplemented!()/uncommented panic!()".to_string()
         } else {
-            format!("{} prod panic(s) at lines {:?}",
+            format!(
+                "{} prod panic(s) at lines {:?}",
                 st.prod_panic_lines.len(),
-                st.prod_panic_lines.iter().map(|(l, _)| l).collect::<Vec<_>>())
+                st.prod_panic_lines
+                    .iter()
+                    .map(|(l, _)| l)
+                    .collect::<Vec<_>>()
+            )
         }
     );
 
     // B9: placeholder_names
     criterion!(
         "B9",
-        if st.placeholder_lines.is_empty() { Status::Pass } else { Status::Fail },
+        if st.placeholder_lines.is_empty() {
+            Status::Pass
+        } else {
+            Status::Fail
+        },
         if st.placeholder_lines.is_empty() {
             "no placeholder param names in signatures".to_string()
         } else {
-            format!("{} placeholder param(s) at lines {:?}",
+            format!(
+                "{} placeholder param(s) at lines {:?}",
                 st.placeholder_lines.len(),
-                st.placeholder_lines.iter().map(|(l, _)| l).collect::<Vec<_>>())
+                st.placeholder_lines
+                    .iter()
+                    .map(|(l, _)| l)
+                    .collect::<Vec<_>>()
+            )
         }
     );
 
@@ -670,10 +814,15 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
         if st.has_test_module {
             "has #[cfg(test)] module".to_string()
         } else if st.fn_count > MIN_FNS_FOR_TEST {
-            format!("{} functions, no #[cfg(test)] module — pure-function code must have unit tests",
-                st.fn_count)
+            format!(
+                "{} functions, no #[cfg(test)] module — pure-function code must have unit tests",
+                st.fn_count
+            )
         } else {
-            format!("{} functions (skip threshold {})", st.fn_count, MIN_FNS_FOR_TEST)
+            format!(
+                "{} functions (skip threshold {})",
+                st.fn_count, MIN_FNS_FOR_TEST
+            )
         }
     );
 
@@ -684,7 +833,9 @@ fn evaluate(st: &ScanState, waivers: &HashMap<String, String>) -> Vec<CriterionR
 
 fn cert_toml_path(source_file: &Path) -> PathBuf {
     // Walk up to find the workspace root (contains Cargo.toml at top level)
-    let mut dir = source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf());
+    let mut dir = source_file
+        .canonicalize()
+        .unwrap_or_else(|_| source_file.to_path_buf());
     dir.pop();
     loop {
         if dir.join("Cargo.toml").exists() && dir.join("src").exists() {
@@ -698,7 +849,9 @@ fn cert_toml_path(source_file: &Path) -> PathBuf {
 }
 
 fn workspace_relative(source_file: &Path, cert_path: &Path) -> String {
-    let abs = source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf());
+    let abs = source_file
+        .canonicalize()
+        .unwrap_or_else(|_| source_file.to_path_buf());
     let root = cert_path.parent().unwrap_or(Path::new("."));
     abs.strip_prefix(root)
         .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -834,7 +987,7 @@ fn write_seal(cert_path: &Path, rel_path: &str, sha256: &str, date: &str) -> std
         if !out.is_empty() && !out.ends_with('\n') {
             out.push('\n');
         }
-        out.push_str("\n");
+        out.push('\n');
         out.push_str(&new_seal);
         std::fs::write(cert_path, out)
     }
@@ -863,19 +1016,34 @@ fn print_results(path: &Path, results: &[CriterionResult], st: &ScanState) {
 
     let warn_count = results.iter().filter(|r| r.status == Status::Warn).count();
     let pass_count = results.iter().filter(|r| r.status == Status::Pass).count();
-    let waived_count = results.iter().filter(|r| r.status == Status::Waived).count();
+    let waived_count = results
+        .iter()
+        .filter(|r| r.status == Status::Waived)
+        .count();
 
-    println!("  {} lines | {} pass | {} warn | {} fail | {} waived",
-        st.total_lines, pass_count, warn_count, blocking.len(), waived_count);
+    println!(
+        "  {} lines | {} pass | {} warn | {} fail | {} waived",
+        st.total_lines,
+        pass_count,
+        warn_count,
+        blocking.len(),
+        waived_count
+    );
 
     if certifiable {
         if waived_count > 0 {
-            println!("  Certifiable: YES  ({} waiver(s) active — review before merge)", waived_count);
+            println!(
+                "  Certifiable: YES  ({} waiver(s) active — review before merge)",
+                waived_count
+            );
         } else {
             println!("  Certifiable: YES");
         }
     } else {
-        println!("  Certifiable: NO  ({} blocking failure(s))", blocking.len());
+        println!(
+            "  Certifiable: NO  ({} blocking failure(s))",
+            blocking.len()
+        );
         for r in &blocking {
             println!("    ✗ {}: {}", r.id, r.detail);
         }
@@ -885,21 +1053,77 @@ fn print_results(path: &Path, results: &[CriterionResult], st: &ScanState) {
 fn print_criteria_list() {
     println!("Auto criteria (checked by cert_check):");
     let auto_criteria = [
-        ("C3", "line_count",       "file <= 600 lines"),
-        ("C4", "gpu_unwrap",       "no .unwrap() on GPU (device/queue) call sites"),
-        ("C5", "buffer_labels",    "all create_buffer() calls have label:"),
-        ("C6", "dead_code_bare",   "no bare #[allow(dead_code)] without preceding comment"),
-        ("C7", "commented_blocks", "no 3+ consecutive commented-out code lines"),
-        ("B1", "clone_pressure",   "<= 6 .clone() / 100 lines  (P6: 24x AI signal)"),
-        ("B2", "todo_desert",      "file has at least one TODO/FIXME  (P1: 5x AI signal)"),
-        ("B3", "unwrap_density",   "<= 15 .unwrap() / 1k prod lines  (N5)"),
-        ("B4", "lint_suppress",    "all #[allow(..)] have justification comments  (P7)"),
-        ("B5", "pub_pressure",     "pub items <= 70% of fns, min 5 fns  (C3: 12.6x AI signal)"),
-        ("B6", "debug_prints",     "no raw println!/eprintln!/dbg!  (A6: perfect discriminator)"),
-        ("B7", "vague_expects",    "no .expect(\"error\"/\"failed\"/etc)  (A4)"),
-        ("B8", "prod_panics",      "no todo!()/unimplemented!(); panic! needs preceding comment  (A3)"),
-        ("B9", "placeholder_names","no data/buf/tmp/res/etc in function signatures  (D11)"),
-        ("C11","test_coverage",    "has #[cfg(test)] module when fn_count > 5"),
+        ("C3", "line_count", "file <= 600 lines"),
+        (
+            "C4",
+            "gpu_unwrap",
+            "no .unwrap() on GPU (device/queue) call sites",
+        ),
+        (
+            "C5",
+            "buffer_labels",
+            "all create_buffer() calls have label:",
+        ),
+        (
+            "C6",
+            "dead_code_bare",
+            "no bare #[allow(dead_code)] without preceding comment",
+        ),
+        (
+            "C7",
+            "commented_blocks",
+            "no 3+ consecutive commented-out code lines",
+        ),
+        (
+            "B1",
+            "clone_pressure",
+            "<= 6 .clone() / 100 lines  (P6: 24x AI signal)",
+        ),
+        (
+            "B2",
+            "todo_desert",
+            "file has at least one TODO/FIXME  (P1: 5x AI signal)",
+        ),
+        (
+            "B3",
+            "unwrap_density",
+            "<= 15 .unwrap() / 1k prod lines  (N5)",
+        ),
+        (
+            "B4",
+            "lint_suppress",
+            "all #[allow(..)] have justification comments  (P7)",
+        ),
+        (
+            "B5",
+            "pub_pressure",
+            "pub items <= 70% of fns, min 5 fns  (C3: 12.6x AI signal)",
+        ),
+        (
+            "B6",
+            "debug_prints",
+            "no raw println!/eprintln!/dbg!  (A6: perfect discriminator)",
+        ),
+        (
+            "B7",
+            "vague_expects",
+            "no .expect(\"error\"/\"failed\"/etc)  (A4)",
+        ),
+        (
+            "B8",
+            "prod_panics",
+            "no todo!()/unimplemented!(); panic! needs preceding comment  (A3)",
+        ),
+        (
+            "B9",
+            "placeholder_names",
+            "no data/buf/tmp/res/etc in function signatures  (D11)",
+        ),
+        (
+            "C11",
+            "test_coverage",
+            "has #[cfg(test)] module when fn_count > 5",
+        ),
     ];
     for (id, name, desc) in &auto_criteria {
         println!("  {:<4} {:<20} {}", id, name, desc);
@@ -949,12 +1173,19 @@ fn main() {
             match waive_arg.split_once(':') {
                 Some((cid, reason)) => {
                     match write_waiver(&cert_path, &rel_path, cid.trim(), reason.trim()) {
-                        Ok(()) => println!("Waiver recorded: {} = {:?} in {}", cid.trim(), reason.trim(), cert_path.display()),
+                        Ok(()) => println!(
+                            "Waiver recorded: {} = {:?} in {}",
+                            cid.trim(),
+                            reason.trim(),
+                            cert_path.display()
+                        ),
                         Err(e) => eprintln!("cert_check: waiver write failed: {}", e),
                     }
                 }
                 None => {
-                    eprintln!("cert_check: --waive format is CID:reason  (e.g. B6:debug bridge code)");
+                    eprintln!(
+                        "cert_check: --waive format is CID:reason  (e.g. B6:debug bridge code)"
+                    );
                 }
             }
             // Re-read with new waiver
@@ -989,7 +1220,10 @@ fn main() {
                     Err(e) => eprintln!("cert_check: sha256 failed: {}", e),
                 }
             } else {
-                eprintln!("cert_check: --seal refused: {} has blocking failures", rel_path);
+                eprintln!(
+                    "cert_check: --seal refused: {} has blocking failures",
+                    rel_path
+                );
                 any_uncertifiable = true;
             }
         }

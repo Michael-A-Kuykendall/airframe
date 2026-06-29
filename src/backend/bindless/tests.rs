@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod tests_inner {
     use super::super::loader::BindlessModel;
     use super::super::pipeline::BindlessPipeline;
     use crate::core::spec::ModelSpec;
@@ -7,6 +7,7 @@ mod tests {
     use tempfile::NamedTempFile;
     use wgpu;
 
+    #[allow(dead_code)]
     fn get_tinyllama_spec() -> ModelSpec {
         ModelSpec::tinylama_1_1b_chat_v1_0()
     }
@@ -46,7 +47,8 @@ mod tests {
         let mut limits = wgpu::Limits::downlevel_defaults();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size; // Use what the card has
         limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
-        limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage; // INT4 bind group uses 14 bindings; use adapter max
+        limits.max_storage_buffers_per_shader_stage =
+            adapter_limits.max_storage_buffers_per_shader_stage; // INT4 bind group uses 14 bindings; use adapter max
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -81,9 +83,7 @@ mod tests {
         content.extend_from_slice(&magic.to_le_bytes());
         content.extend_from_slice(&ver.to_le_bytes());
         // Pad with junk
-        for _ in 0..100 {
-            content.push(0);
-        }
+        content.resize(content.len() + 100, 0);
 
         tmp.write_all(&content).unwrap();
         let path = tmp.path();
@@ -117,28 +117,27 @@ mod tests {
         // qs[0] = 0x88 (nibbles 8, 8). (8-8)*1.0 = 0.0.
         // qs[1] = 0x97 (nibbles 9, 7). (7-8)=-1.0, (9-8)=1.0.
 
-        // We need 18 bytes.
-        let mut block_bytes: Vec<u8> = Vec::with_capacity(18);
+        // We need 18 bytes for Q4_0 block, but wgpu STORAGE buffers require 4-byte alignment.
+        // Pad to next multiple of 4: 20 bytes total (18 data + 2 padding).
+        let mut block_bytes: Vec<u8> = Vec::with_capacity(20);
 
         // Offset 0: scale = 1.0 (0x3C00, LE = 00 3C)
         block_bytes.push(0x00);
         block_bytes.push(0x3C);
 
-        // Offset 2..18: 16 bytes of u8 qs
+        // Offset 2..18: 16 bytes of u8 qs (Q4_0: simplified test with 16 elements)
         // Byte 0 (qs[0]): 0x88 -> (8, 8) -> val 0.0, 0.0
         block_bytes.push(0x88);
 
         // Byte 1 (qs[1]): 0x0F -> (15, 0) -> val (15-8)=7.0, (0-8)=-8.0
-        // Wait, nibbles are low/high?
-        // if qs[i] & 0x0F is first, then 0x0F & 0x0F = 15. qs[i] >> 4 = 0.
-        // So element corresponding to lane 1 is 15-8=7.
-        // Element corresponding to lane 17 is 0-8=-8.
         block_bytes.push(0x0F);
 
         // Fill rest with 0x88 (zeros)
-        for _ in 2..16 {
-            block_bytes.push(0x88);
-        }
+        block_bytes.extend([0x88; 14]);
+
+        // Padding to 4-byte alignment (wgpu STORAGE buffer requirement)
+        block_bytes.push(0x00); // padding byte 0
+        block_bytes.push(0x00); // padding byte 1
 
         // Upload
         use wgpu::util::DeviceExt;
@@ -150,9 +149,15 @@ mod tests {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Blob"),
+            contents: &[0u8; 8], // Pad to 4-byte alignment for STORAGE buffer
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let model = BindlessModel {
             gpu_buffer,
             size: block_bytes.len() as u64,
+            dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
         };
@@ -215,16 +220,12 @@ mod tests {
         block_bytes.push(0x00);
         block_bytes.push(0x3C); // 1.0
         block_bytes.push(0x97);
-        for _ in 1..16 {
-            block_bytes.push(0x88);
-        } // Zeros
+        block_bytes.extend([0x88; 15]);
 
         // Row 0, Block 1 (Cols 32..63): All Zeros
         block_bytes.push(0x00);
         block_bytes.push(0x3C); // 1.0
-        for _ in 0..16 {
-            block_bytes.push(0x88);
-        }
+        block_bytes.extend([0x88; 16]);
 
         // Row 1, Block 0 (Cols 0..31):
         // Scale 2.0 (0x4000)
@@ -232,16 +233,12 @@ mod tests {
         block_bytes.push(0x00);
         block_bytes.push(0x40); // 2.0
         block_bytes.push(0x99);
-        for _ in 1..16 {
-            block_bytes.push(0x88);
-        }
+        block_bytes.extend([0x88; 15]);
 
         // Row 1, Block 1: All Zeros
         block_bytes.push(0x00);
         block_bytes.push(0x40); // 2.0
-        for _ in 0..16 {
-            block_bytes.push(0x88);
-        }
+        block_bytes.extend([0x88; 16]);
 
         assert_eq!(block_bytes.len(), 72);
 
@@ -254,9 +251,15 @@ mod tests {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Blob"),
+            contents: &[0u8; 4],
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let model = BindlessModel {
             gpu_buffer,
             size: 72,
+            dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
         };
@@ -322,9 +325,15 @@ mod tests {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Blob"),
+            contents: &[0u8; 8], // Pad to 4-byte alignment for STORAGE buffer
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let model = BindlessModel {
             gpu_buffer,
             size: block_bytes.len() as u64,
+            dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
         };
@@ -337,8 +346,9 @@ mod tests {
         let params = RMSNormParams {
             count: 4,
             weights_offset: 0, // Weights st start of buffer
-            eps: 0.0,          // Simplify math
-            padding: 0,
+            bias_offset: 0,
+            eps: 0.0, // Simplify math
+            norm_type: 0,
         };
 
         let result = pipeline.run_rmsnorm_test(&device, &queue, &model, &input, params);
@@ -370,7 +380,7 @@ mod tests {
         // Offset 0: RMSNorm Weights (32 x F32) = 128 bytes. All 1.0.
         // Offset 128: MatMul Weights (1 x Q4_0 Block) = 18 bytes. All 1.0.
 
-        let mut block_bytes: Vec<u8> = Vec::new();
+        let mut block_bytes: Vec<u8> = Vec::with_capacity(32 * 4 + 18);
 
         // RMSNorm Weights: 32 * 1.0
         for _ in 0..32 {
@@ -382,9 +392,7 @@ mod tests {
         block_bytes.push(0x00);
         block_bytes.push(0x3C);
         // Quants: 0x99 (since (9-8)*1.0 = 1.0)
-        for _ in 0..16 {
-            block_bytes.push(0x99);
-        }
+        block_bytes.extend([0x99; 16]);
 
         // Upload Model
         let gpu_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -392,9 +400,15 @@ mod tests {
             contents: &block_bytes,
             usage: wgpu::BufferUsages::STORAGE,
         });
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Blob"),
+            contents: &[0u8; 8], // Pad to 4-byte alignment for STORAGE buffer
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let model = BindlessModel {
             gpu_buffer,
             size: block_bytes.len() as u64,
+            dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
         };
@@ -429,8 +443,9 @@ mod tests {
         let rms_params = RMSNormParams {
             count: 32,
             weights_offset: 0,
+            bias_offset: 0,
             eps: 0.0,
-            padding: 0,
+            norm_type: 0,
         };
         let rms_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("RMS Params"),
@@ -473,6 +488,14 @@ mod tests {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: rms_params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.dummy_buf.as_entire_binding(),
                 },
             ],
         });

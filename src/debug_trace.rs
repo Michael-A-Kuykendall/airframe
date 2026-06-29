@@ -124,8 +124,19 @@ pub struct TokenTrace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceTracePackage {
     pub schema_version: u32,
+    pub route_version: u32,
+    pub route_digest: String,
     pub model_arch: String,
+    pub norm_eps: f32,
+    pub layer_norm_enabled: u32,
+    pub post_norm_enabled: u32,
+    pub qk_norm_enabled: u32,
+    pub packed_quant_type: u32,
     pub prompt_mode: String,
+    pub prompt_renderer_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_renderer_family: Option<String>,
+    pub prompt_template_source: String,
     pub seed: u64,
     pub max_tokens: usize,
     pub temperature: f32,
@@ -182,7 +193,11 @@ mod tests {
         assert!(approx_eq(s.max, 3.0));
         assert!(approx_eq(s.mean, 2.0));
         let expected_std = (2.0f32 / 3.0).sqrt();
-        assert!((s.std_dev - expected_std).abs() < 1e-4, "std_dev={}", s.std_dev);
+        assert!(
+            (s.std_dev - expected_std).abs() < 1e-4,
+            "std_dev={}",
+            s.std_dev
+        );
         assert!(approx_eq(s.abs_max, 3.0));
         assert_eq!(s.first8, vec![1.0, 2.0, 3.0]);
     }
@@ -192,7 +207,11 @@ mod tests {
         let s = TraceStats::from_slice(&[-5.0, -1.0, 2.0]);
         assert!(approx_eq(s.min, -5.0));
         assert!(approx_eq(s.max, 2.0));
-        assert!(approx_eq(s.abs_max, 5.0), "abs_max should be 5.0, got {}", s.abs_max);
+        assert!(
+            approx_eq(s.abs_max, 5.0),
+            "abs_max should be 5.0, got {}",
+            s.abs_max
+        );
     }
 
     #[test]
@@ -239,7 +258,10 @@ mod tests {
             assert!(
                 s.min <= s.mean + 1e-4 && s.mean <= s.max + 1e-4,
                 "slice {:?}: min={} mean={} max={} — invariant min<=mean<=max violated",
-                slice, s.min, s.mean, s.max
+                slice,
+                s.min,
+                s.mean,
+                s.max
             );
             assert!(s.max >= s.min, "max < min for slice {:?}", slice);
             assert!(s.mean.is_finite(), "mean not finite for slice {:?}", slice);
@@ -259,7 +281,8 @@ mod tests {
             assert!(
                 s.first8.len() <= 8,
                 "first8 has {} elements for slice of len {}",
-                s.first8.len(), slice.len()
+                s.first8.len(),
+                slice.len()
             );
         }
     }

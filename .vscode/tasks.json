@@ -245,6 +245,27 @@
 			"group": "build"
 		},
 		{
+			"label": "Run Phi Smoke + Formula (bash)",
+			"type": "process",
+			"command": "bash",
+			"args": [
+				"scripts/phi_smoke_formula.sh"
+			],
+			"options": {
+				"env": {
+					"MODEL_PATH": "${input:phiModelPath}",
+					"PROFILE": "phi2_smoke_formula"
+				}
+			},
+			"isBackground": false,
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			},
+			"group": "build"
+		},
+		{
 			"label": "Run Needle Bench (4K ctx)",
 			"type": "process",
 			"command": "python",
@@ -285,6 +306,12 @@
 		}
 	],
 	"inputs": [
+		{
+			"id": "phiModelPath",
+			"type": "promptString",
+			"description": "Absolute GGUF path for Phi smoke harness (MODEL_PATH)",
+			"default": "D:\\shimmy-test-models\\gguf_collection\\phi-2.Q4_K_M.gguf"
+		},
 		{
 			"id": "airframeModelPath",
 			"type": "promptString",

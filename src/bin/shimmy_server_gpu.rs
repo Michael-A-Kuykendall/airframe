@@ -1,26 +1,48 @@
 // GPU-Aware Shimmy Inference Server with FSE Integration
 // Phase 4D: Full Multi-Layer Inference with KV Cache
 
+use aho_corasick::AhoCorasick;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::BindlessPipeline;
-use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0};
+use airframe::core::dequant::{
+    dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0,
+};
 use airframe::core::model::GgufTensorInfo;
+use airframe::core::routing::ModelRoutePlan;
 use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
-use aho_corasick::AhoCorasick;
-use std::sync::OnceLock;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
-use shimmyjinja;
 use std::fs;
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
-/// Xorshift64* PRNG — fast, deterministic, no external dep
+#[derive(Serialize)]
+struct RouteCheckReport {
+    route_version: u32,
+    route_digest: String,
+    model_name: String,
+    model_path: String,
+    arch: String,
+    prompt_renderer_mode: String,
+    prompt_renderer_family: Option<String>,
+    prompt_template_source: String,
+    norm_mode: String,
+    qk_norm_enabled: bool,
+    post_norm_enabled: bool,
+    qkv_layout: String,
+    ffn_mode: String,
+    hard_errors: Vec<String>,
+    strict_mode_pass: bool,
+    reasons: Vec<String>,
+    warnings: Vec<String>,
+}
 
+/// Xorshift64* PRNG — fast, deterministic, no external dep
 #[path = "shimmy_server_gpu/server_inference.rs"]
 mod server_inference;
 fn env_flag(name: &str) -> bool {
@@ -55,6 +77,10 @@ enum ChatTemplateFamily {
     ChatML,
     Llama3,
     Gemma2,
+    MiniCpmV,
+    /// Base / completion models (gpt2, phi-2 base, starcoder2, etc.).
+    /// No chat wrapper — user message content is passed through as raw text.
+    Completion,
 }
 
 impl ChatTemplateFamily {
@@ -70,7 +96,10 @@ impl ChatTemplateFamily {
                     };
                     prompt.push_str(&format!("<|{}|>\n{}</s>\n", role, msg.content));
                 }
-                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                if !matches!(
+                    messages.last().map(|msg| msg.role.as_str()),
+                    Some("assistant")
+                ) {
                     prompt.push_str("<|assistant|>\n");
                 }
                 prompt
@@ -83,7 +112,10 @@ impl ChatTemplateFamily {
                         msg.role, msg.content
                     ));
                 }
-                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                if !matches!(
+                    messages.last().map(|msg| msg.role.as_str()),
+                    Some("assistant")
+                ) {
                     prompt.push_str("<|im_start|>assistant\n");
                 }
                 prompt
@@ -99,7 +131,10 @@ impl ChatTemplateFamily {
                         msg.role, msg.content
                     ));
                 }
-                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                if !matches!(
+                    messages.last().map(|msg| msg.role.as_str()),
+                    Some("assistant")
+                ) {
                     prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n");
                 }
                 prompt
@@ -116,10 +151,40 @@ impl ChatTemplateFamily {
                         role, msg.content
                     ));
                 }
-                if !matches!(messages.last().map(|msg| msg.role.as_str()), Some("assistant")) {
+                if !matches!(
+                    messages.last().map(|msg| msg.role.as_str()),
+                    Some("assistant")
+                ) {
                     prompt.push_str("<start_of_turn>model\n");
                 }
                 prompt
+            }
+            ChatTemplateFamily::MiniCpmV => {
+                // MiniCPM-V 2.6 uses Qwen2 backbone → ChatML format (<|im_start|>/<|im_end|>)
+                let mut prompt = String::new();
+                for msg in messages {
+                    prompt.push_str(&format!(
+                        "<|im_start|>{}\n{}<|im_end|>\n",
+                        msg.role, msg.content
+                    ));
+                }
+                if !matches!(
+                    messages.last().map(|msg| msg.role.as_str()),
+                    Some("assistant")
+                ) {
+                    prompt.push_str("<|im_start|>assistant\n");
+                }
+                prompt
+            }
+            ChatTemplateFamily::Completion => {
+                // Base / completion models: pass the last user message as raw text.
+                // No special tokens — the model expects plain text input.
+                messages
+                    .iter()
+                    .filter(|m| m.role == "user")
+                    .map(|m| m.content.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
             }
         }
     }
@@ -129,14 +194,17 @@ impl ChatTemplateFamily {
 // Pattern indices for the template-marker Aho-Corasick automaton.
 // Two markers per family; both must appear for a positive classification.
 const TM_LLAMA3_HEADER: usize = 0; // <|start_header_id|>
-const TM_LLAMA3_EOT:    usize = 1; // <|eot_id|>
-const TM_GEMMA_START:   usize = 2; // <start_of_turn>
-const TM_GEMMA_END:     usize = 3; // <end_of_turn>
-const TM_CHATML_START:  usize = 4; // <|im_start|>
-const TM_CHATML_END:    usize = 5; // <|im_end|>
-const TM_TINY_USER:     usize = 6; // <|user|>
-const TM_TINY_ASST:     usize = 7; // <|assistant|>
-
+const TM_LLAMA3_EOT: usize = 1; // <|eot_id|>
+const TM_GEMMA_START: usize = 2; // <start_of_turn>
+const TM_GEMMA_END: usize = 3; // <end_of_turn>
+const TM_CHATML_START: usize = 4; // <|im_start|>
+const TM_CHATML_END: usize = 5; // <|im_end|>
+const TM_TINY_USER: usize = 6; // <|user|>
+const TM_TINY_ASST: usize = 7; // <|assistant|>
+const TM_LLAMA3_NAME_SPACE: usize = 8; // "llama 3"
+const TM_LLAMA3_NAME_HYPHEN: usize = 9; // "llama-3"
+const TM_TINYLLAMA_NAME: usize = 10; // "tinyllama"
+const TM_GEMMA_NAME: usize = 11; // "gemma"
 
 /// Single Aho-Corasick automaton covering all template + model-name markers.
 /// Built once, reused for every model load.
@@ -167,7 +235,7 @@ fn classify_template(haystack: &str) -> Option<ChatTemplateFamily> {
     let mut found = 0u16;
     for mat in template_ac().find_iter(haystack) {
         found |= 1 << mat.pattern().as_usize();
-        // Short-circuit as soon as one family is fully confirmed.
+        // Template-marker-based detection (indices 0-7)
         if (found >> TM_LLAMA3_HEADER) & 1 != 0 && (found >> TM_LLAMA3_EOT) & 1 != 0 {
             return Some(ChatTemplateFamily::Llama3);
         }
@@ -180,14 +248,62 @@ fn classify_template(haystack: &str) -> Option<ChatTemplateFamily> {
         if (found >> TM_TINY_USER) & 1 != 0 && (found >> TM_TINY_ASST) & 1 != 0 {
             return Some(ChatTemplateFamily::TinyLlama);
         }
+        // Model-name-based detection (indices 8-11) — fires when haystack
+        // is the model name (no template markers present).
+        if ((found >> TM_LLAMA3_NAME_SPACE) & 1 != 0 || (found >> TM_LLAMA3_NAME_HYPHEN) & 1 != 0)
+            && (found >> TM_LLAMA3_HEADER) & 1 == 0
+        {
+            return Some(ChatTemplateFamily::Llama3);
+        }
+        if (found >> TM_TINYLLAMA_NAME) & 1 != 0 && (found >> TM_TINY_USER) & 1 == 0 {
+            return Some(ChatTemplateFamily::TinyLlama);
+        }
+        if (found >> TM_GEMMA_NAME) & 1 != 0 && (found >> TM_GEMMA_START) & 1 == 0 {
+            return Some(ChatTemplateFamily::Gemma2);
+        }
     }
     None
 }
 
-fn chat_template_family_for_model(spec: &ModelSpec) -> ChatTemplateFamily {
+fn chat_template_family_for_model(
+    spec: &ModelSpec,
+    model_path: &str,
+) -> (ChatTemplateFamily, &'static str) {
     let lower = spec.model_name.to_ascii_lowercase();
-    // Single pass over model name; all family markers checked simultaneously.
-    classify_template(&lower).unwrap_or(ChatTemplateFamily::ChatML)
+    let path_lower = model_path.to_ascii_lowercase();
+    // MiniCPM-V shares <|user|>/<|assistant|> markers with TinyLlama but uses
+    // <|endoftext|> as separator — detect by model name or file path.
+    if lower.contains("minicpm") || path_lower.contains("minicpm") {
+        return (ChatTemplateFamily::MiniCpmV, "fallback_name_minicpm");
+    }
+    // Architecture-based detection — uses the GGUF `general.architecture` field
+    // which is always present and unambiguous. This fires only when the GGUF has
+    // no embedded Jinja template (make_prompt_renderer takes the Jinja path first).
+    match &spec.arch {
+        // phi2/phi3 base models: no chat tokens, raw completion.
+        ModelArch::Phi => return (ChatTemplateFamily::Completion, "fallback_arch"),
+        // Gemma architecture → Gemma2 turn format.
+        ModelArch::Gemma => return (ChatTemplateFamily::Gemma2, "fallback_arch"),
+        // Qwen2/3 without embedded template → ChatML (they use <|im_start|>/<|im_end|>).
+        ModelArch::Qwen2 | ModelArch::Qwen3 => {
+            return (ChatTemplateFamily::ChatML, "fallback_arch")
+        }
+        // Llama/Mistral: fall through to token-marker scan below.
+        ModelArch::Llama | ModelArch::Mistral => {}
+        // Catch-all for architectures not yet in the enum.
+        ModelArch::Other(arch) => {
+            let a = arch.to_ascii_lowercase();
+            if a.contains("gpt2") || a.contains("starcoder") || a.contains("falcon") {
+                return (ChatTemplateFamily::Completion, "fallback_arch_other");
+            }
+        }
+    }
+    // Fall back to scanning the model name for known chat-token markers.
+    if let Some(family) = classify_template(&lower) {
+        (family, "fallback_name_marker")
+    } else {
+        (ChatTemplateFamily::ChatML, "fallback_default_chatml")
+    }
 }
 
 /// Decides how to render chat prompts for a loaded model.
@@ -202,39 +318,142 @@ enum PromptRenderer {
         template: Arc<str>,
         bos: String,
         eos: String,
+        enable_thinking: Option<bool>,
+        thinking_policy_source: &'static str,
     },
     /// No embedded template — use the hard-coded family renderer.
-    Family(ChatTemplateFamily),
+    Family {
+        family: ChatTemplateFamily,
+        source: &'static str,
+        bos: Option<String>,
+    },
 }
 
 impl PromptRenderer {
-    fn render(&self, messages: &[ChatMessage]) -> String {
+    fn mode_name(&self) -> &'static str {
         match self {
-            PromptRenderer::Jinja { template, bos, eos } => {
+            PromptRenderer::Jinja { .. } => "jinja",
+            PromptRenderer::Family { .. } => "family",
+        }
+    }
+
+    fn family_name(&self) -> Option<&'static str> {
+        let family = match self {
+            PromptRenderer::Jinja { .. } => return None,
+            PromptRenderer::Family { family, .. } => family,
+        };
+        Some(match family {
+            ChatTemplateFamily::TinyLlama => "TinyLlama",
+            ChatTemplateFamily::ChatML => "ChatML",
+            ChatTemplateFamily::Llama3 => "Llama3",
+            ChatTemplateFamily::Gemma2 => "Gemma2",
+            ChatTemplateFamily::MiniCpmV => "MiniCpmV",
+            ChatTemplateFamily::Completion => "Completion",
+        })
+    }
+
+    fn template_source(&self) -> &'static str {
+        match self {
+            PromptRenderer::Jinja { .. } => "embedded",
+            PromptRenderer::Family { source, .. } => source,
+        }
+    }
+
+    fn render(&self, messages: &[ChatMessage]) -> String {
+        let rendered = match self {
+            PromptRenderer::Jinja {
+                template,
+                bos,
+                eos,
+                enable_thinking,
+                ..
+            } => {
                 let shimmy_msgs: Vec<shimmyjinja::ChatMessage> = messages
                     .iter()
-                    .map(|m| shimmyjinja::ChatMessage {
-                        role: m.role.clone(),
-                        content: m.content.clone(),
+                    .map(|m| {
+                        let mut content = m.content.clone();
+                        if matches!(enable_thinking, Some(false))
+                            && m.role != "assistant"
+                            && !content.ends_with("/nothink")
+                        {
+                            content.push_str("\n/nothink");
+                        }
+                        shimmyjinja::ChatMessage {
+                            role: m.role.clone(),
+                            content,
+                        }
                     })
                     .collect();
                 let mut ctx = shimmyjinja::RenderContext::new();
                 ctx.set_var("bos_token", bos.as_str());
                 ctx.set_var("eos_token", eos.as_str());
                 ctx.set_flag("add_generation_prompt", true);
+                if let Some(thinking_enabled) = enable_thinking {
+                    ctx.set_flag("enable_thinking", *thinking_enabled);
+                }
                 // catch_unwind guards against unsupported template constructs
                 // that slip through; falls back to ChatML on failure.
                 let tmpl = template.clone();
                 let result = std::panic::catch_unwind(move || {
                     shimmyjinja::render_chat_template_with_context(&tmpl, &shimmy_msgs, &ctx)
                 });
-                result.unwrap_or_else(|_| {
+                let rendered = result.unwrap_or_else(|_| {
                     eprintln!("[PromptRenderer] shimmyjinja panic; falling back to ChatML");
                     ChatTemplateFamily::ChatML.render_messages(messages)
-                })
+                });
+                rendered
             }
-            PromptRenderer::Family(family) => family.render_messages(messages),
+            PromptRenderer::Family { family, bos, .. } => {
+                let rendered = family.render_messages(messages);
+                if matches!(family, ChatTemplateFamily::Completion) {
+                    match bos.as_deref() {
+                        Some(prefix) if !prefix.is_empty() => {
+                            if rendered.starts_with(prefix) {
+                                rendered
+                            } else {
+                                format!("{}{}", prefix, rendered)
+                            }
+                        }
+                        _ => rendered,
+                    }
+                } else {
+                    rendered
+                }
+            }
+        };
+
+        if env_flag("SHIMMY_DEBUG_PROMPT_RENDER") {
+            match self {
+                PromptRenderer::Jinja {
+                    enable_thinking,
+                    thinking_policy_source,
+                    ..
+                } => {
+                    eprintln!(
+                        "[PromptRenderer] mode=jinja enable_thinking={:?} policy={} rendered_prompt={:?}",
+                        enable_thinking,
+                        thinking_policy_source,
+                        rendered
+                    );
+                }
+                PromptRenderer::Family { family, source, .. } => {
+                    let family_name = match family {
+                        ChatTemplateFamily::TinyLlama => "TinyLlama",
+                        ChatTemplateFamily::ChatML => "ChatML",
+                        ChatTemplateFamily::Llama3 => "Llama3",
+                        ChatTemplateFamily::Gemma2 => "Gemma2",
+                        ChatTemplateFamily::MiniCpmV => "MiniCpmV",
+                        ChatTemplateFamily::Completion => "Completion",
+                    };
+                    eprintln!(
+                        "[PromptRenderer] mode=family family={} source={} rendered_prompt={:?}",
+                        family_name, source, rendered
+                    );
+                }
+            }
         }
+
+        rendered
     }
 }
 
@@ -246,23 +465,79 @@ fn make_prompt_renderer(
     metadata: &std::collections::HashMap<String, GgufValue>,
     spec: &ModelSpec,
     tokenizer: &Tokenizer,
+    model_path: &str,
 ) -> PromptRenderer {
+    let bos_id = tokenizer.bos_token();
+    let eos_id = tokenizer.eos_token();
+    let bos = tokenizer
+        .token_to_piece(bos_id)
+        .unwrap_or_else(|_| "<s>".to_string());
+    let eos = tokenizer
+        .token_to_piece(eos_id)
+        .unwrap_or_else(|_| "</s>".to_string());
+
     if let Some(GgufValue::String(template)) = metadata.get("tokenizer.chat_template") {
-        let bos_id = tokenizer.bos_token();
-        let eos_id = tokenizer.eos_token();
-        let bos = tokenizer
-            .token_to_piece(bos_id)
-            .unwrap_or_else(|_| "<s>".to_string());
-        let eos = tokenizer
-            .token_to_piece(eos_id)
-            .unwrap_or_else(|_| "</s>".to_string());
+        let model_lower = spec.model_name.to_ascii_lowercase();
+        let path_lower = model_path.to_ascii_lowercase();
+        let env_thinking = std::env::var("SHIMMY_ENABLE_THINKING").ok().and_then(|v| {
+            if v == "1" || v.eq_ignore_ascii_case("true") {
+                Some(true)
+            } else if v == "0" || v.eq_ignore_ascii_case("false") {
+                Some(false)
+            } else {
+                None
+            }
+        });
+        let (thinking_policy_source, thinking_default) = if let Some(v) = env_thinking {
+            ("env", Some(v))
+        } else if model_lower.contains("qwen")
+            || model_lower.contains("qwq")
+            || path_lower.contains("qwen")
+            || path_lower.contains("qwq")
+            || model_lower.contains("deepseek-r1")
+            || path_lower.contains("deepseek-r1")
+        {
+            // Reasoning families often default-open <think>; keep no-think
+            // behavior by default for these models unless overridden.
+            ("heuristic_no_think", Some(false))
+        } else {
+            // Let template/model default behavior apply.
+            ("template_default", None)
+        };
+        if env_flag("SHIMMY_DEBUG_PROMPT_RENDER") {
+            eprintln!(
+                "[PromptRenderer] selected=jinja enable_thinking={:?} policy={}",
+                thinking_default, thinking_policy_source
+            );
+        }
         PromptRenderer::Jinja {
             template: template.as_str().into(),
             bos,
             eos,
+            enable_thinking: thinking_default,
+            thinking_policy_source,
         }
     } else {
-        PromptRenderer::Family(chat_template_family_for_model(spec))
+        let (family, source) = chat_template_family_for_model(spec, model_path);
+        if env_flag("SHIMMY_DEBUG_PROMPT_RENDER") {
+            let family_name = match family {
+                ChatTemplateFamily::TinyLlama => "TinyLlama",
+                ChatTemplateFamily::ChatML => "ChatML",
+                ChatTemplateFamily::Llama3 => "Llama3",
+                ChatTemplateFamily::Gemma2 => "Gemma2",
+                ChatTemplateFamily::MiniCpmV => "MiniCpmV",
+                ChatTemplateFamily::Completion => "Completion",
+            };
+            eprintln!(
+                "[PromptRenderer] selected=family family={} source={}",
+                family_name, source
+            );
+        }
+        PromptRenderer::Family {
+            family,
+            source,
+            bos: matches!(family, ChatTemplateFamily::Completion).then_some(bos),
+        }
     }
 }
 
@@ -291,6 +566,10 @@ impl ChatCompletionRequest {
             debug_trace_start_step: None,
             debug_trace_max_steps: None,
             debug_trace_include_prefill: None,
+            image_payload: None,
+            prompt_renderer_mode: Some(renderer.mode_name().to_string()),
+            prompt_renderer_family: renderer.family_name().map(|v| v.to_string()),
+            prompt_template_source: Some(renderer.template_source().to_string()),
         }
     }
 }
@@ -323,6 +602,23 @@ pub struct InferenceRequest {
     debug_trace_start_step: Option<usize>,
     debug_trace_max_steps: Option<usize>,
     debug_trace_include_prefill: Option<bool>,
+    /// Optional image payload for multimodal inference.
+    /// `pixels_hwc`: packed H×W×3 u8 RGB bytes (base64-encoded in JSON).
+    /// `h`, `w`: image dimensions in pixels.
+    pub image_payload: Option<ImagePayload>,
+    /// Metadata for prompt renderer decisioning.
+    pub prompt_renderer_mode: Option<String>,
+    pub prompt_renderer_family: Option<String>,
+    pub prompt_template_source: Option<String>,
+}
+
+/// Raw RGB image attached to a multimodal inference request.
+#[derive(Clone, Deserialize, Default)]
+pub struct ImagePayload {
+    /// Base64-encoded HWC u8 RGB bytes.
+    pub pixels_b64: String,
+    pub h: usize,
+    pub w: usize,
 }
 
 #[derive(Clone, Default)]
@@ -463,7 +759,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
     limits.max_buffer_size = adapter_limits.max_buffer_size;
-    limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
+    limits.max_storage_buffers_per_shader_stage =
+        adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
     limits.max_compute_invocations_per_workgroup = 256;
 
     let (device, queue) = adapter
@@ -484,7 +781,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let tokenizer = Tokenizer::from_gguf_file(&model_path)?;
     // Auto-derive model spec from GGUF metadata — works with any GGUF model
     let mut header_file = std::fs::File::open(&model_path)?;
-    let header_meta = airframe::backend::bindless::metadata::BindlessMetadata::new(&mut header_file);
+    let header_meta =
+        airframe::backend::bindless::metadata::BindlessMetadata::new(&mut header_file);
     drop(header_file);
     let mut spec = header_meta.to_model_spec();
 
@@ -496,7 +794,13 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let rope_scale: f32 = std::env::var("SHIMMY_ROPE_SCALE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| if max_ctx as usize > spec.n_ctx { spec.n_ctx as f32 / max_ctx as f32 } else { 1.0 });
+        .unwrap_or_else(|| {
+            if max_ctx as usize > spec.n_ctx {
+                spec.n_ctx as f32 / max_ctx as f32
+            } else {
+                1.0
+            }
+        });
     spec.n_ctx = max_ctx as usize;
     spec.rope_scale = rope_scale;
 
@@ -507,24 +811,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[GPU Server] Model loaded to VRAM");
     log_arch_tensor_registry(&spec, &gpu_model.metadata);
     // Flush any pending staging work from GGUF upload before allocating output head buffer
-    device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU device lost during initial flush");
-
-    // === Q6_K Output Head Workaround (Phase 4E) ===
-    // TinyLlama Q4_0 uses Q6_K for output.weight (not Q4_0!)
-    // GPU doesn't have Q6_K shader yet, so dequant to F32 on CPU
-    let output_head_f32 = load_output_head_f32(&model_path, &gpu_model, &device, &queue, &spec)?;
-    eprintln!("[GPU Server] Output head dequantized to F32 (262 MB)");
-
-    // If the output head buffer exceeds the hardware binding limit, route logit computation
-    // through the CPU embedding table (already loaded to RAM) instead of the GPU shader.
-    let use_cpu_head = output_head_f32.size() > adapter_limits.max_storage_buffer_binding_size as u64;
-    if use_cpu_head {
-        eprintln!(
-            "[GPU Server] Output head ({} MB) exceeds binding limit ({} MB) — CPU logit path active",
-            output_head_f32.size() / 1_048_576,
-            adapter_limits.max_storage_buffer_binding_size / 1_048_576,
-        );
-    }
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU device lost during initial flush");
 
     // === Token Embedding CPU Table ===
     // The dequant pipeline uses a hardcoded Q4_0 shader, which is wrong for
@@ -538,7 +827,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let kv_quant_int4 = std::env::var("SHIMMY_KV_QUANT")
         .map(|v| v.to_lowercase() == "int4")
         .unwrap_or(false);
-    if kv_quant_int4 && spec.head_dim % 2 != 0 {
+    if kv_quant_int4 && !spec.head_dim.is_multiple_of(2) {
         eprintln!(
             "[GPU Server] ERROR: SHIMMY_KV_QUANT=int4 requires head_dim to be a multiple of 2 \
              (nibble packing), but this model has head_dim={}. \
@@ -574,28 +863,25 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         kv_total_mb, max_ctx
     );
     // === VRAM Budget Check ===
-    // Tracks known large allocations: KV cache (K+V) + output head.
+    // Tracks known large allocations: KV cache (K+V).
     // Does not block startup — emits a structured warning if totals look tight.
     // Set SHIMMY_VRAM_LIMIT_MB to override the default (10500 for RTX 3060 12 GB).
     {
-        let head_mb = output_head_f32.size() / 1_048_576;
-        let total_known_mb = kv_total_mb + head_mb;
         let vram_limit_mb: u64 = std::env::var("SHIMMY_VRAM_LIMIT_MB")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(10500);
         eprintln!(
-            "[VRAM_BUDGET] kv_cache={} MB  output_head={} MB  tracked_total={} MB  limit={} MB",
-            kv_total_mb, head_mb, total_known_mb, vram_limit_mb
+            "[VRAM_BUDGET] kv_cache={} MB  tracked_total={} MB  limit={} MB",
+            kv_total_mb, kv_total_mb, vram_limit_mb
         );
-        if total_known_mb > vram_limit_mb {
-            let safe_ctx = ((vram_limit_mb.saturating_sub(head_mb))
-                * 1_048_576
+        if kv_total_mb > vram_limit_mb {
+            let safe_ctx = (vram_limit_mb * 1_048_576
                 / (spec.n_layer as u64 * spec.n_head_kv as u64 * spec.head_dim as u64 * 4 * 2))
                 as u32;
             eprintln!(
                 "[VRAM_BUDGET] WARN: tracked allocations ({} MB) exceed limit ({} MB).",
-                total_known_mb, vram_limit_mb
+                kv_total_mb, vram_limit_mb
             );
             eprintln!(
                 "[VRAM_BUDGET] KV cache is dominant: ctx={}  layers={}  kv_heads={}  head_dim={}",
@@ -608,6 +894,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     eprintln!("[GPU Server] FSE enabled (CrewChief active)");
+
     let shimmy_port = std::env::var("SHIMMY_PORT").unwrap_or_else(|_| "8080".to_string());
     let shimmy_bind_addr = format!("0.0.0.0:{}", shimmy_port);
     eprintln!(
@@ -621,9 +908,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let session_states = Arc::new(Mutex::new(
         std::collections::HashMap::<String, SessionState>::new(),
     ));
-    let stream_channels = Arc::new(Mutex::new(
-        std::collections::HashMap::<String, tokio::sync::broadcast::Sender<String>>::new(),
-    ));
+    let stream_channels = Arc::new(Mutex::new(std::collections::HashMap::<
+        String,
+        tokio::sync::broadcast::Sender<String>,
+    >::new()));
     let (tx_queue, mut rx_queue) = tokio::sync::mpsc::channel::<JobRequest>(15);
 
     let states_for_http = Arc::clone(&job_states);
@@ -632,7 +920,18 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let http_bind_addr = shimmy_bind_addr.clone();
     let listener = tokio::net::TcpListener::bind(&http_bind_addr).await?;
     eprintln!("[HTTP] Async listener spawned on {}", http_bind_addr);
-    let prompt_renderer = make_prompt_renderer(&gpu_model.metadata.gguf_metadata, &spec, &tokenizer);
+    let prompt_renderer = make_prompt_renderer(
+        &gpu_model.metadata.gguf_metadata,
+        &spec,
+        &tokenizer,
+        &model_path,
+    );
+    if let Err(err) =
+        run_minimum_route_check(&spec, &gpu_model.metadata, &prompt_renderer, &model_path)
+    {
+        eprintln!("[ROUTE_CHECK_FAIL] {}", err);
+        return Err(err.into());
+    }
     let models_for_http = Arc::clone(&discovered_models);
     let kv_quant_int4_for_http = kv_quant_int4;
     tokio::spawn(async move {
@@ -646,7 +945,18 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 let prompt_renderer = prompt_renderer.clone();
                 let kv_int4_flag = kv_quant_int4_for_http;
                 tokio::spawn(async move {
-                    if let Err(e) = handle_http_connection(stream, tx, states, sessions, streams, models, prompt_renderer, kv_int4_flag).await {
+                    if let Err(e) = handle_http_connection(
+                        stream,
+                        tx,
+                        states,
+                        sessions,
+                        streams,
+                        models,
+                        prompt_renderer,
+                        kv_int4_flag,
+                    )
+                    .await
+                    {
                         eprintln!("[HTTP] Connection error: {}", e);
                     }
                 });
@@ -687,14 +997,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         let task_type = job.req.task.clone().unwrap_or_else(|| "story".to_string());
         let result = if task_type == "wikitext2" || task_type == "lambada" {
             eprintln!("[GPU Worker] Running eval task: {}", task_type);
-            let _target_bin = if task_type == "wikitext2" {
-                "shimmy_eval"
-            } else {
-                "shimmy_eval"
-            }; // adjust later if they differ
+            let _target_bin = "shimmy_eval";
             let cmd = format!("source ~/.cargo/env && cargo run -p shimmy_eval --bin shimmy_eval --release -- --model /opt/repro-arena/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -t {} --limit 3000", task_type);
             let output = std::process::Command::new("bash")
-                .args(&["-c", &cmd])
+                .args(["-c", &cmd])
                 .current_dir("/opt/repro-arena/libshimmy")
                 .output();
 
@@ -747,9 +1053,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 &tokenizer,
                 &spec,
                 cache_clone,
-                &output_head_f32,
                 &embd_table_cpu,
-                use_cpu_head,
             )
             .await
         };
@@ -788,12 +1092,15 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_http_connection(
     mut stream: tokio::net::TcpStream,
     tx: tokio::sync::mpsc::Sender<JobRequest>,
     states: Arc<Mutex<std::collections::HashMap<String, JobState>>>,
     _session_states: Arc<Mutex<std::collections::HashMap<String, SessionState>>>,
-    stream_channels: Arc<Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>>,
+    stream_channels: Arc<
+        Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<String>>>,
+    >,
     discovered_models: std::sync::Arc<Vec<(String, String)>>,
     prompt_renderer: PromptRenderer,
     kv_quant_int4: bool,
@@ -861,7 +1168,8 @@ async fn handle_http_connection(
 
         let existing_result = {
             let st = states.lock().unwrap();
-            st.get(job_id).and_then(|state| state.result.as_ref().map(|resp| resp.text.clone()))
+            st.get(job_id)
+                .and_then(|state| state.result.as_ref().map(|resp| resp.text.clone()))
         };
 
         let maybe_sender = {
@@ -967,25 +1275,25 @@ async fn handle_http_connection(
             }
         } else {
             match serde_json::from_str(body_clean) {
-            Ok(r) => r,
-            Err(_) => {
-                if let Some(start) = body_clean.find('{') {
-                    if let Some(end) = body_clean.rfind('}') {
-                        match serde_json::from_str(&body_clean[start..=end]) {
-                            Ok(r) => r,
-                            Err(_) => {
-                                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: *\r\n\r\nInvalid JSON").await;
-                                return Ok(());
+                Ok(r) => r,
+                Err(_) => {
+                    if let Some(start) = body_clean.find('{') {
+                        if let Some(end) = body_clean.rfind('}') {
+                            match serde_json::from_str(&body_clean[start..=end]) {
+                                Ok(r) => r,
+                                Err(_) => {
+                                    let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: *\r\n\r\nInvalid JSON").await;
+                                    return Ok(());
+                                }
                             }
+                        } else {
+                            return Ok(());
                         }
                     } else {
                         return Ok(());
                     }
-                } else {
-                    return Ok(());
                 }
             }
-        }
         }; // end if/else path routing
 
         let job_id = format!(
@@ -1188,47 +1496,149 @@ async fn read_http_request(
     Ok(buffer)
 }
 
+/// Minimal startup routing self-check.
+///
+/// This check is intentionally lightweight and model-local:
+/// it validates that a loaded GGUF maps to one coherent prompt/math route plan
+/// and emits a structured debug report with explicit reasons.
+///
+/// Set SHIMMY_ROUTE_CHECK_STRICT=1 to fail startup on hard mismatches.
+fn run_minimum_route_check(
+    spec: &ModelSpec,
+    metadata: &airframe::backend::bindless::metadata::BindlessMetadata,
+    prompt_renderer: &PromptRenderer,
+    model_path: &str,
+) -> Result<(), String> {
+    let has = |name: &str| metadata.tensor_offsets.contains_key(name);
+    let mut route = ModelRoutePlan::from_spec_and_tensors(spec, has);
+
+    let prompt_renderer_mode = prompt_renderer.mode_name().to_string();
+    let prompt_renderer_family = prompt_renderer.family_name().map(|s| s.to_string());
+    let prompt_template_source = prompt_renderer.template_source().to_string();
+    route.apply_prompt_routing(
+        prompt_renderer_mode.clone(),
+        prompt_renderer_family.clone(),
+        prompt_template_source.clone(),
+    );
+
+    let strict_fail_hard = env_flag("SHIMMY_ROUTE_CHECK_STRICT");
+    let strict_fail_warn = env_flag("SHIMMY_ROUTE_CHECK_FAIL_ON_WARN");
+    route.strict_mode_pass =
+        route.hard_errors.is_empty() && (!strict_fail_warn || route.warnings.is_empty());
+
+    let report = RouteCheckReport {
+        route_version: route.route_version,
+        route_digest: route.digest.clone(),
+        model_name: spec.model_name.clone(),
+        model_path: model_path.to_string(),
+        arch: route.arch.clone(),
+        prompt_renderer_mode,
+        prompt_renderer_family,
+        prompt_template_source,
+        norm_mode: route.norm_kind.as_str().to_string(),
+        qk_norm_enabled: route.qk_norm_enabled,
+        post_norm_enabled: route.post_norm_enabled,
+        qkv_layout: route.qkv_layout.as_str().to_string(),
+        ffn_mode: route.ffn_kind.as_str().to_string(),
+        hard_errors: route.hard_errors.clone(),
+        strict_mode_pass: route.strict_mode_pass,
+        reasons: route.reasons.clone(),
+        warnings: route.warnings.clone(),
+    };
+
+    let warnings_count = report.warnings.len();
+    let hard_error_count = report.hard_errors.len();
+    let serialized = serde_json::to_string(&report)
+        .map_err(|e| format!("route check serialization failed: {}", e))?;
+    eprintln!("[ROUTE_CHECK] {}", serialized);
+
+    if strict_fail_hard && hard_error_count > 0 {
+        return Err(format!(
+            "minimum route check failed in strict mode with {} hard error(s)",
+            hard_error_count
+        ));
+    }
+
+    if strict_fail_warn && warnings_count > 0 {
+        return Err(format!(
+            "minimum route check failed in warning-fail mode with {} warning(s)",
+            warnings_count
+        ));
+    }
+
+    Ok(())
+}
+
 /// Architecture tensor registry: verify required tensors are present for the detected arch.
 /// Emits [ARCH_TENSOR_MISSING] for tensors that must exist, and [ARCH_TENSOR_UNEXPECTED]
 /// for tensors that indicate a likely arch mismatch. Conforms to FSE debug standards —
 /// pure log-layer, no hot-path involvement.
-fn log_arch_tensor_registry(spec: &ModelSpec, metadata: &airframe::backend::bindless::metadata::BindlessMetadata) {
+fn log_arch_tensor_registry(
+    spec: &ModelSpec,
+    metadata: &airframe::backend::bindless::metadata::BindlessMetadata,
+) {
     let has = |name: &str| metadata.tensor_offsets.contains_key(name);
     eprintln!(
         "[ARCH_REGISTRY] arch={}  layers={}  vocab={}  kv_heads={}  head_dim={}",
-        spec.arch_string(), spec.n_layer, spec.n_vocab, spec.n_head_kv, spec.head_dim
+        spec.arch_string(),
+        spec.n_layer,
+        spec.n_vocab,
+        spec.n_head_kv,
+        spec.head_dim
     );
     // Universal tensors required in every supported architecture
-    for name in &["token_embd.weight", "output_norm.weight", "blk.0.attn_norm.weight", "blk.0.ffn_norm.weight"] {
+    for name in &[
+        "token_embd.weight",
+        "output_norm.weight",
+        "blk.0.attn_norm.weight",
+    ] {
         if !has(name) {
-            eprintln!("[ARCH_TENSOR_MISSING] REQUIRED (universal): {}  arch={}", name, spec.arch_string());
+            eprintln!(
+                "[ARCH_TENSOR_MISSING] REQUIRED (universal): {}  arch={}",
+                name,
+                spec.arch_string()
+            );
         }
     }
     // Arch-specific required vs not-expected tensors
     let (required, unexpected): (&[&str], &[&str]) = match &spec.arch {
         ModelArch::Qwen3 => (
-            &["blk.0.attn_q.weight", "blk.0.attn_k.weight", "blk.0.attn_v.weight",
-              "blk.0.attn_q_norm.weight", "blk.0.attn_k_norm.weight"],
+            &[
+                "blk.0.attn_q.weight",
+                "blk.0.attn_k.weight",
+                "blk.0.attn_v.weight",
+                "blk.0.attn_q_norm.weight",
+                "blk.0.attn_k_norm.weight",
+            ],
             &["blk.0.attn_qkv.weight"],
         ),
-        ModelArch::Phi => (
-            &["blk.0.attn_qkv.weight"],
-            &["blk.0.attn_q.weight"],
-        ),
+        ModelArch::Phi => (&["blk.0.attn_qkv.weight"], &["blk.0.attn_q.weight"]),
         // Llama, Mistral, Qwen2, Gemma, Other — separate Q/K/V tensors
         _ => (
-            &["blk.0.attn_q.weight", "blk.0.attn_k.weight", "blk.0.attn_v.weight"],
+            &[
+                "blk.0.attn_q.weight",
+                "blk.0.attn_k.weight",
+                "blk.0.attn_v.weight",
+            ],
             &["blk.0.attn_q_norm.weight", "blk.0.attn_k_norm.weight"],
         ),
     };
     for name in required {
         if !has(name) {
-            eprintln!("[ARCH_TENSOR_MISSING] REQUIRED for {}: {}", spec.arch_string(), name);
+            eprintln!(
+                "[ARCH_TENSOR_MISSING] REQUIRED for {}: {}",
+                spec.arch_string(),
+                name
+            );
         }
     }
     for name in unexpected {
         if has(name) {
-            eprintln!("[ARCH_TENSOR_UNEXPECTED] {} found {} — possible arch mismatch", spec.arch_string(), name);
+            eprintln!(
+                "[ARCH_TENSOR_UNEXPECTED] {} found {} — possible arch mismatch",
+                spec.arch_string(),
+                name
+            );
         }
     }
 }
@@ -1300,106 +1710,6 @@ fn load_token_embd_cpu(
     Ok(tensor_f32.data)
 }
 
-/// Load and dequantize the output projection (lm_head) to F32.
-///
-/// Tries `output.weight` first; falls back to `token_embd.weight` for models
-/// that use tied embeddings (e.g. Llama 3.2 1B, many compact models).
-/// Handles F32, Q4_0, Q5_0, Q8_0, Q4_K, and Q6_K tensor types.
-fn load_output_head_f32(
-    model_path: &str,
-    gpu_model: &BindlessModel,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    spec: &ModelSpec,
-) -> Result<wgpu::Buffer, Box<dyn std::error::Error>> {
-    // Resolve tensor name: prefer output.weight, fall back to tied token_embd.weight
-    let tensor_name = if gpu_model.metadata.get_tensor_type("output.weight").is_some() {
-        "output.weight"
-    } else if gpu_model.metadata.get_tensor_type("token_embd.weight").is_some() {
-        eprintln!("[GPU Server] No output.weight found — using tied token_embd.weight");
-        "token_embd.weight"
-    } else {
-        return Err("Neither output.weight nor token_embd.weight found in model".into());
-    };
-
-    let ggml_type = gpu_model.metadata.get_tensor_type(tensor_name).unwrap();
-    let abs_offset = gpu_model.metadata.get_tensor_offset(tensor_name).unwrap();
-    let data_start = gpu_model.metadata.data_start_offset;
-    let relative_offset = abs_offset - data_start;
-
-    // Use dims from metadata; fall back to spec-derived shape if not stored
-    let dimensions = gpu_model
-        .metadata
-        .tensor_dims
-        .get(tensor_name)
-        .map(|d| d.iter().map(|&x| x as usize).collect::<Vec<_>>())
-        .unwrap_or_else(|| vec![spec.n_vocab, spec.n_embd]);
-
-    eprintln!(
-        "[GPU Server] Loading output head: {} (type={}, dims={:?})",
-        tensor_name, ggml_type, dimensions
-    );
-
-    let tensor_info = GgufTensorInfo {
-        name: tensor_name.to_string(),
-        dimensions,
-        ggml_type,
-        offset: relative_offset,
-    };
-
-    // Re-mmap the file for CPU dequant
-    let file = std::fs::File::open(model_path)?;
-    let mmap = unsafe { Mmap::map(&file)? };
-
-    // Dequantize to F32 based on actual tensor type
-    let tensor_f32 = match ggml_type {
-        0 => {
-            // F32 — direct copy
-            let start = (data_start + relative_offset) as usize;
-            let n = tensor_info.dimensions.iter().product::<usize>();
-            let bytes = &mmap[start..start + n * 4];
-            let data: Vec<f32> = bytes
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                .collect();
-            airframe::core::tensor::Tensor::new(data, tensor_info.dimensions.clone())?
-        }
-        2 => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
-        6 => dequantize_q5_0(&tensor_info, &mmap, data_start)?,
-        8 => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
-        12 => dequantize_q4_k(&tensor_info, &mmap, data_start)?,
-        14 => dequantize_q6_k(&tensor_info, &mmap, data_start)?,
-        other => {
-            return Err(format!("Unsupported output head quant type: {}", other).into());
-        }
-    };
-
-    eprintln!("[DEBUG] Dequantized tensor shape: {:?}", tensor_f32.shape);
-    eprintln!("[DEBUG] Total elements: {}", tensor_f32.data.len());
-    eprintln!(
-        "[DEBUG] First 10 values: {:?}",
-        &tensor_f32.data[..10.min(tensor_f32.data.len())]
-    );
-
-    // Upload to GPU (STORAGE usage for matmul shader)
-    // Use create_buffer + queue.write_buffer to avoid mapped_at_creation staging path
-    // which can fail on Vulkan (Linux) after large prior VRAM uploads.
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Output Head F32"),
-        size: (tensor_f32.data.len() * 4) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&tensor_f32.data));
-
-    eprintln!(
-        "[GPU Server] Output head F32 buffer: {} MB",
-        (tensor_f32.data.len() * 4) as f32 / 1024.0 / 1024.0
-    );
-
-    Ok(buffer)
-}
-
 fn build_templated_prompt(
     prompt_mode: &str,
     user_prompt: &str,
@@ -1438,9 +1748,37 @@ fn send_error(mut stream: TcpStream, msg: &str) {
     let _ = stream.write_all(resp.as_bytes());
 }
 
+#[allow(dead_code)]
+/// Removes empty think blocks from prompts
+/// This strips text between
+fn strip_empty_think_block(prompt: &str) -> String {
+    let mut result = prompt.to_string();
+    // Remove empty think blocks
+    while let Some(start) = result.find("think") {
+        if let Some(end) = result[start..].find("</think>") {
+            let remove_len = end + 3; // 3 for "</think>"
+            result.replace_range(start..(start + remove_len), "");
+        } else {
+            break;
+        }
+    }
+    result
+}
+
+#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_empty_think_block_removes_stub() {
+        let prompt =
+            "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
+        assert_eq!(
+            strip_empty_think_block(prompt),
+            "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
+        );
+    }
 
     #[test]
     fn build_templated_prompt_raw_passthrough() {
@@ -1455,7 +1793,8 @@ mod tests {
 
     #[test]
     fn parse_content_length_from_header() {
-        let header = "POST /v1/chat/completions HTTP/1.1\r\nContent-Length: 42\r\nHost: localhost\r\n";
+        let header =
+            "POST /v1/chat/completions HTTP/1.1\r\nContent-Length: 42\r\nHost: localhost\r\n";
         assert_eq!(parse_content_length(header), 42);
     }
 
@@ -1465,8 +1804,7 @@ mod tests {
     fn model_inventory_always_includes_loaded_model() {
         // Minimal smoke: the code path that builds the inventory must produce
         // at least one entry for the loaded model even when no MODEL_DIR is set.
-        let model_path =
-            "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf";
+        let model_path = "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf";
         let loaded_id = std::path::Path::new(model_path)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -1481,7 +1819,7 @@ mod tests {
     fn v1_models_response_is_valid_json() {
         // Build the same JSON body the /v1/models handler builds and verify
         // it can be parsed back.
-        let inventory = vec![
+        let inventory = [
             (
                 "TinyLlama-1.1B-Chat-v1.0.Q4_0".to_string(),
                 "/models/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string(),
@@ -1550,4 +1888,3 @@ mod tests {
         assert_eq!(v["choices"][0]["delta"]["content"], "hello");
     }
 }
-

@@ -68,9 +68,15 @@ async fn verify_final_norm_algebraic_isolation() -> Result<(), Box<dyn std::erro
             | wgpu::BufferUsages::COPY_DST,
     });
 
+    let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Dummy Blob"),
+        contents: &[0u8; 4],
+        usage: wgpu::BufferUsages::STORAGE,
+    });
     let model = BindlessModel {
         gpu_buffer: weight_blob,
         size: (dim * std::mem::size_of::<f32>()) as u64,
+        dummy_buf,
         metadata: BindlessMetadata {
             version: 3,
             tensor_count: 0,
@@ -92,8 +98,9 @@ async fn verify_final_norm_algebraic_isolation() -> Result<(), Box<dyn std::erro
         RMSNormParams {
             count: dim as u32,
             weights_offset: 0,
+            bias_offset: 0,
             eps,
-            padding: 0,
+            norm_type: 0,
         },
     );
 

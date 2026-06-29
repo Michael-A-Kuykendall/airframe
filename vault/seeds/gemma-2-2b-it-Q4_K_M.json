@@ -1,0 +1,38 @@
+{
+  "seed_version": 1,
+  "source_gguf": "D:/shimmy-test-models/gguf_collection\\gemma-2-2b-it-Q4_K_M.gguf",
+  "generated_at": "2026-06-13T17:21:20.525278100+00:00",
+  "model": {
+    "name": "Gemma 2 2b It",
+    "gguf_filename": "gemma-2-2b-it-Q4_K_M.gguf",
+    "arch": "other",
+    "quant": "q4_k_m",
+    "n_layers": 26,
+    "n_heads": 8,
+    "n_heads_kv": 4,
+    "head_dim": 256,
+    "n_embd": 2304,
+    "ff_dim": 9216,
+    "n_vocab": 256000,
+    "n_ctx": 8192,
+    "rope_base": 10000.0,
+    "rope_scale": 1.0,
+    "rope_dim": 256,
+    "rms_eps": 1e-06,
+    "has_qk_norm": false,
+    "attn_logit_softcap": 50.0,
+    "final_logit_softcap": 30.0,
+    "gguf_path": "D:/shimmy-test-models/gguf_collection\\gemma-2-2b-it-Q4_K_M.gguf",
+    "file_size_bytes": 1708582752
+  },
+  "oracles": [],
+  "integrity": {
+    "expected_oracle_count": 0,
+    "rms_sum": 0.0,
+    "nan_count": 0,
+    "inf_count": 0,
+    "forward_pass_seconds": 3e-07,
+    "forward_pass_ok": false,
+    "forward_error": "ShapeMismatch { tensor: \"q_weight\", expected: [2304, 2304], got: [2304, 2048] }"
+  }
+}

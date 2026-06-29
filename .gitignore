@@ -32,6 +32,9 @@ AGENTS.md
 artifacts/model_smoke/smoke_*.csv
 artifacts/model_smoke/smoke_*.log
 
+# Generated debug traces / probe outputs (local analysis artifacts)
+artifacts/debug/
+
 # Internal spike / planning docs (never commit to public repo)
 SPIKE_*.md
 VISION_OPTION_*.md
@@ -51,3 +54,44 @@ crates/libfse/docs/NAMING_CONVENTION_MILITARY.md
 crates/libfse/docs/COMMERCIAL_VALUE_PROP.md
 crates/libfse/docs/patent_materials/
 fused_semantic_execution_full_markdown_reconstruction.md
+# Development hygiene
+artifacts/
+docs/chat*.md
+.github/copilot-instructions.md
+.github/instructions/
+crates/libfse/docs/
+
+# Internal developer docs — never committed (session notes, AI handoffs, audits)
+docs/internal/
+artifacts/
+
+# vault/seeds/  # Now committed as canonical vault data
+# vault/vault.duckdb IS committed (via LFS) — do NOT add vault/ here
+
+# Generated fixture CSVs from oracle runs
+fixtures/oracle_*.csv
+
+# Windows reserved device name artifact (from bad command redirect)
+nul
+.aider*
+
+# Root-level internal dev docs — never committed
+internal/
+
+# VS Code chat chronicle
+.vscode/chat-chronicle.json
+
+# Scratch files
+console-functional-review.md
+.qwen/
+
+# Build artifacts and cache
+build/artifact/*
+target/*.rldb
+target/debug/**/*
+target/release/[a-z0-9]*all_sessions_export.json
+.opencode/opencode.json
+
+# opencode session logs (not part of hotfix release changes)
+session.json
+session_ses_*.json

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Shimmy console CLI and core orchestrator"
 
+[workspace]
+# Exclude from parent workspace — console is a standalone crate on its own timeline
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.4", features = ["derive"] }
@@ -27,6 +30,10 @@ chrono = "0.4.44"
 base64 = { version = "0.22.1", features = ["alloc"] }
 infer = "0.19.0"
 image = "0.25.9"
+
+# Shimmy ecosystem deps — used for local inference adapter and tokenization
+airframe = { path = "../..", version = "0.2.2" }
+shimmytok = "0.7.1"
 
 [dev-dependencies]
 tokio-test = "0.4"

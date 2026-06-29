@@ -1,8 +1,14 @@
 //! Full-model inference dispatch methods for `BindlessPipeline`.
 // TODO: break run_full_model_prefill_chunked_with_cache_state into a separate chunking helper once prefill chunking is the default path.
-use super::*;
 use super::super::loader::BindlessModel;
+use super::*;
+use crate::backend::tdr::TdrScheduler;
+use crate::backend::tdr_calibration;
+use crate::core::routing::ModelRoutePlan;
 use wgpu::util::DeviceExt;
+
+/// Result type for model inference returning three activation vectors
+type InferenceResult = Result<(Vec<f32>, Vec<f32>, Vec<f32>), String>;
 
 impl BindlessPipeline {
     pub fn run_full_model(
@@ -26,6 +32,7 @@ impl BindlessPipeline {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_full_model_with_cache(
         &self,
         device: &wgpu::Device,
@@ -52,6 +59,7 @@ impl BindlessPipeline {
         .2
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_full_model_prefill_chunked_with_cache_state(
         &self,
         device: &wgpu::Device,
@@ -63,10 +71,13 @@ impl BindlessPipeline {
         kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
         spec: &ModelSpec,
         chunk_tokens: u32,
-    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+    ) -> InferenceResult {
         let dim = spec.n_embd;
         assert!(dim > 0, "spec.n_embd must be > 0");
-        assert!(input_embd.len() % dim == 0, "input_embd must align to token rows");
+        assert!(
+            input_embd.len().is_multiple_of(dim),
+            "input_embd must align to token rows"
+        );
         assert!(chunk_tokens > 0, "chunk_tokens must be > 0");
 
         let trace_chunks = std::env::var("AIRFRAME_TRACE_PREFILL_CHUNKS")
@@ -91,10 +102,9 @@ impl BindlessPipeline {
 
         let chunk_rows = chunk_tokens as usize;
         let mut processed_tokens = 0u32;
-        let mut chunk_idx = 0usize;
         let mut last_result = None;
 
-        for chunk in input_embd.chunks(chunk_rows * dim) {
+        for (chunk_idx, chunk) in input_embd.chunks(chunk_rows * dim).enumerate() {
             let chunk_token_count = (chunk.len() / dim) as u32;
             let chunk_current_pos = current_pos + processed_tokens;
             let chunk_seq_len = chunk_current_pos + chunk_token_count;
@@ -102,10 +112,7 @@ impl BindlessPipeline {
             if trace_chunks {
                 eprintln!(
                     "[PREFILL] chunk={} tokens={} current_pos={} seq_len={}",
-                    chunk_idx,
-                    chunk_token_count,
-                    chunk_current_pos,
-                    chunk_seq_len
+                    chunk_idx, chunk_token_count, chunk_current_pos, chunk_seq_len
                 );
             }
 
@@ -126,12 +133,12 @@ impl BindlessPipeline {
             }
 
             processed_tokens += chunk_token_count;
-            chunk_idx += 1;
         }
 
         last_result.ok_or_else(|| "chunked prefill produced no chunks".to_string())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_full_model_with_cache_state(
         &self,
         device: &wgpu::Device,
@@ -143,13 +150,19 @@ impl BindlessPipeline {
         seq_len: u32,
         kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
         spec: &ModelSpec,
-    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+    ) -> InferenceResult {
         // Derive all constants from ModelSpec
         let dim = spec.n_embd as u32;
         let layer_count = spec.n_layer;
         let vocab_size = spec.n_vocab as u32;
         let ffn_dim = spec.ff_dim as u32;
         let temp_stride = spec.temp_buffer_size as u32;
+
+        // Phase 4a escape hatch: set AIRFRAME_PINGPONG_ACTIVATION=1 to enable ping-pong.
+        // Default off until Steps 3-4 are verified.
+        let use_pingpong = std::env::var("AIRFRAME_PINGPONG_ACTIVATION")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
 
         let weight_quant_type = model
             .metadata
@@ -163,20 +176,41 @@ impl BindlessPipeline {
             .metadata
             .get_tensor_type("blk.0.ffn_down.weight")
             .unwrap_or(weight_quant_type);
-        let packed_quant_type =
-            weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
+        let packed_quant_type = weight_quant_type | (qt_v << 8) | (qt_ffn_down << 16);
         let _ = packed_quant_type; // per-layer quant is computed in the loop below
 
         // 1. Buffers
         let batch_size = (input_embd.len() as u32) / dim;
         // A. Activation (Residual Stream) - Init with Embeddings
         let activation_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Activation"),
+            label: Some("Activation A"),
             contents: bytemuck::cast_slice(input_embd),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
         });
+
+        // A2. Activation B (Ping-Pong partner).
+        // Only created when ping-pong is active to avoid wasting VRAM on the old path.
+        // When use_pingpong=false, activation_buffer_b is a dummy zero-byte buffer
+        // that is never actually bound or used.
+        let activation_buffer_b = if use_pingpong {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Activation B (Ping-Pong)"),
+                contents: bytemuck::cast_slice(input_embd), // same initial residual
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            })
+        } else {
+            // Dummy 1-byte buffer — never bound, just satisfies the type system.
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Activation B (disabled)"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            })
+        };
 
         // B. Temp Buffer
         // Needs to hold FFN Gate + Up + scratch space per token
@@ -184,26 +218,81 @@ impl BindlessPipeline {
         let temp_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Temp State"),
             size: temp_buffer_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         // C. Layer Params (computed per-layer below; placeholder base for struct copy)
         // NOTE: quant_type varies per layer in mixed-quant models (e.g. Q4_K_M).
         //       Per-layer params buffers are created inside the layer loop.
+        let use_route_v2_layer_params = std::env::var("SHIMMY_ROUTE_V2_LAYER_PARAMS")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let route_plan = use_route_v2_layer_params.then(|| {
+            ModelRoutePlan::from_spec_and_tensors(spec, |name| {
+                model.metadata.tensor_offsets.contains_key(name)
+            })
+        });
+        let ffn_kind_policy = route_plan
+            .as_ref()
+            .map(ModelRoutePlan::ffn_kind_policy_code)
+            .unwrap_or(ModelRoutePlan::FFN_KIND_INFER);
+        let qkv_layout_policy = route_plan
+            .as_ref()
+            .map(ModelRoutePlan::qkv_layout_policy_code)
+            .unwrap_or(ModelRoutePlan::QKV_LAYOUT_INFER);
+
         let params_base = LayerParams {
             dim,
             head_count: spec.n_head as u32,
             head_count_kv: spec.n_head_kv as u32,
             head_dim: spec.head_dim as u32,
+            rope_dim: spec.rope_dim as u32,
             rms_eps: spec.rms_eps,
             ffn_dim,
             temp_stride,
-            quant_type: 0, // overridden per-layer below
+            quant_qk: 0,
+            quant_v: 0,
+            quant_attn_out: 0,
+            quant_ffn_down: 0,
+            quant_ffn_gate: 0,
+            quant_ffn_up: 0,
             attn_logit_softcap: spec.attn_logit_softcap,
-            post_norm_enabled: if spec.arch_string() == "gemma2" { 1 } else { 0 },
-            qk_norm_enabled: if spec.has_qk_norm { 1 } else { 0 },
+            post_norm_enabled: spec.post_norm_enabled as u32,
+            qk_norm_enabled: spec.has_qk_norm as u32,
+            layer_norm_enabled: spec.uses_layer_norm() as u32,
+            ffn_kind_policy,
+            qkv_layout_policy,
+            batch_offset: 0,
+            batch_count: batch_size,
+            q_weight_k: 0,
+            k_weight_k: 0,
         };
+
+        // Adaptive QKV micro-batch chunk size.
+        // Reads SHIMMY_PREFILL_CHUNK; defaults to 1 (safest — one token per dispatch).
+        // Users with fast GPUs can raise this; Q4_K_M on RTX 3060 is safe at 1.
+        // A future TIMESTAMP_QUERY calibration pass will auto-tune this at model load.
+        let qkv_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1)
+            .clamp(1, batch_size.max(1));
+
+        // ── TDR Scheduler ────────────────────────────────────────────────────
+        // TdrScheduler owns the command encoder and tracks accumulated GPU time.
+        // It replaces the scattered tdr_submit_poll! / tdr_yield_if_needed! macros
+        // with clean, testable methods. Platform-aware budget (1400ms Windows,
+        // 30000ms Linux/macOS). Override with SHIMMY_TDR_BUDGET_MS.
+        //
+        // Patent Notice: FSE + D0 Saturation Fabric scheduling.
+        // Pending patent by Michael A. Kuykendall. All rights reserved.
+        let mut tdr = TdrScheduler::new(device, queue, "Full Model", None);
+        let tdr_log = std::env::var("AIRFRAME_LOG_TDR_POLLS")
+            .map(|v| v == "1")
+            .unwrap_or(false);
 
         // D. Output Logits
         // Only computed for the LAST token in the sequence (usually).
@@ -235,7 +324,7 @@ impl BindlessPipeline {
         // Therefore full-model loop must bind a distinct K/V buffer per layer.
         let kv_size_per_buffer = spec.kv_cache_size_per_layer as u64;
         let local_kv_storage_per_layer = if kv_state.is_none() {
-            let mut bufs = Vec::with_capacity(layer_count as usize);
+            let mut bufs = Vec::with_capacity(layer_count);
             for i in 0..layer_count {
                 let kv_buffer_k = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(&format!("KV Cache K L{}", i)),
@@ -277,29 +366,57 @@ impl BindlessPipeline {
         });
 
         // 2. Prepare Layers (Offsets & BindGroups)
-        let mut layer_bind_groups = Vec::new();
+        // For ping-pong: two bind group arrays — one with activation_buffer (A) at binding 1,
+        // one with activation_buffer_b (B). Layer i uses set_a when i%2==0, set_b when i%2==1.
+        // For the old path (use_pingpong=false): only set_a is used; set_b is empty.
+        let mut layer_bind_groups = Vec::new(); // set A: activation_buffer at binding 1
+        let mut layer_bind_groups_b = Vec::new(); // set B: activation_buffer_b at binding 1
         let mut _offset_buffers = Vec::new(); // Keep alive
         let mut _params_buffers: Vec<wgpu::Buffer> = Vec::new(); // Keep alive
+        let mut _layer_params: Vec<LayerParams> = Vec::new(); // Per-layer params for QKV chunking
 
         for i in 0..layer_count {
-            let compiled = &model.metadata.compiled_layers[i as usize];
-            let layer_params_i = LayerParams {
-                quant_type: compiled.quant_type_packed,
+            let compiled = &model.metadata.compiled_layers[i];
+            let supported = [0u8, 1, 2, 6, 8, 12, 13, 14];
+            for &q in &[
+                compiled.quant_qk,
+                compiled.quant_v,
+                compiled.quant_attn_out,
+                compiled.quant_ffn_down,
+                compiled.quant_ffn_gate,
+                compiled.quant_ffn_up,
+            ] {
+                if q != 0 && !supported.contains(&(q as u8)) {
+                    panic!("Unsupported quant type {} in layer {}", q, i);
+                }
+            }
+            let mut layer_params_i = LayerParams {
+                quant_qk: compiled.quant_qk,
+                quant_v: compiled.quant_v,
+                quant_attn_out: compiled.quant_attn_out,
+                quant_ffn_down: compiled.quant_ffn_down,
+                quant_ffn_gate: compiled.quant_ffn_gate,
+                quant_ffn_up: compiled.quant_ffn_up,
                 ..params_base
             };
+            if spec.arch_string() == "qwen3" {
+                let packed_k = 2 * dim;
+                layer_params_i.q_weight_k = packed_k;
+                layer_params_i.k_weight_k = packed_k;
+            }
             let params_buffer_i = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Layer {} Params", i)),
                 contents: bytemuck::bytes_of(&layer_params_i),
-                usage: wgpu::BufferUsages::UNIFORM,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
             let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
                 if let Some((kv_k_layers, kv_v_layers)) = kv_state {
-                    (&kv_k_layers[i as usize], &kv_v_layers[i as usize])
+                    (&kv_k_layers[i], &kv_v_layers[i])
                 } else {
                     let (local_k, local_v) = &local_kv_storage_per_layer
                         .as_ref()
-                        .expect("local KV storage missing")[i as usize];
+                        .expect("local KV storage missing")[i];
                     (local_k, local_v)
                 };
 
@@ -309,66 +426,209 @@ impl BindlessPipeline {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("Layer {} BindGroup", i)),
-                layout: &self.layer_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: model.gpu_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: activation_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: temp_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: params_buffer_i.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: model
-                            .preflight
-                            .as_ref()
-                            .unwrap()
-                            .norm_bank_buffer
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: model
-                            .preflight
-                            .as_ref()
-                            .unwrap()
-                            .rope_cache_buffer
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: kv_buffer_k_ref.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: kv_buffer_v_ref.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: cache_params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            // Build bind group with a specific activation buffer at binding 1.
+            // This closure lets us create both A and B sets without duplicating all entries.
+            let make_bg = |act_buf: &wgpu::Buffer, label: &str| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(label),
+                    layout: &self.layer_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: model.blob_binding_0(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: act_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: temp_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: params_buffer_i.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .norm_bank_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .rope_cache_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: kv_buffer_k_ref.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: kv_buffer_v_ref.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 9,
+                            resource: cache_params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 10,
+                            resource: model.blob_binding_1(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 11,
+                            resource: model.blob_binding_2(),
+                        },
+                    ],
+                })
+            };
+
+            // Set A: activation_buffer (always built — used by old path + even layers in pingpong)
+            let bg_a = make_bg(&activation_buffer, &format!("Layer {} BG-A", i));
+
+            // Set B: activation_buffer_b (only built when pingpong is active)
+            if use_pingpong {
+                let bg_b = make_bg(&activation_buffer_b, &format!("Layer {} BG-B", i));
+                layer_bind_groups_b.push(bg_b);
+            }
 
             _offset_buffers.push(buf);
             _params_buffers.push(params_buffer_i);
-            layer_bind_groups.push(bg);
+            _layer_params.push(layer_params_i);
+            layer_bind_groups.push(bg_a);
+        }
+
+        // 2b. Pre-build QKV chunk bind groups (Step 5: eliminate QKV forced polls).
+        //
+        // The QKV micro-batch loop currently patches `params_buffer_i` via write_buffer
+        // for each chunk's batch_offset/batch_count, requiring 2 forced yields per chunk.
+        // Instead: pre-build one params buffer + bind group per (layer, chunk_offset).
+        // The layer loop then just selects the right pre-built bind group — no write_buffer,
+        // no forced yields for QKV.
+        //
+        // _qkv_chunk_params_buffers[layer][chunk_idx] = pre-built params buffer
+        // _qkv_chunk_bind_groups[layer][chunk_idx]   = pre-built bind group for that chunk
+        //
+        // For decode (batch_size=1, qkv_chunk=1): 1 chunk per layer = N_layers entries.
+        // For prefill (batch_size=N, qkv_chunk=512): ceil(N/512) chunks per layer.
+        let n_qkv_chunks = batch_size.div_ceil(qkv_chunk) as usize;
+        let mut _qkv_chunk_params_buffers: Vec<Vec<wgpu::Buffer>> = Vec::with_capacity(layer_count);
+        let mut _qkv_chunk_bind_groups: Vec<Vec<wgpu::BindGroup>> = Vec::with_capacity(layer_count);
+
+        for i in 0..layer_count {
+            let compiled = &model.metadata.compiled_layers[i];
+            let layer_params_base = _layer_params[i];
+            let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
+                if let Some((kv_k_layers, kv_v_layers)) = kv_state {
+                    (&kv_k_layers[i], &kv_v_layers[i])
+                } else {
+                    let (local_k, local_v) = &local_kv_storage_per_layer
+                        .as_ref()
+                        .expect("local KV storage missing")[i];
+                    (local_k, local_v)
+                };
+            let offsets_buf = &_offset_buffers[i];
+
+            let mut layer_chunk_params: Vec<wgpu::Buffer> = Vec::with_capacity(n_qkv_chunks);
+            let mut layer_chunk_bgs: Vec<wgpu::BindGroup> = Vec::with_capacity(n_qkv_chunks);
+
+            let mut qkv_offset: u32 = 0;
+            while qkv_offset < batch_size {
+                let this_chunk = (batch_size - qkv_offset).min(qkv_chunk);
+                let chunk_params = LayerParams {
+                    batch_offset: qkv_offset,
+                    batch_count: this_chunk,
+                    ..layer_params_base
+                };
+                let chunk_params_buf =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("L{}-QKV-chunk{}-Params", i, qkv_offset)),
+                        contents: bytemuck::bytes_of(&chunk_params),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                let chunk_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("L{}-QKV-chunk{}-BG", i, qkv_offset)),
+                    layout: &self.layer_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: model.blob_binding_0(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: activation_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: temp_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: offsets_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: chunk_params_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .norm_bank_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .rope_cache_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: kv_buffer_k_ref.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: kv_buffer_v_ref.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 9,
+                            resource: cache_params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 10,
+                            resource: model.blob_binding_1(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 11,
+                            resource: model.blob_binding_2(),
+                        },
+                    ],
+                });
+                layer_chunk_params.push(chunk_params_buf);
+                layer_chunk_bgs.push(chunk_bg);
+                qkv_offset += this_chunk;
+            }
+            let _ = compiled; // used above in outer loop
+            _qkv_chunk_params_buffers.push(layer_chunk_params);
+            _qkv_chunk_bind_groups.push(layer_chunk_bgs);
         }
 
         // 3. Final Norm
@@ -376,11 +636,21 @@ impl BindlessPipeline {
             .metadata
             .get_tensor_offset("output_norm.weight")
             .expect("output_norm missing");
+        let norm_bias = model
+            .metadata
+            .get_tensor_offset("output_norm.bias")
+            .map(|off| (off / 4) as u32)
+            .unwrap_or(0);
         let norm_params = RMSNormParams {
             count: dim,
-            weights_offset: norm_weight as u32,
+            weights_offset: (norm_weight / 4) as u32, // word index (byte_offset / 4); safe: 4.4GB/4 = 1.1B < u32::MAX
+            bias_offset: norm_bias,
             eps: spec.rms_eps,
-            padding: 0,
+            norm_type: if matches!(spec.arch, crate::core::spec::ModelArch::Phi) {
+                1
+            } else {
+                0
+            },
         };
         let norm_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Final Norm Params"),
@@ -398,7 +668,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffer.as_entire_binding(),
+                    resource: model.blob_binding_0(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -422,30 +692,59 @@ impl BindlessPipeline {
                     binding: 3,
                     resource: norm_param_buf.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.blob_binding_1(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.blob_binding_2(),
+                },
             ],
         });
 
-        // 4. Output Head (MatMul)
-        let head_weight = model
-            .metadata
-            .get_tensor_offset("output.weight")
-            .or_else(|| model.metadata.get_tensor_offset("token_embd.weight"))
-            .unwrap_or(0);
-
-        let head_params = MatMulParams {
-            n: vocab_size,
-            k: dim,
-            weights_offset: head_weight as u32,
-            padding: 0,
+        // 4. Output Head
+        // When head_weights_override = Some(buf): diagnostic F32 matmul override path.
+        // When head_weights_override = None (default): blob-based quantized head — reads
+        //   output.weight directly from the GGUF blob, no dequant buffer required.
+        let head_tensor_name = if model.metadata.get_tensor_type("output.weight").is_some() {
+            "output.weight"
+        } else {
+            "token_embd.weight"
         };
-        let head_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Head Params"),
-            contents: bytemuck::bytes_of(&head_params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let head_weight_off = (model
+            .metadata
+            .get_tensor_offset(head_tensor_name)
+            .unwrap_or(0)
+            / 4) as u32;
+        let head_quant_type = model
+            .metadata
+            .get_tensor_type(head_tensor_name)
+            .unwrap_or(2);
+        let supported = [0u8, 1, 2, 6, 8, 12, 13, 14];
+        if !supported.contains(&(head_quant_type as u8)) {
+            panic!("Unsupported head quant type {}", head_quant_type);
+        }
+
+        enum HeadBg {
+            F32(wgpu::BindGroup),
+            Blob(wgpu::BindGroup),
+        }
 
         let head_bg = if let Some(override_buf) = head_weights_override {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
+            // --- Diagnostic F32 override (kept for shimmy_eval comparison tests) ---
+            let head_params = MatMulParams {
+                n: vocab_size,
+                k: dim,
+                weights_offset: head_weight_off,
+                padding: 0,
+            };
+            let head_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Head Params F32"),
+                contents: bytemuck::bytes_of(&head_params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            HeadBg::F32(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Head BG F32"),
                 layout: &self.matmul_f32_layout,
                 entries: &[
@@ -470,15 +769,30 @@ impl BindlessPipeline {
                         resource: head_param_buf.as_entire_binding(),
                     },
                 ],
-            })
+            }))
         } else {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Head BG"),
-                layout: &self.matmul_layout,
+            // --- Default blob-based path: output.weight stays quantized on GPU ---
+            let head_params = HeadBlobParams {
+                vocab_size,
+                dim,
+                weight_off: head_weight_off,
+                quant_type: head_quant_type,
+                softcap: spec.final_logit_softcap,
+                base_row: 0,
+                _pad: 0,
+            };
+            let head_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Head Params Blob"),
+                contents: bytemuck::bytes_of(&head_params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            HeadBg::Blob(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Head BG Blob"),
+                layout: &self.lm_head_blob_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: model.gpu_buffer.as_entire_binding(),
+                        resource: model.blob_binding_0(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -496,127 +810,318 @@ impl BindlessPipeline {
                         binding: 3,
                         resource: head_param_buf.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: model.blob_binding_1(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: model.blob_binding_2(),
+                    },
                 ],
-            })
+            }))
         };
 
-        // 5. Command Encoding
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Full Model"),
-        });
+        // 5. Command Encoding — managed by TdrScheduler (see tdr above).
+        // The initial encoder was created by TdrScheduler::new().
 
-        let wg_dim = (dim + 255) / 256;
+        let wg_dim = dim.div_ceil(256);
         let ffn_total = ffn_dim * 2; // Gate + Up need this many threads
-        let wg_ffn = (ffn_total + 255) / 256; // Ceil div by workgroup size (256)
-        let wg_norm = (dim + 255) / 256;
-        let wg_head = (vocab_size + 255) / 256;
+        let wg_ffn = ffn_total.div_ceil(256); // Ceil div by workgroup size (256)
+        let wg_norm = dim.div_ceil(256);
+        // matmul_f32 uses @workgroup_size(256).
+        let wg_head_f32 = vocab_size.div_ceil(256);
 
         // QKV Dispatch Calculation
         let q_len = params_base.head_count * params_base.head_dim;
         let kv_len = params_base.head_count_kv * params_base.head_dim;
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv = (total_qkv + 255) / 256;
+        let wg_qkv = total_qkv.div_ceil(256);
+        let wg_qknorm = (q_len + kv_len).div_ceil(256); // must cover all Q+K elements, not just head_dim
         let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+        let disable_output_norm = std::env::var("SHIMMY_DISABLE_OUTPUT_NORM")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
 
-// Loop Layers
+        // Loop Layers
         for (i, bg) in layer_bind_groups.iter().enumerate() {
+            let params_layer = _layer_params[i]; // per-layer quant_type + base fields
             if trace_prefill_layers {
                 eprintln!(
                     "[PREFILL-LAYER] start layer={} batch_size={} current_pos={} seq_len={}",
-                    i,
-                    batch_size,
-                    current_pos,
-                    seq_len
+                    i, batch_size, current_pos, seq_len
                 );
             }
-            // Each kernel in its own compute pass to guarantee memory barriers
-            // (matches layer.rs ordering). PostAttnNorm and PostFfwNorm are no-ops
-            // when params.post_norm_enabled == 0 (non-Gemma models).
+            // All models use V1 pipelines. V1 handles all quant types (Q4_0, Q4_K, Q5_K,
+            // Q6_K, F16, F32) via per-kernel quant_type branch checks and proven-correct
+            // dequant helpers. The Q4K-specific shader family has been removed.
+            let (
+                pipe_attn_norm,
+                pipe_qkv,
+                pipe_qk_norm,
+                pipe_attn_out,
+                pipe_attn_proj,
+                pipe_post_attn_norm,
+                pipe_ffn_norm,
+                pipe_ffn_proj,
+                pipe_ffn_down,
+                pipe_post_ffw_norm,
+            ) = (
+                &self.layer_pipeline_attn_norm,
+                &self.layer_pipeline_qkv,
+                &self.layer_pipeline_qk_norm,
+                &self.layer_pipeline_attn_out,
+                &self.layer_pipeline_attn_proj,
+                &self.layer_pipeline_post_attn_norm,
+                &self.layer_pipeline_ffn_norm,
+                &self.layer_pipeline_ffn_proj,
+                &self.layer_pipeline_ffn_down,
+                &self.layer_pipeline_post_ffw_norm,
+            );
+
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - AttnNorm", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - AttnNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_attn_norm);
+                cpass.set_pipeline(pipe_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
+            // QKV: micro-batched to avoid TDR on large batch prefill.
+            // Step 5: uses pre-built per-chunk bind groups — no write_buffer, no forced yields.
+            // For correctness, yield at layer boundary handles TDR protection.
+            // For large batches, also yield every TDR_QKV_YIELD_INTERVAL chunks to prevent
+            // the GPU accumulating >2s of work inside the QKV dispatch loop.
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - QKV", i)),
-                    timestamp_writes: None,
-                });
-                cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_qkv);
-                cpass.dispatch_workgroups(wg_qkv, batch_size, 1);
+                let chunk_bgs = &_qkv_chunk_bind_groups[i];
+                let mut qkv_offset: u32 = 0;
+                let mut chunk_idx: usize = 0;
+                // Yield every 16 chunks for large batches (prevents TDR inside QKV loop)
+                const QKV_YIELD_INTERVAL: usize = 16;
+                while qkv_offset < batch_size {
+                    let this_chunk = (batch_size - qkv_offset).min(qkv_chunk);
+                    {
+                        let mut cpass =
+                            tdr.encoder
+                                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                    label: Some(&format!(
+                                        "Layer {} QKV [{}/{}]",
+                                        i, qkv_offset, batch_size
+                                    )),
+                                    timestamp_writes: None,
+                                });
+                        cpass.set_bind_group(0, &chunk_bgs[chunk_idx], &[]);
+                        cpass.set_pipeline(pipe_qkv);
+                        cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
+                    }
+                    // Yield every QKV_YIELD_INTERVAL chunks for large batches to prevent TDR
+                    if batch_size > 1
+                        && chunk_idx > 0
+                        && chunk_idx.is_multiple_of(QKV_YIELD_INTERVAL)
+                    {
+                        let label = format!("layer-{}-qkv-interval-{}", i, chunk_idx);
+                        tdr.force_yield(&label)?;
+                    }
+                    qkv_offset += this_chunk;
+                    chunk_idx += 1;
+                }
             }
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - AttnOut", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - QKNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_attn_out);
+                cpass.set_pipeline(pipe_qk_norm);
+                cpass.dispatch_workgroups(wg_qknorm, batch_size, 1);
+            }
+            {
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - AttnOut", i)),
+                        timestamp_writes: None,
+                    });
+                cpass.set_bind_group(0, bg, &[]);
+                cpass.set_pipeline(pipe_attn_out);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
+            // TDR: yield after attn_out only if accumulated budget exceeded.
+            // For large batch prefill: force yield after attn_out to prevent TDR.
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - AttnProj", i)),
-                    timestamp_writes: None,
-                });
+                let label = format!("layer-{}-attn_out", i);
+                if batch_size > 8 {
+                    tdr.force_yield(&label)?;
+                } else {
+                    tdr.yield_if_needed(&label)?;
+                }
+            }
+            {
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - AttnProj", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_attn_proj);
+                cpass.set_pipeline(pipe_attn_proj);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
             {
                 // Post-attention norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - PostAttnNorm", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - PostAttnNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_post_attn_norm);
+                cpass.set_pipeline(pipe_post_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - FFNProj", i)),
-                    timestamp_writes: None,
-                });
+            if params_layer.quant_ffn_down != 12u32 {
+                // For Q4K, ffn_norm is inside the Q4K ffn_proj kernel; skip V1 to avoid double norm.
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - FFNNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_ffn_proj);
+                cpass.set_pipeline(pipe_ffn_norm);
+                cpass.dispatch_workgroups(1, batch_size, 1);
+            }
+            {
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - FFNProj", i)),
+                        timestamp_writes: None,
+                    });
+                cpass.set_bind_group(0, bg, &[]);
+                cpass.set_pipeline(pipe_ffn_proj);
                 cpass.dispatch_workgroups(wg_ffn, batch_size, 1);
             }
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - FFNDown", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - FFNDown", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_ffn_down);
+                cpass.set_pipeline(pipe_ffn_down);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+            }
+            // TDR: yield after ffn_down only if accumulated budget exceeded.
+            {
+                let label = format!("layer-{}-ffn_down", i);
+                tdr.yield_if_needed(&label)?;
             }
             {
                 // Post-FFW norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some(&format!("Loop Layer {} - PostFfwNorm", i)),
-                    timestamp_writes: None,
-                });
+                let mut cpass = tdr
+                    .encoder
+                    .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some(&format!("Loop Layer {} - PostFfwNorm", i)),
+                        timestamp_writes: None,
+                    });
                 cpass.set_bind_group(0, bg, &[]);
-                cpass.set_pipeline(&self.layer_pipeline_post_ffw_norm);
+                cpass.set_pipeline(pipe_post_ffw_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
             }
-            
+
+            // TDR: conditional yield at layer boundary.
+            // NOTE: this yield is required for correctness on DeepSeek Q4K (UAV barrier).
+            // For large batch prefill, always force a yield every layer to prevent TDR.
+            // For decode (batch_size=1), only yield if budget exceeded (usually never).
+            {
+                let label = format!("layer-{}-boundary", i);
+                if batch_size > 1 {
+                    // Prefill: force yield every layer — GPU work per layer is ~0.5s on RTX 3060
+                    // with 32-layer Q4K_M × large batch. Without this, TDR fires.
+                    tdr.force_yield(&label)?;
+                } else {
+                    // Decode (single token): conditional only — budget rarely exceeded at 0.03s/step
+                    tdr.yield_if_needed(&label)?;
+                }
+            }
+
+            if trace_prefill_layers {
+                // Layer trace readback — uses its own encoder, separate from tdr.
+                let mut trace_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(&format!("Layer {} Trace Readback", i)),
+                    });
+                trace_encoder.copy_buffer_to_buffer(
+                    &activation_buffer,
+                    last_token_offset,
+                    &pre_norm_buffer,
+                    0,
+                    (dim as u64) * 4,
+                );
+                queue.submit(Some(trace_encoder.finish()));
+                device
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .map_err(|_| {
+                        "GPU device lost or TDR timeout during layer trace readback".to_string()
+                    })?;
+                tdr.reset_accumulator(); // readback did its own submit+poll
+
+                let trace_slice = pre_norm_buffer.slice(..);
+                let (tx_trace, rx_trace) = std::sync::mpsc::channel();
+                trace_slice.map_async(wgpu::MapMode::Read, move |res| tx_trace.send(res).unwrap());
+                loop {
+                    device
+                        .poll(wgpu::PollType::Poll)
+                        .map_err(|_| "GPU device lost during layer trace poll".to_string())?;
+                    if let Ok(res) = rx_trace.try_recv() {
+                        res.map_err(|_| "Layer trace buffer map failed".to_string())?;
+                        break;
+                    }
+                }
+                let mapped = trace_slice.get_mapped_range();
+                let trace_vals: &[f32] = bytemuck::cast_slice(&mapped);
+                let nan_count = trace_vals.iter().filter(|&&x| x.is_nan()).count();
+                let first5: Vec<f32> = trace_vals.iter().take(5).copied().collect();
+                eprintln!(
+                    "[PREFILL-LAYER-TRACE] layer={} nan={}/{} first5={:?}",
+                    i,
+                    nan_count,
+                    trace_vals.len(),
+                    first5
+                );
+                drop(mapped);
+                pre_norm_buffer.unmap();
+            }
+
             if trace_prefill_layers {
                 eprintln!("[PREFILL-LAYER] complete layer={}", i);
             }
         }
 
         // Snapshot h20 (post-layer-loop, pre-final-norm)
-        // Copy only the LAST token's state for validation
-        encoder.copy_buffer_to_buffer(
+        if tdr_log {
+            eprintln!(
+                "[TDR-STATS] batch_size={} layers={} total_yields={} forced_per_layer_min={}",
+                batch_size,
+                layer_count,
+                tdr.yield_count,
+                if layer_count > 0 {
+                    tdr.yield_count / layer_count as u32
+                } else {
+                    0
+                }
+            );
+        }
+        tdr.encoder.copy_buffer_to_buffer(
             &activation_buffer,
             last_token_offset,
             &pre_norm_buffer,
@@ -624,25 +1129,125 @@ impl BindlessPipeline {
             (dim as u64) * 4,
         );
 
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Norm+Head"),
-                timestamp_writes: None,
-            });
-
-            // Final Norm
+        // Final Norm — separate pass so wgpu inserts a memory barrier before the
+        // LM Head pass reads from temp_buffer (same region that norm writes).
+        if disable_output_norm {
+            tdr.encoder.copy_buffer_to_buffer(
+                &activation_buffer,
+                last_token_offset,
+                &temp_buffer,
+                0,
+                (dim as u64) * 4u64,
+            );
+        } else {
+            let mut cpass = tdr
+                .encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Final Norm"),
+                    timestamp_writes: None,
+                });
             cpass.set_bind_group(0, &norm_bg, &[]);
             cpass.set_pipeline(&self.rmsnorm_pipeline);
             cpass.dispatch_workgroups(wg_norm, 1, 1);
+        }
+        // LM Head
+        let mut _tile_bgs: Vec<wgpu::BindGroup> = Vec::new();
+        {
+            let mut cpass = tdr
+                .encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("LM Head"),
+                    timestamp_writes: None,
+                });
+            match &head_bg {
+                HeadBg::Blob(bg) => {
+                    cpass.set_pipeline(&self.lm_head_blob_pipeline);
 
-            // Head
-            cpass.set_bind_group(0, &head_bg, &[]);
-            if head_weights_override.is_some() {
-                cpass.set_pipeline(&self.matmul_f32_pipeline);
-            } else {
-                cpass.set_pipeline(&self.matmul_pipeline);
+                    // TDR-safe tiled dispatch: split into tiles of max_safe_wgs
+                    let max_safe_wgs =
+                        tdr_calibration::ensure_calibrated("unknown", "head_blob", dim);
+                    let tile_size = 64u32; // @workgroup_size in sh_head_blob.wgsl
+                    let total_wgs = vocab_size.div_ceil(tile_size);
+
+                    if total_wgs <= max_safe_wgs {
+                        // Fast path: single dispatch
+                        cpass.set_bind_group(0, bg, &[]);
+                        cpass.dispatch_workgroups(total_wgs, 1, 1);
+                    } else {
+                        // Tiled path: split into max_safe_wgs chunks
+                        let mut dispatched = 0u32;
+
+                        while dispatched < total_wgs {
+                            let this_tile = (total_wgs - dispatched).min(max_safe_wgs);
+                            let base_row = dispatched * tile_size;
+                            let tile_idx = dispatched / max_safe_wgs;
+
+                            let tile_params = HeadBlobParams {
+                                vocab_size,
+                                dim,
+                                weight_off: head_weight_off,
+                                quant_type: head_quant_type,
+                                softcap: spec.final_logit_softcap,
+                                base_row,
+                                _pad: 0,
+                            };
+                            let param_buf =
+                                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some(&format!("Head Params tile-{}", tile_idx)),
+                                    contents: bytemuck::bytes_of(&tile_params),
+                                    usage: wgpu::BufferUsages::UNIFORM,
+                                });
+                            let tile_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some(&format!("Head BG tile-{}", tile_idx)),
+                                layout: &self.lm_head_blob_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: model.blob_binding_0(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Buffer(
+                                            wgpu::BufferBinding {
+                                                buffer: &temp_buffer,
+                                                offset: 0,
+                                                size: Some(token_size),
+                                            },
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: logits_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: param_buf.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 10,
+                                        resource: model.blob_binding_1(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 11,
+                                        resource: model.blob_binding_2(),
+                                    },
+                                ],
+                            });
+
+                            cpass.set_bind_group(0, &tile_bg, &[]);
+                            cpass.dispatch_workgroups(this_tile, 1, 1);
+
+                            _tile_bgs.push(tile_bg);
+                            dispatched += this_tile;
+                        }
+                    }
+                }
+                HeadBg::F32(bg) => {
+                    cpass.set_bind_group(0, bg, &[]);
+                    cpass.set_pipeline(&self.matmul_f32_pipeline);
+                    cpass.dispatch_workgroups(wg_head_f32, 1, 1);
+                }
             }
-            cpass.dispatch_workgroups(wg_head, 1, 1);
         }
 
         // 6. Readback
@@ -654,9 +1259,11 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
 
-        encoder.copy_buffer_to_buffer(&temp_buffer, 0, &l21_buffer, 0, (dim as u64) * 4);
-        encoder.copy_buffer_to_buffer(&logits_buffer, 0, &staging_buffer, 0, output_size);
-        queue.submit(Some(encoder.finish()));
+        tdr.encoder
+            .copy_buffer_to_buffer(&temp_buffer, 0, &l21_buffer, 0, (dim as u64) * 4);
+        tdr.encoder
+            .copy_buffer_to_buffer(&logits_buffer, 0, &staging_buffer, 0, output_size);
+        queue.submit(Some(tdr.encoder.finish()));
 
         let pre_norm_slice = pre_norm_buffer.slice(..);
         let (tx_pre, rx_pre) = std::sync::mpsc::channel();
@@ -675,18 +1282,23 @@ impl BindlessPipeline {
         let mut main_done = false;
 
         loop {
-            device.poll(wgpu::PollType::Poll)
+            device
+                .poll(wgpu::PollType::Poll)
                 .map_err(|_| "GPU device lost during readback poll".to_string())?;
-            
+
             if !pre_done {
                 if let Ok(res) = rx_pre.try_recv() {
-                    res.map_err(|_| "Pre-norm buffer map failed. Device lost or TDR timeout.".to_string())?;
+                    res.map_err(|_| {
+                        "Pre-norm buffer map failed. Device lost or TDR timeout.".to_string()
+                    })?;
                     pre_done = true;
                 }
             }
             if !l21_done {
                 if let Ok(res) = rx_l21.try_recv() {
-                    res.map_err(|_| "L21 buffer map failed. Device lost or TDR timeout.".to_string())?;
+                    res.map_err(|_| {
+                        "L21 buffer map failed. Device lost or TDR timeout.".to_string()
+                    })?;
                     l21_done = true;
                 }
             }
@@ -696,7 +1308,7 @@ impl BindlessPipeline {
                     main_done = true;
                 }
             }
-            
+
             if pre_done && l21_done && main_done {
                 break;
             }

@@ -3,13 +3,11 @@
 
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
-use airframe::core::dequant::dequantize_q6_k;
-use airframe::core::model::GgufTensorInfo;
-use airframe::core::spec::ModelSpec;
-use memmap2::Mmap;
-use serde::{Deserialize, Serialize};
+use airframe::backend::bindless::metadata::BindlessMetadata;
+use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams};
+use serde::Serialize;
 use shimmytok::Tokenizer;
+use std::fs::File;
 use std::path::PathBuf;
 
 #[derive(Serialize)]
@@ -104,7 +102,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
     limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
-    limits.max_storage_buffers_per_shader_stage = adapter_limits.max_storage_buffers_per_shader_stage;
+    limits.max_storage_buffers_per_shader_stage =
+        adapter_limits.max_storage_buffers_per_shader_stage;
     limits.max_compute_invocations_per_workgroup = 256;
 
     let (device, queue) = adapter
@@ -122,12 +121,26 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // === Load Model ===
-    let tokenizer = Tokenizer::from_gguf_file(&model_path)?;
-    let spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+    let tokenizer = Tokenizer::from_gguf_file(model_path)?;
+
+    // Read metadata first to get correct spec for preflight
+    let mut meta_file = File::open(model_path)?;
+    let meta = BindlessMetadata::new(&mut meta_file);
+    drop(meta_file);
+    let spec = meta.to_model_spec();
+
+    eprintln!("[Layer Dump] Spec: n_embd={}, n_head={}, n_head_kv={}, head_dim={}, rope_dim={}, n_ctx={}, ffn_dim={}, rms_eps={}, has_qk_norm={}, attn_logit_softcap={}",
+        spec.n_embd, spec.n_head, spec.n_head_kv, spec.n_embd / spec.n_head, spec.rope_dim, spec.n_ctx, spec.ff_dim, spec.rms_eps,
+        spec.has_qk_norm, spec.attn_logit_softcap);
+
     let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(model_path), Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
 
-    eprintln!("[Layer Dump] Model loaded to VRAM");
+    let n_layers = gpu_model.metadata.compiled_layers.len();
+    eprintln!(
+        "[Layer Dump] Model loaded to VRAM ({}, {} layers)",
+        spec.model_name, n_layers
+    );
 
     // === Tokenize ===
     let prompt_tokens = tokenizer.encode(prompt, true)?;
@@ -139,31 +152,67 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     // === Setup ===
     let dim = spec.n_embd as u32;
+    let embd_quant_type = gpu_model
+        .metadata
+        .get_tensor_type("token_embd.weight")
+        .unwrap_or(2); // default Q4_0
     let embd_weight_offset = gpu_model
         .metadata
         .get_tensor_offset("token_embd.weight")
         .expect("token_embd.weight not found");
-    let row_bytes = (dim / 32) * 18; // Q4_0 quantization
 
-    let layer_params = LayerParams {
+    let embd_row_bytes = match embd_quant_type {
+        0 => dim * 4,            // F32
+        1 => dim * 2,            // F16
+        2 => (dim / 32) * 18,    // Q4_0
+        6 => (dim / 32) * 22,    // Q5_0
+        8 => (dim / 32) * 34,    // Q8_0
+        12 => (dim / 256) * 144, // Q4_K
+        13 => (dim / 256) * 176, // Q5_K
+        14 => (dim / 256) * 210, // Q6_K
+        _ => panic!("unsupported embedding quant type: {}", embd_quant_type),
+    };
+
+    let head_dim = (spec.n_embd / spec.n_head) as u32;
+    let rope_dim = if spec.rope_dim > 0 {
+        spec.rope_dim as u32
+    } else {
+        head_dim
+    };
+
+    let layer_params_base = LayerParams {
         dim,
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
-        head_dim: (spec.n_embd / spec.n_head) as u32,
+        head_dim,
+        rope_dim,
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
-        quant_type: 0,
-        attn_logit_softcap: 0.0,
-        post_norm_enabled: 0,
-        qk_norm_enabled: 0,
+        quant_qk: 0,
+        quant_v: 0,
+        quant_attn_out: 0,
+        quant_ffn_down: 0,
+        quant_ffn_gate: 0,
+        quant_ffn_up: 0,
+        attn_logit_softcap: spec.attn_logit_softcap,
+        post_norm_enabled: spec.post_norm_enabled as u32,
+        qk_norm_enabled: spec.has_qk_norm as u32,
+        layer_norm_enabled: spec.uses_layer_norm() as u32,
+        ffn_kind_policy: 0,
+        qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 0,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let mut kv_cache = KVCache::new(
-        &device, 22,   // n_layers
-        4,    // n_head_kv (GQA)
-        64,   // head_dim
-        2048, // max_seq_len
+        &device,
+        n_layers,
+        spec.n_head_kv as u32,
+        head_dim,
+        spec.n_ctx as u32,
     );
 
     let mut layers = Vec::new();
@@ -172,10 +221,25 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let token_id = prompt_tokens[0];
     eprintln!("[Layer Dump] Processing token {} (id={})", 0, token_id);
 
-    // Get embedding
-    let row_offset = embd_weight_offset + (token_id as u64 * row_bytes as u64);
-    let mut layer_output =
-        pipeline.run_dequant_request(&device, &queue, &gpu_model, row_offset as u32, dim);
+    // Get embedding (handles all quant types via dequant_any_hot)
+    let row_offset = embd_weight_offset + (token_id as u64 * embd_row_bytes as u64);
+    let mut layer_output = pipeline.run_dequant_any_hot(
+        &device,
+        &queue,
+        &gpu_model,
+        row_offset as u32,
+        dim,
+        embd_quant_type,
+    );
+
+    eprintln!(
+        "[Layer Dump] Embedding complete (min={:.6}, max={:.6}, mean={:.6})",
+        layer_output.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
+        layer_output
+            .iter()
+            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+        layer_output.iter().sum::<f32>() / layer_output.len() as f32
+    );
 
     // Capture embedding layer (Layer 0 input)
     layers.push(LayerOutput {
@@ -186,12 +250,24 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         hidden_states: layer_output.clone(),
     });
 
-    // === Run All 22 Layers ===
-    for layer_idx in 0..22 {
+    // === Run All Layers ===
+    for layer_idx in 0..n_layers {
+        let compiled = &gpu_model.metadata.compiled_layers[layer_idx];
+
         let layer_offsets = gpu_model
             .metadata
-            .get_layer_offsets(layer_idx, "tinyllama")
-            .expect(&format!("Layer {} offsets not found", layer_idx));
+            .get_layer_offsets(layer_idx, spec.arch_string())
+            .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
+
+        let layer_params = LayerParams {
+            quant_qk: compiled.quant_qk,
+            quant_v: compiled.quant_v,
+            quant_attn_out: compiled.quant_attn_out,
+            quant_ffn_down: compiled.quant_ffn_down,
+            quant_ffn_gate: compiled.quant_ffn_gate,
+            quant_ffn_up: compiled.quant_ffn_up,
+            ..layer_params_base
+        };
 
         layer_output = pipeline.run_layer_with_cache(
             &device,

@@ -100,6 +100,8 @@ pub struct ModelSpec {
     pub final_logit_softcap: f32,
     /// Per-head Q and K RMSNorm before RoPE (Qwen3). False for all other architectures.
     pub has_qk_norm: bool,
+    /// Gemma-2 has post-attention and post-FFW norms. False for others.
+    pub post_norm_enabled: bool,
 
     // Derived dimensions (computed once, used everywhere)
     pub head_dim: usize,  // n_embd / n_head
@@ -110,6 +112,10 @@ pub struct ModelSpec {
     pub arch: ModelArch,
     pub file_type: GgufFileType,
     pub model_name: String,
+    /// Jinja2 chat template string from GGUF metadata (tokenizer.chat_template).
+    /// Present on most instruct-tuned models. None for base models.
+    /// Use shimmyjinja::render_chat_template() to apply it.
+    pub chat_template: Option<String>,
 
     // Buffer sizing (computed from dims)
     pub temp_buffer_size: usize, // max(n_embd, ff_dim*2 + n_embd) rounded up
@@ -130,11 +136,20 @@ impl ModelSpec {
         self.kv_dim = self.n_head_kv * self.head_dim;
         // Qwen3 uses per-head Q and K RMSNorm before RoPE
         self.has_qk_norm = matches!(self.arch, ModelArch::Qwen3);
+        // Gemma-2 has post-attention and post-FFW norms
+        self.post_norm_enabled = matches!(self.arch, ModelArch::Gemma);
 
-        // Temp buffer needs to hold the largest intermediate:
-        // FFN uses ff_dim*2 (gate+up) plus dim for residual connections
+        // Temp buffer layout (must fit ALL intermediates at once):
+        //   [0..n_embd]              = attn_norm output / activation copy
+        //   [n_embd..+q_len]         = Q vectors (n_head * head_dim)
+        //   [+q_len..+kv_len]        = K vectors (n_head_kv * head_dim)
+        //   [+kv_len..+kv_len]       = V vectors (n_head_kv * head_dim)
+        //   [after KV..]             = attn scores or FFN gate + FFN up (ff_dim * 2)
+        let q_len = self.n_head * self.head_dim; // same as n_embd
+        let kv_len = self.n_head_kv * self.head_dim; // = kv_dim
+        let full_layout = self.n_embd + q_len + kv_len * 2 + self.ff_dim * 2;
         let ffn_scratch = self.ff_dim * 2 + self.n_embd;
-        let min_scratch = std::cmp::max(self.n_embd * 4, ffn_scratch);
+        let min_scratch = std::cmp::max(full_layout, ffn_scratch);
         // Round up to next 1024 boundary for GPU alignment
         self.temp_buffer_size = (min_scratch + 1023) & !1023;
 
@@ -152,63 +167,128 @@ impl ModelSpec {
     /// GGUF suffixes are globally unique within a file (only one arch is present).
     /// Eliminates ~15 individual format!/HashMap::get calls with one O(N) scan.
     pub fn from_gguf_metadata(metadata: &HashMap<String, GgufValue>) -> Self {
-        let mut arch_str        = "llama".to_string();
-        let mut model_name      = "unknown".to_string();
-        let mut file_type_raw: Option<u32>   = None;
-        let mut n_vocab:        Option<usize> = None;
-        let mut n_embd:         Option<usize> = None;
-        let mut n_layer:        Option<usize> = None;
-        let mut ff_dim:         Option<usize> = None;
-        let mut n_head:         Option<usize> = None;
-        let mut n_head_kv:      Option<usize> = None;
-        let mut rms_eps:        Option<f32>   = None;
-        let mut rope_base:      Option<f32>   = None;
-        let mut rope_dim:       Option<usize> = None;
-        let mut n_ctx:          Option<usize> = None;
-        let mut attn_softcap:   Option<f32>   = None;
-        let mut final_softcap:  Option<f32>   = None;
-        let mut head_dim_expl:  Option<usize> = None;
+        let mut arch_str = "llama".to_string();
+        let mut model_name = "unknown".to_string();
+        let mut file_type_raw: Option<u32> = None;
+        let mut n_vocab: Option<usize> = None;
+        let mut n_embd: Option<usize> = None;
+        let mut n_layer: Option<usize> = None;
+        let mut ff_dim: Option<usize> = None;
+        let mut n_head: Option<usize> = None;
+        let mut n_head_kv: Option<usize> = None;
+        let mut rms_eps: Option<f32> = None;
+        let mut rope_base: Option<f32> = None;
+        let mut rope_dim: Option<usize> = None;
+        let mut n_ctx: Option<usize> = None;
+        let mut attn_softcap: Option<f32> = None;
+        let mut final_softcap: Option<f32> = None;
+        let mut head_dim_expl: Option<usize> = None;
+        let mut chat_template: Option<String> = None;
 
         // Single pass: dispatch on exact key for `general.*` / `tokenizer.*`,
         // or on the suffix after the first `.` for arch-prefixed keys.
         for (key, value) in metadata.iter() {
             match key.as_str() {
                 "general.architecture" => {
-                    if let GgufValue::String(s) = value { arch_str = s.clone(); }
+                    if let GgufValue::String(s) = value {
+                        arch_str = s.clone();
+                    }
                 }
                 "general.name" => {
-                    if let GgufValue::String(s) = value { model_name = s.clone(); }
+                    if let GgufValue::String(s) = value {
+                        model_name = s.clone();
+                    }
                 }
                 "general.file_type" => {
-                    if let GgufValue::U32(v) = value { file_type_raw = Some(*v); }
+                    if let GgufValue::U32(v) = value {
+                        file_type_raw = Some(*v);
+                    }
                 }
                 "tokenizer.ggml.tokens" => {
-                    if let GgufValue::ArrayLen(len) = value { n_vocab = Some(*len); }
+                    if let GgufValue::ArrayLen(len) = value {
+                        n_vocab = Some(*len);
+                    }
+                }
+                "tokenizer.chat_template" => {
+                    if let GgufValue::String(s) = value {
+                        chat_template = Some(s.clone());
+                    }
                 }
                 _ => {
                     // Strip the arch prefix (everything up to and including the first '.')
                     // GGUF suffixes are unique per file; no collision risk.
                     let suffix = match key.find('.') {
                         Some(i) => &key[i + 1..],
-                        None    => continue,
+                        None => continue,
                     };
                     match suffix {
-                        "embedding_length"                  => { if let GgufValue::U32(v) = value { n_embd       = Some(*v as usize); } }
-                        "block_count"                       => { if let GgufValue::U32(v) = value { n_layer      = Some(*v as usize); } }
-                        "feed_forward_length"               => { if let GgufValue::U32(v) = value { ff_dim       = Some(*v as usize); } }
-                        "attention.head_count"              => { if let GgufValue::U32(v) = value { n_head       = Some(*v as usize); } }
-                        "attention.head_count_kv"           => { if let GgufValue::U32(v) = value { n_head_kv    = Some(*v as usize); } }
-                        "attention.layer_norm_rms_epsilon"  => { if let GgufValue::F32(v) = value { rms_eps      = Some(*v); } }
-                        "rope.freq_base"                    => { if let GgufValue::F32(v) = value { rope_base    = Some(*v); } }
-                        "rope.dimension_count"              => { if let GgufValue::U32(v) = value { rope_dim     = Some(*v as usize); } }
-                        "context_length"                    => { if let GgufValue::U32(v) = value { n_ctx        = Some(*v as usize); } }
-                        "attn_logit_softcapping"
-                        | "attention.logit_softcapping"     => { if let GgufValue::F32(v) = value { attn_softcap = Some(*v); } }
-                        "final_logit_softcapping"           => { if let GgufValue::F32(v) = value { final_softcap = Some(*v); } }
-                        "attention.key_length"              => { if let GgufValue::U32(v) = value { head_dim_expl = Some(*v as usize); } }
+                        "embedding_length" => {
+                            if let GgufValue::U32(v) = value {
+                                n_embd = Some(*v as usize);
+                            }
+                        }
+                        "block_count" => {
+                            if let GgufValue::U32(v) = value {
+                                n_layer = Some(*v as usize);
+                            }
+                        }
+                        "feed_forward_length" => {
+                            if let GgufValue::U32(v) = value {
+                                ff_dim = Some(*v as usize);
+                            }
+                        }
+                        "attention.head_count" => {
+                            if let GgufValue::U32(v) = value {
+                                n_head = Some(*v as usize);
+                            }
+                        }
+                        "attention.head_count_kv" => {
+                            if let GgufValue::U32(v) = value {
+                                n_head_kv = Some(*v as usize);
+                            }
+                        }
+                        "attention.layer_norm_rms_epsilon"
+                        | "attention.layer_norm_epsilon"
+                        | "layer_norm_epsilon" => {
+                            if let GgufValue::F32(v) = value {
+                                rms_eps = Some(*v);
+                            }
+                        }
+                        "rope.freq_base" => {
+                            if let GgufValue::F32(v) = value {
+                                rope_base = Some(*v);
+                            }
+                        }
+                        "rope.dimension_count" => {
+                            if let GgufValue::U32(v) = value {
+                                rope_dim = Some(*v as usize);
+                            }
+                        }
+                        "context_length" => {
+                            if let GgufValue::U32(v) = value {
+                                n_ctx = Some(*v as usize);
+                            }
+                        }
+                        "attn_logit_softcapping" | "attention.logit_softcapping" => {
+                            if let GgufValue::F32(v) = value {
+                                attn_softcap = Some(*v);
+                            }
+                        }
+                        "final_logit_softcapping" => {
+                            if let GgufValue::F32(v) = value {
+                                final_softcap = Some(*v);
+                            }
+                        }
+                        "attention.key_length" => {
+                            if let GgufValue::U32(v) = value {
+                                head_dim_expl = Some(*v as usize);
+                            }
+                        }
                         "vocab_size" => {
-                            if n_vocab.is_none() {
-                                if let GgufValue::U32(v) = value { n_vocab = Some(*v as usize); }
+                            if let GgufValue::U32(v) = value {
+                                if n_vocab.is_none() {
+                                    n_vocab = Some(*v as usize);
+                                }
                             }
                         }
                         _ => {}
@@ -217,14 +297,16 @@ impl ModelSpec {
             }
         }
 
-        let arch      = ModelArch::from(arch_str.as_str());
-        let file_type = file_type_raw.map(GgufFileType::from).unwrap_or(GgufFileType::Unknown);
-        let n_embd    = n_embd.expect("Missing embedding_length in GGUF metadata");
-        let n_layer   = n_layer.expect("Missing block_count in GGUF metadata");
-        let ff_dim    = ff_dim.expect("Missing feed_forward_length in GGUF metadata");
-        let n_head    = n_head.expect("Missing attention.head_count in GGUF metadata");
+        let arch = ModelArch::from(arch_str.as_str());
+        let file_type = file_type_raw
+            .map(GgufFileType::from)
+            .unwrap_or(GgufFileType::Unknown);
+        let n_embd = n_embd.expect("Missing embedding_length in GGUF metadata");
+        let n_layer = n_layer.expect("Missing block_count in GGUF metadata");
+        let ff_dim = ff_dim.expect("Missing feed_forward_length in GGUF metadata");
+        let n_head = n_head.expect("Missing attention.head_count in GGUF metadata");
         let n_head_kv = n_head_kv.unwrap_or(n_head);
-        let n_vocab   = n_vocab.unwrap_or(32000);
+        let n_vocab = n_vocab.unwrap_or(32000);
 
         Self {
             n_vocab,
@@ -233,24 +315,26 @@ impl ModelSpec {
             n_head,
             n_head_kv,
             ff_dim,
-            rms_eps:             rms_eps.unwrap_or(1e-5),
-            rope_base:           rope_base.unwrap_or(10000.0),
-            rope_scale:          1.0,
-            rope_dim:            rope_dim.unwrap_or(n_embd / n_head),
-            yarn_alpha:          1.0,
-            yarn_beta:           32.0,
-            n_ctx:               n_ctx.unwrap_or(2048),
-            attn_logit_softcap:  attn_softcap.unwrap_or(0.0),
+            rms_eps: rms_eps.unwrap_or(1e-5),
+            rope_base: rope_base.unwrap_or(10000.0),
+            rope_scale: 1.0,
+            rope_dim: rope_dim.unwrap_or(n_embd / n_head), // trust GGUF metadata; shader handles rope_pairs < n_pairs via identity rotation
+            yarn_alpha: 1.0,
+            yarn_beta: 32.0,
+            n_ctx: n_ctx.unwrap_or(2048),
+            attn_logit_softcap: attn_softcap.unwrap_or(0.0),
             final_logit_softcap: final_softcap.unwrap_or(0.0),
-            has_qk_norm:         false, // set in compute_derived() from arch
-            head_dim:            head_dim_expl.unwrap_or(0),
-            gqa_ratio:           0,
-            kv_dim:              0,
+            has_qk_norm: false,       // set in compute_derived() from arch
+            post_norm_enabled: false, // set in compute_derived() from arch
+            head_dim: head_dim_expl.unwrap_or(0),
+            gqa_ratio: 0,
+            kv_dim: 0,
             arch,
             file_type,
             model_name,
-            temp_buffer_size:         0,
-            kv_cache_size_per_layer:  0,
+            chat_template,
+            temp_buffer_size: 0,
+            kv_cache_size_per_layer: 0,
         }
         .compute_derived()
     }
@@ -274,12 +358,14 @@ impl ModelSpec {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
             arch: ModelArch::Llama,
             file_type: GgufFileType::Q4_0,
             model_name: "tinyllama_tinyllama-1.1b-chat-v1.0".to_string(),
+            chat_template: None,
             temp_buffer_size: 0,
             kv_cache_size_per_layer: 0,
         }
@@ -351,6 +437,19 @@ impl ModelSpec {
     /// Row byte size for a weight matrix in the dominant quant type
     pub fn quant_row_bytes(&self, cols: usize) -> usize {
         (cols / self.quant_block_size()) * self.quant_block_bytes()
+    }
+
+    /// Whether this architecture should run LayerNorm math (mean+variance)
+    /// instead of RMSNorm in bindless kernels and final norm.
+    pub fn uses_layer_norm(&self) -> bool {
+        match &self.arch {
+            ModelArch::Phi => true,
+            ModelArch::Other(s) => {
+                let a = s.to_ascii_lowercase();
+                a.contains("gpt2") || a.contains("starcoder") || a.contains("falcon")
+            }
+            _ => false,
+        }
     }
 }
 
@@ -542,12 +641,14 @@ mod tests {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
             arch: ModelArch::Llama,
             file_type: GgufFileType::F32,
             model_name: "test".to_string(),
+            chat_template: None,
             temp_buffer_size: 0,
             kv_cache_size_per_layer: 0,
         }
@@ -612,19 +713,37 @@ mod tests {
     fn test_from_gguf_metadata_gqa_llama32() {
         // Llama-3.2: 16 heads, 8 kv heads → gqa_ratio=2
         let mut meta = HashMap::new();
-        meta.insert("general.architecture".to_string(), GgufValue::String("llama".to_string()));
-        meta.insert("general.name".to_string(), GgufValue::String("llama32".to_string()));
+        meta.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("llama".to_string()),
+        );
+        meta.insert(
+            "general.name".to_string(),
+            GgufValue::String("llama32".to_string()),
+        );
         meta.insert("general.file_type".to_string(), GgufValue::U32(12));
         meta.insert("llama.embedding_length".to_string(), GgufValue::U32(2048));
         meta.insert("llama.block_count".to_string(), GgufValue::U32(16));
-        meta.insert("llama.feed_forward_length".to_string(), GgufValue::U32(8192));
+        meta.insert(
+            "llama.feed_forward_length".to_string(),
+            GgufValue::U32(8192),
+        );
         meta.insert("llama.attention.head_count".to_string(), GgufValue::U32(32));
-        meta.insert("llama.attention.head_count_kv".to_string(), GgufValue::U32(8));
-        meta.insert("llama.attention.layer_norm_rms_epsilon".to_string(), GgufValue::F32(1e-5));
+        meta.insert(
+            "llama.attention.head_count_kv".to_string(),
+            GgufValue::U32(8),
+        );
+        meta.insert(
+            "llama.attention.layer_norm_rms_epsilon".to_string(),
+            GgufValue::F32(1e-5),
+        );
         meta.insert("llama.rope.freq_base".to_string(), GgufValue::F32(500000.0));
         meta.insert("llama.rope.dimension_count".to_string(), GgufValue::U32(64));
         meta.insert("llama.context_length".to_string(), GgufValue::U32(131072));
-        meta.insert("tokenizer.ggml.tokens".to_string(), GgufValue::ArrayLen(32000));
+        meta.insert(
+            "tokenizer.ggml.tokens".to_string(),
+            GgufValue::ArrayLen(32000),
+        );
 
         let spec = ModelSpec::from_gguf_metadata(&meta);
         assert_eq!(spec.gqa_ratio, 4, "32/8 = 4");
@@ -635,19 +754,37 @@ mod tests {
     fn test_from_gguf_metadata_arch_prefix_used_for_keys() {
         // Verify the suffix-scan picks up arch-prefixed keys
         let mut meta = HashMap::new();
-        meta.insert("general.architecture".to_string(), GgufValue::String("llama".to_string()));
-        meta.insert("general.name".to_string(), GgufValue::String("x".to_string()));
+        meta.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("llama".to_string()),
+        );
+        meta.insert(
+            "general.name".to_string(),
+            GgufValue::String("x".to_string()),
+        );
         meta.insert("general.file_type".to_string(), GgufValue::U32(2));
         meta.insert("llama.embedding_length".to_string(), GgufValue::U32(512));
         meta.insert("llama.block_count".to_string(), GgufValue::U32(4));
-        meta.insert("llama.feed_forward_length".to_string(), GgufValue::U32(1024));
+        meta.insert(
+            "llama.feed_forward_length".to_string(),
+            GgufValue::U32(1024),
+        );
         meta.insert("llama.attention.head_count".to_string(), GgufValue::U32(8));
-        meta.insert("llama.attention.head_count_kv".to_string(), GgufValue::U32(8));
-        meta.insert("llama.attention.layer_norm_rms_epsilon".to_string(), GgufValue::F32(1e-6));
+        meta.insert(
+            "llama.attention.head_count_kv".to_string(),
+            GgufValue::U32(8),
+        );
+        meta.insert(
+            "llama.attention.layer_norm_rms_epsilon".to_string(),
+            GgufValue::F32(1e-6),
+        );
         meta.insert("llama.rope.freq_base".to_string(), GgufValue::F32(10000.0));
         meta.insert("llama.rope.dimension_count".to_string(), GgufValue::U32(64));
         meta.insert("llama.context_length".to_string(), GgufValue::U32(2048));
-        meta.insert("tokenizer.ggml.tokens".to_string(), GgufValue::ArrayLen(8192));
+        meta.insert(
+            "tokenizer.ggml.tokens".to_string(),
+            GgufValue::ArrayLen(8192),
+        );
 
         let spec = ModelSpec::from_gguf_metadata(&meta);
         assert_eq!(spec.n_embd, 512);

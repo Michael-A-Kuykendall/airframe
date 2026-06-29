@@ -89,8 +89,8 @@ async fn debug_layer_offsets() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Layer 0 attn: index 0 (bytes 0-8191)");
     println!(
         "  Layer 1 attn: index {} (bytes {})",
-        1 * 2 * spec.n_embd,
-        1 * 2 * spec.n_embd * 4
+        2 * spec.n_embd,
+        2 * spec.n_embd * 4
     );
 
     println!("\n=== ALGEBRAIC FORMULA CHECK ===");
@@ -100,7 +100,7 @@ async fn debug_layer_offsets() -> Result<(), Box<dyn std::error::Error>> {
     println!("  = {}", (l1.layer_idx * 2) as usize * spec.n_embd);
     println!(
         "\n✅ If formula produces {}, norm index is CORRECT",
-        1 * 2 * spec.n_embd
+        2 * spec.n_embd
     );
     println!("❌ If formula produces anything else, THAT'S THE BUG");
 

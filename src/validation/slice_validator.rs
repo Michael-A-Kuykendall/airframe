@@ -324,8 +324,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    const TARGET_SHA: &str =
-        "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556";
+    const TARGET_SHA: &str = "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556";
 
     fn tmp() -> TempDir {
         tempfile::tempdir().unwrap()
@@ -336,9 +335,16 @@ mod tests {
             model_sha256: TARGET_SHA.to_string(),
             model_file_size: 1234567,
             prompt_tokens: vec![1, 2, 3],
-            generated_tokens: vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
+            generated_tokens: vec![
+                10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+            ],
             per_step_logits: (0..16)
-                .map(|i| LogitInfo { step: i, max_logit_index: 10, max_logit_value: Some(5.0), finite: true })
+                .map(|i| LogitInfo {
+                    step: i,
+                    max_logit_index: 10,
+                    max_logit_value: Some(5.0),
+                    finite: true,
+                })
                 .collect(),
             determinism_proof: DeterminismProof {
                 run1_tokens: vec![10, 11],
@@ -457,14 +463,18 @@ mod tests {
     fn test_boundary_within_is_ok() {
         let td = tmp();
         let v = SliceValidator::v2_target(td.path());
-        assert!(v.validate_boundary(true, "max_tokens", "under limit").is_ok());
+        assert!(v
+            .validate_boundary(true, "max_tokens", "under limit")
+            .is_ok());
     }
 
     #[test]
     fn test_boundary_exceeded_returns_error() {
         let td = tmp();
         let v = SliceValidator::v2_target(td.path());
-        let err = v.validate_boundary(false, "context_window", "overflow at 4097").unwrap_err();
+        let err = v
+            .validate_boundary(false, "context_window", "overflow at 4097")
+            .unwrap_err();
         match err {
             SliceValidationError::SystemBoundaryExceeded { boundary, details } => {
                 assert_eq!(boundary, "context_window");
@@ -492,7 +502,10 @@ mod tests {
         let mut dr = good_decode();
         dr.model_sha256 = "wrong_sha".to_string();
         let err = v.validate_slice_01(&dr, "p").unwrap_err();
-        assert!(matches!(err, SliceValidationError::ValidationRuleViolated { .. }));
+        assert!(matches!(
+            err,
+            SliceValidationError::ValidationRuleViolated { .. }
+        ));
     }
 
     #[test]
@@ -502,7 +515,10 @@ mod tests {
         let mut dr = good_decode();
         dr.generated_tokens = vec![1, 2, 3]; // only 3 tokens
         let err = v.validate_slice_01(&dr, "p").unwrap_err();
-        assert!(matches!(err, SliceValidationError::ValidationRuleViolated { .. }));
+        assert!(matches!(
+            err,
+            SliceValidationError::ValidationRuleViolated { .. }
+        ));
     }
 
     #[test]
@@ -513,10 +529,18 @@ mod tests {
         dr.generated_tokens = vec![1; 17];
         // Also need 17 logit infos
         dr.per_step_logits = (0..17)
-            .map(|i| LogitInfo { step: i, max_logit_index: 1, max_logit_value: Some(1.0), finite: true })
+            .map(|i| LogitInfo {
+                step: i,
+                max_logit_index: 1,
+                max_logit_value: Some(1.0),
+                finite: true,
+            })
             .collect();
         let err = v.validate_slice_01(&dr, "p").unwrap_err();
-        assert!(matches!(err, SliceValidationError::ValidationRuleViolated { .. }));
+        assert!(matches!(
+            err,
+            SliceValidationError::ValidationRuleViolated { .. }
+        ));
     }
 
     #[test]
@@ -526,7 +550,10 @@ mod tests {
         let mut dr = good_decode();
         dr.per_step_logits[5].finite = false;
         let err = v.validate_slice_01(&dr, "p").unwrap_err();
-        assert!(matches!(err, SliceValidationError::InvariantViolation { .. }));
+        assert!(matches!(
+            err,
+            SliceValidationError::InvariantViolation { .. }
+        ));
     }
 
     #[test]
@@ -537,7 +564,10 @@ mod tests {
         dr.determinism_proof.identical = false;
         dr.determinism_proof.run2_tokens = vec![99, 88];
         let err = v.validate_slice_01(&dr, "p").unwrap_err();
-        assert!(matches!(err, SliceValidationError::DeterminismFailed { .. }));
+        assert!(matches!(
+            err,
+            SliceValidationError::DeterminismFailed { .. }
+        ));
     }
 
     // ── validate_slice_02 ─────────────────────────────────────────────────────
@@ -559,7 +589,10 @@ mod tests {
         let mut kv = good_kv(10, 4);
         kv.cache_len_by_step[0] = 999; // step 0 should be base=10, not 999
         let err = v.validate_slice_02(&kv, "p").unwrap_err();
-        assert!(matches!(err, SliceValidationError::InvariantViolation { .. }));
+        assert!(matches!(
+            err,
+            SliceValidationError::InvariantViolation { .. }
+        ));
     }
 
     #[test]
@@ -569,7 +602,10 @@ mod tests {
         let mut kv = good_kv(5, 6);
         kv.cache_len_by_step[3] = 7; // step 3: expected 5+3=8, got 7
         let err = v.validate_slice_02(&kv, "p").unwrap_err();
-        assert!(matches!(err, SliceValidationError::InvariantViolation { .. }));
+        assert!(matches!(
+            err,
+            SliceValidationError::InvariantViolation { .. }
+        ));
     }
 
     #[test]
@@ -604,6 +640,9 @@ mod tests {
             mismatch_report: "diverged at step 3".to_string(),
         };
         let result = v.validate_slice_03(&oracle, "p");
-        assert!(result.is_ok(), "slice_03 records mismatch but doesn't fail on it");
+        assert!(
+            result.is_ok(),
+            "slice_03 records mismatch but doesn't fail on it"
+        );
     }
 }

@@ -14,11 +14,13 @@ const BLOCK_SIZE: u32 = 32u; // Q4_0 Block Size
 
 struct LayerOffsets {
     attn_norm: u32,
+    attn_norm_bias: u32,
     attn_q: u32,
     attn_k: u32,
     attn_v: u32,
     attn_out: u32,
     ffn_norm: u32,
+    ffn_norm_bias: u32,
     ffn_gate: u32,
     ffn_down: u32,
     ffn_up: u32,
@@ -32,6 +34,7 @@ struct LayerParams {
     head_count: u32,    // 32
     head_count_kv: u32, // 4 (GQA)
     head_dim: u32,      // 64
+    rope_dim: u32,      // rotary sub-dimension (may be < head_dim for partial RoPE)
     rms_eps: f32,       // 1e-5
     ffn_dim: u32,       // Feed-forward intermediate dim (e.g. 5632)
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
@@ -39,6 +42,9 @@ struct LayerParams {
     attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
     post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
     qk_norm_enabled: u32,     // 1 = apply per-head Q/K RMSNorm before attention (Qwen3); 0 = disabled
+    layer_norm_enabled: u32,  // 1 = LayerNorm path (Phi); 0 = RMSNorm
+    ffn_kind_policy: u32,     // 0 = infer from offsets, 1 = gated, 2 = non-gated
+    qkv_layout_policy: u32,   // 0 = infer from offsets, 1 = separate, 2 = fused
 };
 
 struct CacheParams {
@@ -69,6 +75,16 @@ struct CacheParams {
 @group(0) @binding(11) var<storage, read> kv_cache_k_scale:  array<f32>;  // K scales  [max_seq, n_head_kv]
 @group(0) @binding(12) var<storage, read> kv_cache_v_packed: array<u32>;  // V nibbles [max_seq, n_head_kv, head_dim/8]
 @group(0) @binding(13) var<storage, read> kv_cache_v_scale:  array<f32>;  // V scales  [max_seq, n_head_kv]
+
+fn is_non_gated() -> bool {
+    if (params.ffn_kind_policy == 2u) {
+        return true;
+    }
+    if (params.ffn_kind_policy == 1u) {
+        return false;
+    }
+    return offsets.ffn_gate == 0u;
+}
 
 // Helper functions for Q4_0 dequant
 fn unpack_q4_0(block_val: u32, idx_in_block: u32) -> f32 {
@@ -280,15 +296,35 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let temp_base = token_idx * params.temp_stride;
 
     var sum_sq = 0.0;
+    var sum = 0.0;
     for (var i = 0u; i < params.dim; i++) {
         let val = activation_in[act_base + i];
         sum_sq += val * val;
+        sum += val;
     }
+    let mean = sum / f32(params.dim);
     let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+    var inv_std = rms;
+    if (params.layer_norm_enabled != 0u) {
+        var var_sum = 0.0;
+        for (var i = 0u; i < params.dim; i++) {
+            let d = activation_in[act_base + i] - mean;
+            var_sum += d * d;
+        }
+        inv_std = inverseSqrt(var_sum / f32(params.dim) + params.rms_eps);
+    }
 
     let norm_offset_base = offsets.layer_idx * 4u * params.dim;
     let norm_w = norm_bank[norm_offset_base + idx];
-    temp_state[temp_base + idx] = activation_in[act_base + idx] * rms * norm_w;
+    let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.attn_norm_bias / 4u + idx]), offsets.attn_norm_bias != 0u);
+    let centered = select(activation_in[act_base + idx], activation_in[act_base + idx] - mean, params.layer_norm_enabled != 0u);
+    let normed = centered * inv_std * norm_w + norm_b;
+    temp_state[temp_base + idx] = normed;
+
+    if (params.layer_norm_enabled != 0u || is_non_gated()) {
+        temp_state[temp_base + params.ffn_dim * 2u + idx] = normed;
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -551,6 +587,7 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let kv_head_idx = head_idx / gqa_ratio;
     let q_base     = temp_base + params.dim + head_idx * params.head_dim;
     let n_pairs    = params.head_dim / 2u;
+    let rope_pairs = params.rope_dim / 2u;
     let compact_query_pos = cache_params.current_pos + token_idx;
     let logical_query_pos = cache_params.logical_pos_base + compact_query_pos;
 
@@ -581,9 +618,13 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k_base = pos * params.head_count_kv * params.head_dim
                    + kv_head_idx * params.head_dim;
         for (var p = 0u; p < n_pairs; p++) {
-            let tbl   = rel * n_pairs * 2u + p * 2u;
-            let cos_a = rope_table[tbl];
-            let sin_a = rope_table[tbl + 1u];
+            var cos_a = 1.0;
+            var sin_a = 0.0;
+            if (p < rope_pairs) {
+                let tbl = rel * rope_pairs * 2u + p * 2u;
+                cos_a = rope_table[tbl];
+                sin_a = rope_table[tbl + 1u];
+            }
             let doff  = p * 2u;
             let q_re  = temp_state[q_base + doff];
             let q_im  = temp_state[q_base + doff + 1u];
@@ -853,7 +894,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
                 let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
+                let val_x = seq_x;
                 dot += val_x * dequant_q6k_elem(bb, e);
             }
         }
@@ -865,7 +908,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
                 let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
+                let val_x = seq_x;
                 dot += val_x * dequant_q5k_elem(bb, e);
             }
         }
@@ -877,7 +922,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var e = 0u; e < 256u; e++) {
                 let col = b * 256u + e;
                 let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
+                let val_x = seq_x;
                 dot += val_x * dequant_q4k_elem(block_base_k, e);
             }
         }
@@ -889,7 +936,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var e = 0u; e < 32u; e++) {
                 let col = b * 32u + e;
                 let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
+                let val_x = seq_x;
                 dot += val_x * dequant_q8_0_elem(bb, e);
             }
         }
@@ -897,14 +946,18 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_off + (row_idx * params.dim + col) * 2u;
             let norm_w = norm_bank[norm_offset_base + col];
-            let val_x = activation_in[act_base + col] * rms * norm_w;
+            let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
+            let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
+            let val_x = seq_x;
             dot += val_x * dequant_f16_at(w_byte);
         }
     } else if ((params.quant_type & 0xFFu) == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_off / 4u + row_idx * params.dim + col;
             let norm_w = norm_bank[norm_offset_base + col];
-            let val_x = activation_in[act_base + col] * rms * norm_w;
+            let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
+            let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
+            let val_x = seq_x;
             dot += val_x * bitcast<f32>(gguf_blob[w_idx]);
         }
     } else { // Q4_0
@@ -919,7 +972,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             for (var i = 0u; i < 32u; i++) {
                 let col = b * 32u + i;
                 let norm_w = norm_bank[norm_offset_base + col];
-                let val_x = activation_in[act_base + col] * rms * norm_w;
+                let norm_b = select(0.0, bitcast<f32>(gguf_blob[offsets.ffn_norm_bias / 4u + col]), offsets.ffn_norm_bias != 0u);
+                let seq_x = activation_in[act_base + col] * rms * norm_w + norm_b;
+                let val_x = seq_x;
                 let byte_idx = i % 16u;
                 let qs_idx = qs_byte_start + byte_idx;
                 let qs_word = gguf_blob[qs_idx / 4u];
@@ -1092,6 +1147,7 @@ fn main_attn_out_int4(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let kv_head_idx = head_idx / gqa_ratio;
     let q_base     = temp_base + params.dim + head_idx * params.head_dim;
     let n_pairs    = params.head_dim / 2u;
+    let rope_pairs = params.rope_dim / 2u;
     let hd8        = params.head_dim / 8u;  // U32s per head-vector
     let compact_query_pos = cache_params.current_pos + token_idx;
     let logical_query_pos = cache_params.logical_pos_base + compact_query_pos;
@@ -1121,9 +1177,13 @@ fn main_attn_out_int4(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k_flat_base = pos * params.head_count_kv * params.head_dim
                         + kv_head_idx * params.head_dim;
         for (var p = 0u; p < n_pairs; p++) {
-            let tbl   = rel * n_pairs * 2u + p * 2u;
-            let cos_a = rope_table[tbl];
-            let sin_a = rope_table[tbl + 1u];
+            var cos_a = 1.0;
+            var sin_a = 0.0;
+            if (p < rope_pairs) {
+                let tbl = rel * rope_pairs * 2u + p * 2u;
+                cos_a = rope_table[tbl];
+                sin_a = rope_table[tbl + 1u];
+            }
             let doff  = p * 2u;
             let q_re  = temp_state[q_base + doff];
             let q_im  = temp_state[q_base + doff + 1u];

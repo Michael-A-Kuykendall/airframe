@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Initialize Engine
     let llama_model = LlamaModel::from_spec(model.spec.clone());
-    let mut engine = Engine::new(llama_model);
+    let mut engine = Engine::new(Box::new(llama_model));
     let sampler = Sampler::greedy();
 
     // 4. Prefill

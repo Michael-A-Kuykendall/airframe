@@ -76,7 +76,12 @@ mod tests {
     }
 
     fn tensor_info(dims: Vec<usize>) -> GgufTensorInfo {
-        GgufTensorInfo { name: "test".to_string(), dimensions: dims, ggml_type: 2, offset: 0 }
+        GgufTensorInfo {
+            name: "test".to_string(),
+            dimensions: dims,
+            ggml_type: 2,
+            offset: 0,
+        }
     }
 
     // ── Basic dequant: all-zero nibbles ───────────────────────────────────────

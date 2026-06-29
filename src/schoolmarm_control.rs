@@ -11,8 +11,8 @@ pub struct SchoolmarmControl {
 impl SchoolmarmControl {
     /// Create a new SchoolmarmControl wrapper for a given Grammar
     pub fn new(grammar: Grammar, decoder: Arc<dyn TokenDecoder>) -> Result<Self, String> {
-        let state = GrammarState::new(grammar)
-            .map_err(|e| format!("Grammar init failed: {}", e))?;
+        let state =
+            GrammarState::new(grammar).map_err(|e| format!("Grammar init failed: {}", e))?;
         Ok(Self {
             state: Mutex::new(state),
             decoder,
@@ -49,13 +49,19 @@ mod tests {
 
     impl MockDecoder {
         fn new(map: HashMap<usize, String>) -> Self {
-            Self { map, fallback: "?".to_string() }
+            Self {
+                map,
+                fallback: "?".to_string(),
+            }
         }
     }
 
     impl TokenDecoder for MockDecoder {
         fn decode_single(&self, token: usize) -> String {
-            self.map.get(&token).cloned().unwrap_or_else(|| self.fallback.clone())
+            self.map
+                .get(&token)
+                .cloned()
+                .unwrap_or_else(|| self.fallback.clone())
         }
     }
 
@@ -107,7 +113,11 @@ mod tests {
         let ctrl = SchoolmarmControl::new(grammar, decoder).unwrap();
         let decision = ctrl.intervene(&fake_event(0));
         // "hel" is a valid prefix of "hello" → Allow
-        assert_eq!(decision, ControlDecision::Allow, "partial prefix should Allow");
+        assert_eq!(
+            decision,
+            ControlDecision::Allow,
+            "partial prefix should Allow"
+        );
     }
 
     // ── intervene: EarlyExit path ─────────────────────────────────────────────
@@ -172,6 +182,10 @@ mod tests {
         assert_eq!(d1, ControlDecision::Allow, "first char should Allow");
 
         let d2 = ctrl.intervene(&fake_event(11)); // "b"
-        assert_eq!(d2, ControlDecision::EarlyExit, "completing 'ab' should EarlyExit");
+        assert_eq!(
+            d2,
+            ControlDecision::EarlyExit,
+            "completing 'ab' should EarlyExit"
+        );
     }
 }

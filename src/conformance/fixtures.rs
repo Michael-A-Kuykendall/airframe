@@ -315,7 +315,9 @@ pub fn create_test_fixture() -> ConformanceFixture {
         fixture_id: "test-fixture-001".to_string(),
         model: ModelInfo {
             name: "TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string(),
-            gguf_path_hint: "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf".to_string(),
+            gguf_path_hint:
+                "D:/shimmy-test-models/gguf_collection/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf"
+                    .to_string(),
             gguf_sha256: "TBD".to_string(),
             spec: ModelSpecInfo {
                 n_vocab: 32000,

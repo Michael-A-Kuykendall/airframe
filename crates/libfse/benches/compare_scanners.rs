@@ -1,19 +1,20 @@
+use aho_corasick::AhoCorasick;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use libfse::{FseMap, FseOpcode, FseScanner, Rule};
-use aho_corasick::AhoCorasick;
 
 fn bench_scanners(c: &mut Criterion) {
     // 1. Setup Data
     let patterns = vec!["needle", "haystack", "mission_critical", "abort_code"];
-    let text = "This is a haystack that might contain a needle or two. ".repeat(1000) 
-             + "Sometimes we find a mission_critical error code. "
-             + "But mostly just haystack text repeating over and over. ";
+    let text = "This is a haystack that might contain a needle or two. ".repeat(1000)
+        + "Sometimes we find a mission_critical error code. "
+        + "But mostly just haystack text repeating over and over. ";
     let input = text.as_bytes();
 
     // 2. Setup LibFSE
-    let rules: Vec<Rule> = patterns.iter().map(|p| {
-        Rule::new(p, FseOpcode::Record(1))
-    }).collect();
+    let rules: Vec<Rule> = patterns
+        .iter()
+        .map(|p| Rule::new(p, FseOpcode::Record(1)))
+        .collect();
     let map = FseMap::compile(rules).unwrap();
     let mut scanner = FseScanner::new(&map).unwrap();
 
@@ -31,7 +32,7 @@ fn bench_scanners(c: &mut Criterion) {
             // Reset automaton allows us to scan from the start of the state machine,
             // correctly benchmarking the "from zero" scan cost each iteration.
             scanner.reset_automaton_state().unwrap();
-            
+
             black_box(scanner.scan(black_box(input))).unwrap();
         })
     });

@@ -7,6 +7,7 @@
 use crate::core::{error::Result, spec::ModelSpec, tensor::Tensor, weight_id::WeightId};
 use crate::ops::dispatch::OpDispatcher;
 use crate::runtime::kvcache::KvCache;
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -80,7 +81,7 @@ fn should_trace_layer_out(layer: usize, cache_len: usize) -> bool {
     let trace_cache_len = std::env::var("LIBSHIMMY_TRACE_LAYER_OUT_CACHELEN")
         .ok()
         .and_then(|s| s.parse::<usize>().ok());
-    trace_layer.map_or(true, |l| l == layer) && trace_cache_len.map_or(true, |c| c == cache_len)
+    trace_layer.is_none_or(|l| l == layer) && trace_cache_len.is_none_or(|c| c == cache_len)
 }
 
 /// Emit L0 checkpoint to trace file
@@ -559,6 +560,30 @@ impl LlamaModel {
     }
 }
 
+impl super::ModelFamily for LlamaModel {
+    fn forward(
+        &self,
+        input_ids: &[usize],
+        weights: &HashMap<WeightId, Tensor>,
+        kv_cache: &mut KvCache,
+        ops: &OpDispatcher,
+    ) -> Result<Tensor> {
+        self.forward(input_ids, weights, kv_cache, ops)
+    }
+
+    fn required_weights(&self) -> Vec<WeightId> {
+        self.required_weights()
+    }
+
+    fn validate_weights(&self, weights: &HashMap<WeightId, Tensor>) -> Result<()> {
+        self.validate_weights(weights)
+    }
+
+    fn spec(&self) -> &ModelSpec {
+        &self.spec
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,6 +592,7 @@ mod tests {
 
     fn create_tiny_spec() -> ModelSpec {
         ModelSpec {
+            chat_template: None,
             n_vocab: 100,
             n_embd: 8,
             n_layer: 2,
@@ -591,6 +617,7 @@ mod tests {
             attn_logit_softcap: 0.0,
             final_logit_softcap: 0.0,
             has_qk_norm: false,
+            post_norm_enabled: false,
         }
         .compute_derived()
     }

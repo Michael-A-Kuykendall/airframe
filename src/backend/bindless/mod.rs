@@ -2,6 +2,8 @@ pub mod kv_cache;
 pub mod loader;
 pub mod metadata;
 pub mod pipeline;
+pub mod pool_encoder;
+pub mod pool_timestamp;
 pub mod preflight;
 
 pub mod pipeline_shift;

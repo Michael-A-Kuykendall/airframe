@@ -13,8 +13,8 @@ use crate::core::error::{LibshimmyError, Result};
 // non_camel_case_types: GGML naming convention uses underscores (Q4_0, Q4_K, etc.)
 #[allow(non_camel_case_types)]
 pub enum GgmlType {
-    F32  = 0,
-    F16  = 1,
+    F32 = 0,
+    F16 = 1,
     Q4_0 = 2,
     Q5_0 = 6,
     Q8_0 = 8,
@@ -27,11 +27,11 @@ impl GgmlType {
     /// Convert from raw GGML type ID to enum
     pub fn from_u32(type_id: u32) -> Result<Self> {
         match type_id {
-            0  => Ok(GgmlType::F32),
-            1  => Ok(GgmlType::F16),
-            2  => Ok(GgmlType::Q4_0),
-            6  => Ok(GgmlType::Q5_0),
-            8  => Ok(GgmlType::Q8_0),
+            0 => Ok(GgmlType::F32),
+            1 => Ok(GgmlType::F16),
+            2 => Ok(GgmlType::Q4_0),
+            6 => Ok(GgmlType::Q5_0),
+            8 => Ok(GgmlType::Q8_0),
             12 => Ok(GgmlType::Q4_K),
             13 => Ok(GgmlType::Q5_K),
             14 => Ok(GgmlType::Q6_K),
@@ -46,8 +46,8 @@ impl GgmlType {
     /// Get the canonical name for this GGML type
     pub fn name(&self) -> &'static str {
         match self {
-            GgmlType::F32  => "F32",
-            GgmlType::F16  => "F16",
+            GgmlType::F32 => "F32",
+            GgmlType::F16 => "F16",
             GgmlType::Q4_0 => "Q4_0",
             GgmlType::Q5_0 => "Q5_0",
             GgmlType::Q8_0 => "Q8_0",
@@ -309,8 +309,8 @@ mod tests {
 
     #[test]
     fn test_ggml_type_name_all_variants() {
-        assert_eq!(GgmlType::F32.name(),  "F32");
-        assert_eq!(GgmlType::F16.name(),  "F16");
+        assert_eq!(GgmlType::F32.name(), "F32");
+        assert_eq!(GgmlType::F16.name(), "F16");
         assert_eq!(GgmlType::Q4_0.name(), "Q4_0");
         assert_eq!(GgmlType::Q5_0.name(), "Q5_0");
         assert_eq!(GgmlType::Q8_0.name(), "Q8_0");
@@ -329,9 +329,9 @@ mod tests {
 
     #[test]
     fn test_ggml_type_name_function_all() {
-        assert_eq!(ggml_type_name(1).unwrap(),  "F16");
-        assert_eq!(ggml_type_name(6).unwrap(),  "Q5_0");
-        assert_eq!(ggml_type_name(8).unwrap(),  "Q8_0");
+        assert_eq!(ggml_type_name(1).unwrap(), "F16");
+        assert_eq!(ggml_type_name(6).unwrap(), "Q5_0");
+        assert_eq!(ggml_type_name(8).unwrap(), "Q8_0");
         assert_eq!(ggml_type_name(13).unwrap(), "Q5_K");
     }
 
@@ -375,6 +375,9 @@ mod tests {
         // validate_tensor_bounds with an unknown type_id should return an error
         let err = validate_tensor_bounds("my_tensor", 99, 10000, 999999, 100).unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("my_tensor") || msg.len() > 0, "error message should be non-empty");
+        assert!(
+            msg.contains("my_tensor") || !msg.is_empty(),
+            "error message should be non-empty"
+        );
     }
 }
