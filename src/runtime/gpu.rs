@@ -441,8 +441,8 @@ impl GpuRuntime {
         let forward_fn: std::sync::Arc<
             dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync,
         > = std::sync::Arc::new(move |token_data: Vec<f32>, current_pos: u32| {
-            // Gate DIAG prints behind AIRFRAME_DIAG_ENABLED env var (6ex issue fix)
-            if std::env::var("AIRFRAME_DIAG_ENABLED").is_err() {
+            // Gate DIAG prints behind AIRFRAME_LOG_TDR_POLLS=1 (6ex)
+            if std::env::var("AIRFRAME_LOG_TDR_POLLS").is_ok() {
                 eprintln!(
                     "[DIAG] decode forward current_pos={} prompt_len={}",
                     current_pos, prompt_len

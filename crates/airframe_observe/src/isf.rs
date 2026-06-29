@@ -323,7 +323,9 @@ impl InferenceSaturationFabric {
                     for _ in 0..*token_count {
                         kv_inc();
                     }
-                    eprintln!("[DIAG] after prefill kv_inc called {} times", token_count);
+                    if std::env::var("AIRFRAME_LOG_TDR_POLLS").is_ok() {
+                        eprintln!("[DIAG] after prefill kv_inc called {} times", token_count);
+                    }
                     {
                         let mut s = state_ref.lock().unwrap();
                         s.logits = logits;
@@ -513,10 +515,12 @@ impl InferenceSaturationFabric {
                         (s.tdr_accumulated_ms, s.tdr_budget_ms)
                     };
                     if accumulated >= budget {
-                        eprintln!(
-                            "[ISF-TDR] layer={} accumulated={}ms >= budget={}ms → TdrRiskHigh",
-                            layer, accumulated, budget
-                        );
+                        if std::env::var("AIRFRAME_LOG_TDR_POLLS").is_ok() {
+                            eprintln!(
+                                "[ISF-TDR] layer={} accumulated={}ms >= budget={}ms → TdrRiskHigh",
+                                layer, accumulated, budget
+                            );
+                        }
                         vec![InferenceFact::TdrRiskHigh { layer: *layer }]
                     } else {
                         vec![]
