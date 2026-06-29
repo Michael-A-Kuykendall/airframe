@@ -1,6 +1,6 @@
 //! # airframe-observe
 //!
-//! FSE-based inference observation layer, powered by d0-engine.
+//! FSE-based inference observation layer, powered by dzero.
 //!
 //! ## The Core Inversion
 //!
@@ -12,11 +12,11 @@
 //! Cost: O(N_observers × M_selectors)
 //! ```
 //!
-//! This crate is selector-first (FSE/d0-engine architecture):
+//! This crate is selector-first (FSE/dzero architecture):
 //! ```text
 //! ObservationSession::new(plan)  ← compile once
 //! forward_pass emits facts        ← single pass
-//! All observers receive data simultaneously via d0-engine broadcast
+//! All observers receive data simultaneously via dzero broadcast
 //! Cost: O(M_selectors), independent of observer count
 //! ```
 //!

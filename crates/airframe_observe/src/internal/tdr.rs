@@ -1,12 +1,12 @@
 //! Private TDR / Saturation Fabric support.
 //! Implements TDR navigation as part of the FSE/D0 reactive layer.
-//! Uses d0-engine SaturationFabric internally for one-pass fact propagation,
+//! Uses dzero SaturationFabric internally for one-pass fact propagation,
 //! chunk calibration, vault writes, and beads updates.
 //!
 //! All types and functions here are private to the crate.
 
 use crate::facts::InferenceFact;
-use d0_engine::{AlphaKey, ClosureProgram, RunBudget, SaturationFabric};
+use dzero::{AlphaKey, ClosureProgram, RunBudget, SaturationFabric};
 use std::sync::Arc;
 
 /// TDR-specific facts (kept private).
@@ -74,13 +74,13 @@ impl PrivateTdrNavigator {
     pub fn new() -> Self {
         let program = build_tdr_program();
         let key_fn = tdr_alpha_key;
-        let handler = |c: d0_engine::Consequent<InferenceFact>,
-                       store: &mut d0_engine::FactStore<InferenceFact>|
+        let handler = |c: dzero::Consequent<InferenceFact>,
+                       store: &mut dzero::FactStore<InferenceFact>|
          -> Vec<InferenceFact> {
             // Handle consequents: drive chunking, vault write, beads update.
             // This is where the "saturation fabric" actions live.
             match c {
-                d0_engine::Consequent::Custom(msg) if msg == "apply_chunk" => {
+                dzero::Consequent::Custom(msg) if msg == "apply_chunk" => {
                     // In real: patch LayerParams, submit micro batch, etc.
                     vec![]
                 }

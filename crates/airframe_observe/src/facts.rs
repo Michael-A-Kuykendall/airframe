@@ -1,13 +1,13 @@
 //! InferenceFact — the domain fact vocabulary for inference observation.
 //!
-//! This is the domain-specific Fact enum that plugs into d0-engine's
+//! This is the domain-specific Fact enum that plugs into dzero's
 //! generic ReactiveGraph<InferenceFact>.
 //!
 //! Each variant corresponds to a data point in the inference graph.
 //! When the forward pass produces one of these, it is asserted into
 //! the ReactiveGraph, which broadcasts it to all registered observers.
 
-use d0_engine::AlphaKey;
+use dzero::AlphaKey;
 
 /// Why generation halted.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -35,7 +35,7 @@ pub enum YieldReason {
 
 /// A fact about an inference run.
 ///
-/// Three tiers following d0-engine conventions:
+/// Three tiers following dzero conventions:
 /// - Structural (Tier 1): emitted as data is produced
 /// - Semantic (Tier 2): derived by rules (e.g. "layer output is stable")
 /// - Consequent (Tier 3): drives external actions (not stored)
@@ -230,7 +230,7 @@ pub const KEY_PREFILL_COMPLETE: u64 = 15;
 pub const KEY_DECODE_STEP: u64 = 16;
 pub const KEY_DECODE_LOGITS_READY: u64 = 17;
 
-/// Map an InferenceFact to its AlphaKey for d0-engine dispatch.
+/// Map an InferenceFact to its AlphaKey for dzero dispatch.
 ///
 /// This is the discriminant function — maps fact variants to index keys.
 /// Rules registered on a key only fire when a fact with that key arrives.

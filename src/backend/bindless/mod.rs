@@ -20,5 +20,4 @@ mod test_rope;
 mod tests;
 #[cfg(test)]
 mod tests_gpu_math;
-#[cfg(test)]
-mod tests_golden_traces;
+

@@ -1,11 +1,11 @@
 //! Built-in observers for the vault pipeline.
 //!
-//! Each observer is a d0-engine rule registered on specific InferenceFact keys.
+//! Each observer is a dzero rule registered on specific InferenceFact keys.
 //! When the forward pass emits a fact, all rules indexed on that fact's alpha key
 //! fire simultaneously — zero additional extraction cost per shared selector.
 
 use crate::facts::{bits_to_f32, InferenceFact, KEY_FINAL_LOGITS, KEY_LAYER_OUTPUT};
-use d0_engine::{AlphaKey, FactStore};
+use dzero::{AlphaKey, FactStore};
 use std::sync::{Arc, Mutex};
 
 /// Captured oracle data from a single layer.
@@ -39,7 +39,7 @@ impl VaultOracleObserver {
         }
     }
 
-    /// Returns the rule closure to register with d0-engine.
+    /// Returns the rule closure to register with dzero.
     /// The closure fires on every LayerOutput fact.
     pub fn rule(
         &self,
@@ -102,7 +102,7 @@ impl CandleCompareObserver {
         }
     }
 
-    /// Returns the rule closure to register with d0-engine.
+    /// Returns the rule closure to register with dzero.
     pub fn rule(
         &self,
     ) -> impl Fn(&InferenceFact, &FactStore<InferenceFact>) -> Vec<InferenceFact> + Send + Sync

@@ -6,7 +6,7 @@
 members = ["crates/libfse", "sample"]
 # Private internal tools — not part of CI:
 #   crates/candle_probe     — cross-validation spike, depends on candle (heavy)
-#   crates/airframe_observe — FSE observation layer, depends on private d0-engine
+#   crates/airframe_observe — FSE observation layer, depends on dzero
 
 [package]
 name = "airframe"
@@ -43,7 +43,7 @@ sha2 = "0.10"
 aho-corasick = { version = "1.1", features = ["std"] }
 shimmyjinja = { version = "0.5.0" }
 
-# Optional: ISF (Inference Saturation Fabric) — depends on private d0-engine.
+# Optional: ISF (Inference Saturation Fabric) — depends on dzero.
 # Enable with --features isf. Not published to crates.io.
 airframe-observe = { path = "crates/airframe_observe", optional = true }
 

@@ -17,9 +17,9 @@ publish = false
 serde       = { version = "1.0", features = ["derive"] }
 serde_json  = "1.0"
 
-# d0-engine: the FSE reactive fact engine (private, patent-pending)
-# This is the execution backend for the observation layer.
-d0-engine   = { path = "C:/Users/micha/repos/dzero-cas/d0-engine" }
+# dzero: the FSE reactive fact engine
+# Published to crates.io as the generic saturation core.
+dzero       = "0.1"
 
 # NOTE: airframe dep removed — airframe now optionally depends on airframe-observe,
 # not the other way around. This breaks the circular dependency.

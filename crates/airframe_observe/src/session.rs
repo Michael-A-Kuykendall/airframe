@@ -1,20 +1,20 @@
 //! ObservationSession — the live runtime for a single inference pass.
 //!
-//! Wraps d0-engine's ReactiveGraph<InferenceFact> with the inference domain's
+//! Wraps dzero's ReactiveGraph<InferenceFact> with the inference domain's
 //! fact vocabulary and observer registration API.
 //!
 //! Usage:
 //! 1. Create a session
 //! 2. Register observers (vault oracle, candle compare, stability, etc.)
 //! 3. During forward pass: call emit() for each layer output and final logits
-//! 4. Call saturate() to run d0-engine to fixpoint
+//! 4. Call saturate() to run dzero to fixpoint
 //! 5. Read results from observers
 
 use crate::facts::{
     alpha_key_of, InferenceFact, KernelKind, YieldReason, KEY_DISPATCH_TIMING, KEY_TDR_RISK_HIGH,
 };
 use crate::observers::{CandleCompareObserver, LayerStabilityObserver, VaultOracleObserver};
-use d0_engine::{AlphaKey, ClosureProgram, ReactiveGraph, RunBudget, RunResult};
+use dzero::{AlphaKey, ClosureProgram, ReactiveGraph, RunBudget, RunResult};
 use std::sync::{Arc, Mutex};
 
 /// TDR scheduler — holds mutable timing state between layer dispatches.
@@ -216,7 +216,7 @@ impl ObservationSession {
         });
     }
 
-    /// Run d0-engine to fixpoint. All observers receive their data.
+    /// Run dzero to fixpoint. All observers receive their data.
     ///
     /// Returns RunResult with statistics.
     /// Call this after all facts for the current pass have been emitted.

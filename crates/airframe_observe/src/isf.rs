@@ -19,11 +19,11 @@ use crate::facts::{
     KEY_EMBEDDING_READY, KEY_EMBEDDING_REQUEST, KEY_PREFILL_BATCH_READY, KEY_PREFILL_COMPLETE,
     KEY_PROMPT_TOKEN, KEY_TDR_RISK_HIGH,
 };
-use d0_engine::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric};
+use dzero::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-/// Re-export RunBudget::default() so callers don't need d0_engine directly.
+/// Re-export RunBudget::default() so callers don't need dzero directly.
 pub fn d0_run_budget() -> RunBudget {
     RunBudget::default()
 }
