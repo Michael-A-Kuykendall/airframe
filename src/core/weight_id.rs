@@ -18,7 +18,14 @@ pub enum WeightId {
     /// Per-head Q RMSNorm weight (Qwen3). Shape: [head_dim]. GGUF: blk.N.attn_q_norm.weight
     AttnQNorm { layer: usize },
     /// Per-head K RMSNorm weight (Qwen3). Shape: [head_dim]. GGUF: blk.N.attn_k_norm.weight
-    AttnKNorm { layer: usize },
+    AttnKNorm {
+        layer: usize,
+    },
+    /// Per-head attention logit scale (Qwen3). Shape: [n_head]. GGUF: blk.N.attention.scale
+    /// Multiplies attention scores after 1/sqrt(head_dim). Defaults to 1.0/sqrt(head_dim) when absent.
+    AttentionScale {
+        layer: usize,
+    },
 
     FfnGate { layer: usize },
     FfnUp { layer: usize },

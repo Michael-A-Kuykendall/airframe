@@ -29,7 +29,7 @@ pub fn attention_f32(
     causal_mask: bool,
 ) -> Result<Tensor> {
     // Validate GQA configuration
-    if n_head % n_head_kv != 0 {
+    if !n_head.is_multiple_of(n_head_kv) {
         return Err(LibshimmyError::Unsupported(format!(
             "n_head ({}) must be divisible by n_head_kv ({})",
             n_head, n_head_kv
@@ -129,9 +129,10 @@ pub fn attention_with_cache_f32(
     layer_idx: usize,
     kv_cache: &mut KvCache,
     qk_norm: Option<(&Tensor, &Tensor)>, // (q_norm_weight, k_norm_weight) for Qwen3
+    attention_scale: Option<&Tensor>,    // per-head scale [n_head] for Qwen3
 ) -> Result<Tensor> {
     // Validate GQA configuration
-    if n_head % n_head_kv != 0 {
+    if !n_head.is_multiple_of(n_head_kv) {
         return Err(LibshimmyError::Unsupported(format!(
             "n_head ({}) must be divisible by n_head_kv ({})",
             n_head, n_head_kv
@@ -192,20 +193,10 @@ pub fn attention_with_cache_f32(
     };
 
     // 3. Apply RoPE to Q and K (using position_ids for absolute positions)
-    let q_rope = rope::apply_rope_scaled_f32(
-        &q_heads,
-        position_ids,
-        rope_base,
-        rope_dim,
-        rope_scale,
-    )?;
-    let k_rope = rope::apply_rope_scaled_f32(
-        &k_heads,
-        position_ids,
-        rope_base,
-        rope_dim,
-        rope_scale,
-    )?;
+    let q_rope =
+        rope::apply_rope_scaled_f32(&q_heads, position_ids, rope_base, rope_dim, rope_scale)?;
+    let k_rope =
+        rope::apply_rope_scaled_f32(&k_heads, position_ids, rope_base, rope_dim, rope_scale)?;
 
     // 4. Store new K, V in cache (before retrieving full cache)
     // Note: We store AFTER RoPE for K, but V is unmodified
@@ -271,9 +262,13 @@ pub fn attention_with_cache_f32(
             );
         }
 
-        // Scale by sqrt(head_dim)
-        let scale = 1.0 / (head_dim as f32).sqrt();
-        let scaled_scores = scale_tensor(&scores, scale)?;
+        // Scale by sqrt(head_dim), then optionally multiply by per-head attention.scale (Qwen3)
+        let base_scale = 1.0 / (head_dim as f32).sqrt();
+        let head_scale = attention_scale
+            .and_then(|s| s.data.get(h))
+            .copied()
+            .unwrap_or(1.0);
+        let scaled_scores = scale_tensor(&scores, base_scale * head_scale)?;
 
         // Apply softmax with causal mask
         // For causal mask with cache: each query position can only attend to
@@ -417,20 +412,10 @@ fn attention_2d(
     let v_heads = reshape_to_heads(&v, seq_len, n_head_kv, head_dim)?; // [seq_len, n_head_kv, head_dim]
 
     // 3. Apply RoPE to Q and K
-    let q_rope = rope::apply_rope_scaled_f32(
-        &q_heads,
-        position_ids,
-        rope_base,
-        rope_dim,
-        rope_scale,
-    )?;
-    let k_rope = rope::apply_rope_scaled_f32(
-        &k_heads,
-        position_ids,
-        rope_base,
-        rope_dim,
-        rope_scale,
-    )?;
+    let q_rope =
+        rope::apply_rope_scaled_f32(&q_heads, position_ids, rope_base, rope_dim, rope_scale)?;
+    let k_rope =
+        rope::apply_rope_scaled_f32(&k_heads, position_ids, rope_base, rope_dim, rope_scale)?;
 
     // DIAGNOSTIC: Check if tracing is enabled
     let trace_attention = std::env::var("LIBSHIMMY_TRACE_ATTENTION").is_ok();
@@ -922,5 +907,74 @@ mod tests {
         .unwrap();
 
         assert_eq!(output.shape, vec![batch_size, seq_len, hidden_size]);
+    }
+
+    /// T-1.4: Bidirectional attention (causal_mask=false) correctness.
+    ///
+    /// With causal masking OFF every token must attend to every other token.
+    /// We verify this by checking that token-0's output changes when a later
+    /// token's value changes — which would be impossible under causal masking.
+    #[test]
+    fn test_bidirectional_attention_all_tokens_visible() {
+        // 4-token sequence, 1 head, head_dim=4, hidden=4
+        let seq_len = 4;
+        let hidden = 4;
+        let n_head = 1;
+        let n_head_kv = 1;
+        let head_dim = 4;
+
+        // Identity projections so Q/K/V = input directly
+        let eye4: Vec<f32> = vec![
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ];
+        let q_w = Tensor::new(eye4.clone(), vec![hidden, n_head * head_dim]).unwrap();
+        let k_w = Tensor::new(eye4.clone(), vec![hidden, n_head_kv * head_dim]).unwrap();
+        let v_w = Tensor::new(eye4.clone(), vec![hidden, n_head_kv * head_dim]).unwrap();
+        let o_w = Tensor::new(eye4.clone(), vec![n_head * head_dim, hidden]).unwrap();
+
+        // Input where token-3 has a distinctive value
+        let input_a = Tensor::new(
+            vec![
+                1., 0., 0., 0., // tok 0
+                0., 1., 0., 0., // tok 1
+                0., 0., 1., 0., // tok 2
+                0., 0., 0., 9., // tok 3 — large distinctive value
+            ],
+            vec![seq_len, hidden],
+        )
+        .unwrap();
+
+        // Same but token-3 is zeroed
+        let input_b = Tensor::new(
+            vec![
+                1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0.,
+                0., // tok 3 now zero
+            ],
+            vec![seq_len, hidden],
+        )
+        .unwrap();
+
+        let pos_ids: Vec<usize> = (0..seq_len).collect();
+
+        let out_a = attention_f32(
+            &input_a, &q_w, &k_w, &v_w, &o_w, n_head, n_head_kv, head_dim, &pos_ids, 10000.0,
+            head_dim, 1.0, false, // bidirectional
+        )
+        .unwrap();
+
+        let out_b = attention_f32(
+            &input_b, &q_w, &k_w, &v_w, &o_w, n_head, n_head_kv, head_dim, &pos_ids, 10000.0,
+            head_dim, 1.0, false,
+        )
+        .unwrap();
+
+        // Token-0's output must differ between input_a and input_b because
+        // token-0 can attend to token-3 (bidirectional).
+        let tok0_a: f32 = out_a.data[..hidden].iter().map(|x| x.abs()).sum();
+        let tok0_b: f32 = out_b.data[..hidden].iter().map(|x| x.abs()).sum();
+        assert!(
+            (tok0_a - tok0_b).abs() > 1e-4,
+            "tok0 output unchanged despite tok3 change — causal mask may be stuck ON: a={tok0_a} b={tok0_b}"
+        );
     }
 }

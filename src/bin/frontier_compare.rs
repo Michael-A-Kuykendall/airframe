@@ -562,7 +562,8 @@ fn cpu_debug_target_token(
             layer_idx,
             kv_cache,
             None, // no QK norm for non-Qwen3
-        )?;;
+            None, // no attention.scale for non-Qwen3
+        )?;
         let post_attn = ops.add(&hidden, &attn_output)?;
         let ffn_input = ops.rmsnorm(&post_attn, ffn_norm, spec.rms_eps)?;
         let ffn_output = ops.ffn_swiglu(&ffn_input, gate, up, down)?;

@@ -141,7 +141,7 @@ impl Monitor {
             println!("Time(s), GPU_Util(%), Mem_Used(MB)");
             while r_clone.load(Ordering::Relaxed) {
                 let output = Command::new("nvidia-smi")
-                    .args(&[
+                    .args([
                         "--query-gpu=utilization.gpu,memory.used",
                         "--format=csv,noheader,nounits",
                     ])
@@ -193,7 +193,7 @@ impl CpuEvalEngine {
         let weights = container.weights;
 
         let llama_model = LlamaModel::from_spec(spec);
-        let engine = CpuCore::new(llama_model);
+        let engine = CpuCore::new(Box::new(llama_model));
 
         Ok(Self {
             inner: engine,
@@ -311,7 +311,7 @@ impl GpuEvalEngine {
 
         let model = BindlessModel::load_from_disk(&device, path, Some(&spec));
         let pipeline = BindlessPipeline::new(&device);
-        let weights_f32 = load_output_head_f32_override(path, &model, &device, &spec)?;;
+        let weights_f32 = load_output_head_f32_override(path, &model, &device, &spec)?;
         let kv_size_per_buffer = spec.kv_cache_size_per_layer as u64;
         let mut kv_cache_k_layers = Vec::with_capacity(spec.n_layer);
         let mut kv_cache_v_layers = Vec::with_capacity(spec.n_layer);
@@ -368,9 +368,10 @@ impl EvalEngine for GpuEvalEngine {
 
         // Stop at context limit
         if self.current_pos + tokens.len() > self.spec.n_ctx {
-            return Err(airframe::core::error::LibshimmyError::Unsupported(
-                format!("context limit {} exceeded", self.spec.n_ctx),
-            ));
+            return Err(airframe::core::error::LibshimmyError::Unsupported(format!(
+                "context limit {} exceeded",
+                self.spec.n_ctx
+            )));
         }
 
         // Batch Prefill: Collect embeddings for entire prompt
@@ -395,17 +396,20 @@ impl EvalEngine for GpuEvalEngine {
 
         // println!("[GPU] Processing batch of {} tokens. Pos: {} -> {}", batch_size, self.current_pos, seq_len);
 
-        let (_pre_norm, _l21, logits) = self.pipeline.run_full_model_with_cache_state(
-            &self.device,
-            &self.queue,
-            &self.model,
-            &batched_embd,
-            self.weights_f32.as_ref(),
-            self.current_pos as u32,
-            seq_len,
-            Some((&self.kv_cache_k_layers, &self.kv_cache_v_layers)),
-            &self.spec,
-        ).expect("GPU forward pass failed");
+        let (_pre_norm, _l21, logits) = self
+            .pipeline
+            .run_full_model_with_cache_state(
+                &self.device,
+                &self.queue,
+                &self.model,
+                &batched_embd,
+                self.weights_f32.as_ref(),
+                self.current_pos as u32,
+                seq_len,
+                Some((&self.kv_cache_k_layers, &self.kv_cache_v_layers)),
+                &self.spec,
+            )
+            .expect("GPU forward pass failed");
 
         self.current_pos += batch_size;
 
@@ -987,7 +991,7 @@ async fn run_wikitext(
     let mut count = 0;
     let mut total_tokens = 0;
 
-    let benchmark_start = std::time::Instant::now();
+    let _benchmark_start = std::time::Instant::now();
 
     println!("=== PHASE 1: TOKENIZATION ===");
     let tokenization_start = std::time::Instant::now();
@@ -1090,7 +1094,7 @@ async fn run_wikitext(
 
     for (i, chunk) in chunks.iter().enumerate() {
         let chunk_start = std::time::Instant::now();
-        println!("");
+        println!();
         println!(
             ">>> STARTING CHUNK {}/{} ({} tokens)",
             i + 1,
@@ -1200,7 +1204,7 @@ async fn run_wikitext(
                 percent_complete, total_tokens, overall_tokens_per_sec, total_elapsed);
     }
 
-    println!("");
+    println!();
 
     if count == 0 {
         println!("No predictions were generated; skipping perplexity calculation.");
@@ -1312,7 +1316,7 @@ async fn run_lambada(
         }
         evaluated += 1;
 
-        if evaluated % 10 == 0 {
+        if evaluated.is_multiple_of(10) {
             let elapsed = run_start.elapsed().as_secs_f64();
             let rate = if elapsed > 0.0 {
                 evaluated as f64 / elapsed
@@ -1331,7 +1335,7 @@ async fn run_lambada(
             );
         }
 
-        if sample_index % 50 == 0 {
+        if sample_index.is_multiple_of(50) {
             let acc = (matches as f32 / evaluated as f32) * 100.0;
             println!(
                 "LAMBADA_PROGRESS samples={} accuracy={:.2}% (lines_seen={})",
@@ -1429,8 +1433,9 @@ async fn run_l0probe(args: &Args) -> Result<()> {
     let params = RMSNormParams {
         count: dim as u32,
         weights_offset: norm_offset as u32,
+        bias_offset: 0,
         eps: spec.rms_eps,
-        padding: 0,
+        norm_type: 0,
     };
 
     let gpu_l02 = pipeline.run_rmsnorm_test(&device, &queue, &model, input, params);
@@ -1519,6 +1524,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         0,
         &mut kv_cache,
         None, // no QK norm for non-Qwen3
+        None, // no attention.scale for non-Qwen3
     )?;
 
     let post_attn = ops.add(&input_tensor, &attn_output)?;
@@ -1534,13 +1540,26 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         head_count: spec.n_head as u32,
         head_count_kv: spec.n_head_kv as u32,
         head_dim: (spec.n_embd / spec.n_head) as u32,
+        rope_dim: spec.rope_dim as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
-        quant_type: 0,
+        quant_qk: 0,
+        quant_v: 0,
+        quant_attn_out: 0,
+        quant_ffn_down: 0,
+        quant_ffn_gate: 0,
+        quant_ffn_up: 0,
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,
+        layer_norm_enabled: 0,
+        ffn_kind_policy: 0,
+        qkv_layout_policy: 0,
+        batch_offset: 0,
+        batch_count: 0,
+        q_weight_k: 0,
+        k_weight_k: 0,
     };
 
     let (gpu_l04_mid, gpu_l0_final) = pipeline.run_layer_stepwise_test(
@@ -1567,8 +1586,9 @@ async fn run_l0probe(args: &Args) -> Result<()> {
         let ffn_norm_params = RMSNormParams {
             count: dim as u32,
             weights_offset: ffn_norm_offset as u32,
+            bias_offset: 0,
             eps: spec.rms_eps,
-            padding: 0,
+            norm_type: 0,
         };
         pipeline.run_rmsnorm_test(&device, &queue, &model, &gpu_l04_mid, ffn_norm_params)
     };
@@ -1600,7 +1620,7 @@ async fn run_l0probe(args: &Args) -> Result<()> {
 
     // L0.22 probe (final logits for single token)
     let llama_model = LlamaModel::from_spec(spec.clone());
-    let mut cpu_engine = CpuCore::new(llama_model);
+    let mut cpu_engine = CpuCore::new(Box::new(llama_model));
     let cpu_logits_tensor = cpu_engine.prefill(&[token_id], &weights)?;
     let cpu_l22 = cpu_logits_tensor.data;
 
@@ -1643,17 +1663,19 @@ async fn run_l0probe(args: &Args) -> Result<()> {
 
     let (_gpu_l20_f32_head, _gpu_l21_f32_head, gpu_l22_f32_head) =
         if let Some(ref f32_head) = output_head_f32 {
-            pipeline.run_full_model_with_cache_state(
-                &device,
-                &queue,
-                &model,
-                input,
-                Some(f32_head),
-                0,
-                1,
-                None,
-                &spec,
-            ).expect("GPU forward pass failed (f32 head)")
+            pipeline
+                .run_full_model_with_cache_state(
+                    &device,
+                    &queue,
+                    &model,
+                    input,
+                    Some(f32_head),
+                    0,
+                    1,
+                    None,
+                    &spec,
+                )
+                .expect("GPU forward pass failed (f32 head)")
         } else {
             (Vec::new(), Vec::new(), Vec::new())
         };
@@ -1974,7 +1996,7 @@ async fn run_hellaswag(
         }
 
         let context_text = format!("{} {}", sample.ctx_a, sample.ctx_b);
-        let context_tokens_u32 = tokenizer.encode(&context_text, true).unwrap_or(vec![]);
+        let context_tokens_u32 = tokenizer.encode(&context_text, true).unwrap_or_default();
         let context_tokens: Vec<usize> = context_tokens_u32.iter().map(|&t| t as usize).collect();
 
         let mut best_ending_idx = 0;
@@ -1985,7 +2007,7 @@ async fn run_hellaswag(
             let ending_with_space = format!(" {}", ending_text);
             let ending_tokens_u32 = tokenizer
                 .encode(&ending_with_space, false)
-                .unwrap_or(vec![]);
+                .unwrap_or_default();
             let ending_tokens: Vec<usize> = ending_tokens_u32.iter().map(|&t| t as usize).collect();
 
             if ending_tokens.is_empty() {
@@ -2163,7 +2185,7 @@ async fn run_arc(args: &Args, tokenizer: &Tokenizer, engine: &mut dyn EvalEngine
 
         // lm-eval-harness format: "Question: {question}\nAnswer:" (no choices listed)
         let question_prompt = format!("{}Question: {}\nAnswer:", few_shot_prefix, sample.question);
-        let prompt_tokens_u32 = tokenizer.encode(&question_prompt, true).unwrap_or(vec![]);
+        let prompt_tokens_u32 = tokenizer.encode(&question_prompt, true).unwrap_or_default();
         let prompt_tokens: Vec<usize> = prompt_tokens_u32.iter().map(|&t| t as usize).collect();
 
         // Score each choice by log-probability of its answer text
@@ -2173,7 +2195,7 @@ async fn run_arc(args: &Args, tokenizer: &Tokenizer, engine: &mut dyn EvalEngine
         for (i, choice_text) in sample.choices.text.iter().enumerate() {
             // Format answer as " A. <full text>" to match natural continuation
             let answer_text = format!(" {}", choice_text);
-            let answer_tokens_u32 = tokenizer.encode(&answer_text, false).unwrap_or(vec![]);
+            let answer_tokens_u32 = tokenizer.encode(&answer_text, false).unwrap_or_default();
             let answer_tokens: Vec<usize> = answer_tokens_u32.iter().map(|&t| t as usize).collect();
 
             if answer_tokens.is_empty() {
