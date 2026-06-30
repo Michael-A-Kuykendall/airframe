@@ -1749,15 +1749,24 @@ fn send_error(mut stream: TcpStream, msg: &str) {
 }
 
 #[allow(dead_code)]
-/// Removes empty think blocks from prompts
-/// This strips text between
 fn strip_empty_think_block(prompt: &str) -> String {
     let mut result = prompt.to_string();
-    // Remove empty think blocks
-    while let Some(start) = result.find("think") {
-        if let Some(end) = result[start..].find("</think>") {
-            let remove_len = end + 3; // 3 for "</think>"
-            result.replace_range(start..(start + remove_len), "");
+    let open_tag = "<think>";
+    let close_tag = "</think>";
+    while let Some(start) = result.find(open_tag) {
+        let after_open = start + open_tag.len();
+        if let Some(end) = result[after_open..].find(close_tag) {
+            let content = &result[after_open..after_open + end];
+            let close_end = after_open + end + close_tag.len();
+            if content.chars().all(|c| c.is_whitespace()) {
+                let mut trim_end = close_end;
+                while trim_end < result.len() && result.as_bytes()[trim_end] == b'\n' {
+                    trim_end += 1;
+                }
+                result.replace_range(start..trim_end, "");
+            } else {
+                break;
+            }
         } else {
             break;
         }
@@ -1765,7 +1774,6 @@ fn strip_empty_think_block(prompt: &str) -> String {
     result
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
