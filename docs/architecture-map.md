@@ -1,377 +1,208 @@
-# Architecture Map
+# Airframe — Architectural Map (as-built)
 
-Two separate applications live in this workspace. They share the `airframe` library as a common engine but otherwise have different surfaces, audiences, and completion states.
+> Goal: see the actual physical machine before simplifying it. "What connects to what"
+> at the file/module level, where the complexity piled up, and where it can be cut.
+> Source: `airframe` workspace clone at `sideline/v0.2.8-base`, branch `spike/206-…`.
+> This is a MAP only — no changes yet.
 
 ---
 
-## High-Level Topology
+## 1. Crate / module layering
 
-```mermaid
-flowchart TB
-    subgraph "airframe (private GPU engine library)"
-        LIB["airframe crate (src/lib.rs)"]
-        CORE["core/ — GGUF loading, tensors, weight IDs, spec, dequant"]
-        FAMILY["family/llama.rs — CPU Llama forward pass"]
-        OPS["ops/ — reference CPU ops (attention, FFN, RoPE, RMSNorm…)"]
-        RUNTIME["runtime/ — engine, KV cache, sampler, multi-token engine"]
-        BACKEND["backend/bindless/ — WebGPU compute pipeline"]
-        WGSL["WGSL shaders (14 files) — dequant, layer, matmul, RoPE, RMSNorm…"]
-        CONTROL["control / fse_control / schoolmarm — policy / grammar gating"]
-        VALIDATION["validation/ — evidence checklists, oracle conformance, artifacts"]
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ BINARIES  src/bin/*                                                          │
+│  shimmy_server_gpu (+server_inference) · shimmy_eval · layer_dump_gpu ·     │
+│  quant_verify · frontier_compare · cert_check · probe_tokens ·              │
+│  vault_generator · vault_seed · window_boundary_probe                       │
+└───────────────┬───────────────────────────────┬───────────────────────────┘
+                │ server drives pipeline DIRECT   │ other bins call GpuRuntime
+                ▼                                 ▼
+┌────────────────────────────┐        ┌──────────────────────────────────────┐
+│ backend/bindless/pipeline/* │◄───────│ runtime/gpu.rs  (GpuRuntime)          │
+│  dequant · inference · layer│ uses   │  load() · generate() · generate_isf() │
+│  · matmul · mod(layouts)   │ pipeline│ runtime/engine.rs (Engine facade)    │
+│  run_full_model_…_with_state│        └───────────────┬──────────────────────┘
+└───────────────┬────────────┘                        │ (generate_isf only)
+                │ binds                                ▼
+┌────────────────────────────┐        ┌──────────────────────────────────────┐
+│ BindlessModel (loader.rs)   │        │ airframe_observe crate                │
+│  ONE gpu_buffer + N sub-    │        │  isf  = Inference Saturation Fabric   │
+│  range blob bindings        │        │  facts · observer · output · plan ·   │
+│  + BindlessMetadata         │        │  session · internal/tdr               │
+└───────────────┬────────────┘        └──────────────────────────────────────┘
+                │ reads GGUF
+                ▼
+┌─────────────────┐  ┌──────────────────┐  ┌──────────────┐  ┌──────────────┐
+│ core/model.rs   │  │ core/dequant/*   │  │ core/spec.rs │  │ core/ggml_   │
+│ GgufTensorInfo  │  │ q4_0 q4_k q5_0   │  │ ModelSpec    │  │ types.rs     │
+│ core/weight_id  │  │ q5_k q6_k q8_0   │  │             │  │ core/tensor  │
+└─────────────────┘  └──────────────────┘  └──────────────┘  └──────────────┘
 
-        LIB --> CORE
-        LIB --> FAMILY
-        LIB --> OPS
-        LIB --> RUNTIME
-        LIB --> BACKEND
-        LIB --> CONTROL
-        LIB --> VALIDATION
-        BACKEND --> WGSL
-    end
+CONTROL PLANE (per-token intervention) — control.rs defines the trait:
+   InferenceControl trait + InferenceEvent + ControlDecision
+   ├─ fse_control.rs        → libfse Aho-Corasick scan      (uses libfse crate)
+   ├─ math_bypass_control.rs→ arithmetic bypass
+   └─ schoolmarm_control.rs → grammar constraint           (uses schoolmarm)
 
-    subgraph "shimmy_server_gpu (Airframe GPU server binary)"
-        SRV["src/bin/shimmy_server_gpu.rs — HTTP listener, job queue"]
-        SRV_INF["src/bin/shimmy_server_gpu/server_inference.rs — inference loop"]
-        SRV_EVAL["src/bin/shimmy_eval.rs — wikitext2 / LAMBADA eval tasks"]
-        DIAG["src/bin/frontier_compare.rs + layer_dump_gpu.rs + quant_verify.rs — diagnostics"]
+TWO FABRICS (different things — easy to conflate):
+   • libfse crate           = low-level FSE trie / DFA scanner (TEXT rules)
+   • airframe_observe::isf  = Inference Saturation Fabric (reactive inference graph)
 
-        SRV --> SRV_INF
-        SRV --> SRV_EVAL
-        SRV --> DIAG
-        SRV_INF --> BACKEND
-        SRV_INF --> RUNTIME
-    end
+TWO VERIFICATION SUBSYSTEMS:
+   • validation/*  (artifacts · errors · evidence · projection · slice_validator)
+   • conformance/* (diff · fixtures)
 
-    subgraph "shimmy_integration (Shimmy product server — shimmy_integration/)"
-        SHIMMY_MAIN["src/main.rs — CLI entry, AppState"]
-        SHIMMY_CLI["src/cli.rs — clap serve/list/discover/pull/chat CLI"]
-        SHIMMY_SRV["src/server.rs — Axum router, CORS, health, metrics"]
-        SHIMMY_API["src/api.rs — /api/generate, WebSocket /ws"]
-        OAI_COMPAT["src/openai_compat/ — /v1/chat/completions, /v1/models"]
-        ANTHROPIC["src/anthropic_compat.rs — /v1/messages (Anthropic format)"]
-        ENGINE_MOD["src/engine/mod.rs — InferenceEngine + LoadedModel traits"]
-        AF_ENGINE["src/engine/airframe.rs — AirframeEngine (in-process GPU)"]
-        ADAPTER_ENG["src/engine/adapter.rs — llama.cpp adapter"]
-        DISCOVERY["src/discovery.rs — GGUF + SafeTensors path scanner"]
-        AUTO_DISC["src/auto_discovery/ — Ollama manifest scanner"]
-        TEMPLATES["src/templates.rs — chat template formatting per arch"]
-        PORT_MGR["src/port_manager.rs — ephemeral port allocation"]
-
-        SHIMMY_MAIN --> SHIMMY_CLI
-        SHIMMY_MAIN --> SHIMMY_SRV
-        SHIMMY_SRV --> SHIMMY_API
-        SHIMMY_SRV --> OAI_COMPAT
-        SHIMMY_SRV --> ANTHROPIC
-        SHIMMY_API --> ENGINE_MOD
-        OAI_COMPAT --> ENGINE_MOD
-        ENGINE_MOD --> AF_ENGINE
-        ENGINE_MOD --> ADAPTER_ENG
-        AF_ENGINE --> LIB
-        SHIMMY_MAIN --> DISCOVERY
-        SHIMMY_MAIN --> AUTO_DISC
-    end
-
-    subgraph "shimmy-console (Shimmy CLI dev tool — crates/console/)"
-        CON_MAIN["src/main.rs — clap chat/analyze/edit/config/license/tool"]
-        CON_CMDS["src/commands/ — chat, analyze, edit, config, sessions, model, license"]
-        CON_ADAPT["src/adapters/ — HTTP, WebSocket, Local (in-process), Mock, Shimmy server"]
-        CON_WS["src/websocket/ — InferenceBackend trait + client"]
-        CON_TOOLS["src/tools/ — file_ops, git, command, analysis, docs, image, system, loader"]
-        CON_HIST["src/history.rs — SQLite WAL history storage"]
-        CON_SESS["src/session_store.rs — session state"]
-        CON_LIC["src/license/ — license validation"]
-        CON_PLUG["src/plugins.rs — plugin registry"]
-
-        CON_MAIN --> CON_CMDS
-        CON_CMDS --> CON_ADAPT
-        CON_CMDS --> CON_TOOLS
-        CON_ADAPT --> CON_WS
-        CON_ADAPT --> LIB
-    end
-
-    CON_ADAPT -- "HTTP POST /v1/chat/completions (ShimmyServerAdapter)" --> SHIMMY_SRV
-    CON_ADAPT -- "HTTP POST / (ShimmyServerAdapter legacy)" --> SRV
-    CON_ADAPT -- "in-process (LocalInferenceAdapter)" --> LIB
-    SHIMMY_SRV -- "or direct to Airframe GPU server" --> SRV
+OBSERVE ("rank the numbers"): airframe_observe — facts/observer/output/plan/session
 ```
 
 ---
 
-## Application 1: `shimmy_server_gpu` (Airframe GPU Server)
-
-**Location:** `src/bin/shimmy_server_gpu.rs` + `src/bin/shimmy_server_gpu/`
-
-**What it is:** A single-threaded async HTTP server that runs one GGUF model on WebGPU and exposes an Airframe-specific job-queue API. This is the inference workhorse. It is the only binary that directly operates the GPU pipeline.
-
-**Completion:** Functionally complete and validated for TinyLlama, Llama-3.2-1B/3B, Phi-2, Gemma-2-2B (with caveats), starcoder2-3b. Stable gate-pass status.
-
-### Endpoints
-
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/` | POST | Submit an inference job; returns `job_id` |
-| `/api/repro/queue` | GET | Queue state (readiness check) |
-| `/api/repro/job-status` | GET | Poll job by `job_id` |
-| `/api/repro/job-stream` | GET | Chunked streaming for a completed/in-progress job |
-| `/v1/chat/completions` | POST | OpenAI-compatible chat completions |
-| `/v1/models` | GET | Registered model list |
-
-### Request surface (InferenceRequest)
+## 2. One inference — physical data flow
 
 ```
-task, prompt, session_id, prompt_mode, max_tokens, min_tokens (reserved),
-ignore_eos, temperature, top_p, repetition_penalty, seed, stream,
-expose_candidate, debug_trace_path, debug_trace_full, debug_trace_start_step,
-debug_trace_max_steps, debug_trace_include_prefill
-```
+GGUF file on disk
+   │ BindlessMetadata::new()            reads tensor offsets / data_start
+   ▼
+BindlessModel::load_from_disk()
+   │ device.create_buffer(ONE gpu_buffer = full file size)
+   │ + N sub-range blob bindings (blob_0..blob_N)   ← THE 206 BUG LIVES HERE
+   ▼
+GpuRuntime::load()
+   │ builds KVCache, dequants output head → output_head_f32, tokenizer, ModelSpec
+   │
+   ├─ generate()                       [imperative loop]
+   │     embed dequant → prefill chunked → decode loop → sampling
+   │       └─ each step: InferenceControl.intervene(event)   ← fse / math / schoolmarm
+   │
+   └─ generate_isf()                   [reactive]
+         ISFState + InferenceFacts → airframe_observe::isf::InferenceSaturationFabric
+         .run_to_fixpoint()   (wraps the SAME pipeline calls as generate)
 
-### Prompt modes
-
-| Mode | Template | Notes |
-|------|----------|-------|
-| `creative` | TinyLlama legacy `<|system|>` format | Default; bit-perfect repro baseline |
-| `creative-chatml` | ChatML `<\|im_start\|>` | Alt creative path |
-| `raw` | None (verbatim passthrough) | |
-| `developer` | ChatML + Rust-code system prompt | Grammar/sanitizer/compile-check active |
-
-### Stop reasons
-
-`max_tokens`, `eos`, `im_end`, `grammar_reject`, `grammar_accept`, `end_marker`
-
-### Known issues / caveats
-
-| Item | File | Issue |
-|------|------|-------|
-| `send_error()` is dead code | `shimmy_server_gpu.rs:1394` | TODO to promote to async + TcpStream; streaming error path not wired |
-| `min_tokens` field reserved but not consumed | `shimmy_server_gpu.rs:280` | Doc comment says "reserved for future request throttling" |
-| `StreamTokenEvent` / `StreamDoneEvent` structs unused | `shimmy_server_gpu.rs:351,359` | SSE structs for future streaming — not yet active |
-| Q6_K output head workaround (Phase 4E) at line 483 | `shimmy_server_gpu.rs:483` | Inline comment names it a workaround; still in place |
-
----
-
-## Application 2: `shimmy` (Shimmy Product Server)
-
-**Location:** `shimmy_integration/src/`
-
-**What it is:** The public-facing Shimmy product binary — an OpenAI-compatible HTTP server with model auto-discovery, an Ollama-compatible model list, CORS, health/metrics endpoints, and a CLI. It uses Airframe as one of its engine backends.
-
-**Completion:** Server, routing, and OpenAI-compat are functional. Airframe in-process engine integration (`engine/airframe.rs`) is wired and compiles. Several planned-future surfaces (tool endpoints, universal model routing, MLX) are scaffolded but dead.
-
-### CLI commands (`src/cli.rs`)
-
-| Command | Purpose |
-|---------|---------|
-| `serve` | Start HTTP server (auto or manual bind, optional `--model-path`) |
-| `list` | Show registered + discovered models |
-| `discover` | Rescan model directories |
-| `pull` | (Planned) HuggingFace model download |
-| `chat` | Interactive chat in terminal |
-| `--legacy` | Force CPU adapter instead of Airframe GPU |
-| `--gpu-backend` | Select backend: auto/cpu/cuda/vulkan/opencl |
-| `--cpu-moe` / `--n-cpu-moe` | MoE offload flags |
-
-### API endpoints (`server.rs` + `api.rs` + `openai_compat/`)
-
-| Route | Method | Purpose | Status |
-|-------|--------|---------|--------|
-| `/health` | GET | Health + model count | Active |
-| `/metrics` | GET | Model inventory + perf stats | Active |
-| `/v1/chat/completions` | POST | OpenAI chat completions (streaming + non-streaming) | Active |
-| `/v1/models` | GET | OpenAI model list | Active |
-| `/api/tags` | GET | Ollama-compatible model list | Active |
-| `/api/generate` | POST | Raw generate (Ollama-style) | Active |
-| `/v1/messages` | POST | Anthropic-compatible messages | Active |
-| `/ws` | WebSocket | Token streaming | Active |
-| `/diag` | GET | Diagnostic dump | Active |
-| `/tools/call` | POST | Tool execution (future) | **Dead — route stub only** |
-| `/tools/execute` | POST | Tool execution (future) | **Dead — route stub only** |
-| `/workflows/run` | POST | Workflow execution (future) | **Dead — route stub only** |
-
-### Engine backends (`src/engine/`)
-
-| File | Engine | Status |
-|------|--------|--------|
-| `airframe.rs` | `AirframeEngine` — in-process GPU via `GpuRuntime` | **Wired and active** |
-| `adapter.rs` | llama.cpp adapter (legacy CPU path) | Active (legacy) |
-| `huggingface.rs` | HuggingFace via `feature = "huggingface"` | Feature-gated; not compiled by default |
-| `mlx.rs` | Apple MLX backend | Scaffolded; `#[allow(dead_code)]` throughout |
-| `safetensors_native.rs` | Native SafeTensors loading | Scaffolded; `#[allow(dead_code)]` throughout |
-| `universal.rs` | Universal routing layer | **Dead — `#[allow(dead_code)]`, future routing; not wired** |
-
-### Known issues
-
-| Item | File | Issue |
-|------|------|-------|
-| `ensure_model_exists()` hardcodes port 11435 | `shimmy_integration/src/` (not used directly here) | Shimmy uses ephemeral ports; function is skipped |
-| `/tools/call`, `/tools/execute`, `/workflows/run` are stubs | `api.rs:385,392,404` | Route bodies exist but are not registered in the router |
-| `UniversalEngine` / `UniversalModel` are future routing stubs | `engine/universal.rs` | Not wired into `main.rs` dispatch |
-| MLX and SafeTensors engines have pervasive `#[allow(dead_code)]` | `engine/mlx.rs`, `engine/safetensors_native.rs` | Scaffolded only |
-| `port_manager.rs` has 7 bare `#[allow(dead_code)]` suppresses | `port_manager.rs:15,27,91,101,107,112,121` | Several methods are unreachable in current flow |
-| `util/memory.rs` — entire file is stubs | `util/memory.rs` | 8x `"Placeholder utility for future use"` suppressions |
-| Version check hard-exits on `0.1.0` with a public GitHub URL | `main.rs:57` | Private-engine binary should not reference a public repo URL |
-
----
-
-## Application 3: `shimmy-console` (Development CLI)
-
-**Location:** `crates/console/src/`
-
-**What it is:** A standalone CLI tool intended for developer use: chat with the model in a terminal, invoke tools (file ops, git, shell commands, image reading), manage configuration and sessions. It is the foundation for future agentic behaviors.
-
-**Completion:** CLI skeleton, tool registry, adapters, and history storage are structurally sound. The `chat` command is functional against a running Shimmy GPU server. Session persistence, model selection persistence, license gating, and several commands are incomplete or stub-only.
-
-### CLI commands (`src/main.rs` + `src/commands/`)
-
-| Command | File | Status |
-|---------|------|--------|
-| `chat` | `commands/chat.rs` | **Works** — connects to Shimmy GPU server at `127.0.0.1:8080`, tool-call dispatch loop |
-| `analyze` | `commands/analyze.rs` | **Skeleton** — struct exists, `run()` not fully implemented |
-| `edit` | `commands/edit.rs` | **Skeleton** |
-| `config` | `commands/config.rs` | **Skeleton** |
-| `license` | `commands/license.rs` | **Partial** — license validation wired but has dev backdoors (see below) |
-| `tool <name>` | `main.rs` | **Works** — dispatches any registered tool by name |
-| `model set` / `model show` | `commands/model.rs` | **Broken** — `set_model` mutates a local `Config` but never calls `config.save()`. Selection is lost on restart. |
-| `sessions` | `commands/sessions.rs` | Exists but state unclear |
-
-### Tool registry (`src/tools/`)
-
-| Tool | File | Status |
-|------|------|--------|
-| `file_ops` | `tools/file_ops.rs` | Active |
-| `git` | `tools/git.rs` | Active |
-| `command` | `tools/command.rs` | Active — runs shell commands |
-| `analysis` | `tools/analysis.rs` | Active |
-| `docs` | `tools/docs.rs` | Active |
-| `read_image` | `tools/image.rs` | Active — base64 + MIME + dimensions; `ocr` mode advertised but unimplemented |
-| `system` | `tools/system.rs` | Active |
-| `loader` | `tools/loader.rs` | Active |
-
-### Inference adapters (`src/adapters/`)
-
-| Adapter | Connects to | Status |
-|---------|------------|--------|
-| `ShimmyServerAdapter` | Shimmy GPU server via HTTP | **Primary path; used by `chat` command** |
-| `HttpInferenceAdapter` | Generic OpenAI-compat HTTP endpoint | Active |
-| `WsInferenceAdapter` | WebSocket endpoint | Active |
-| `LocalInferenceAdapter` | In-process Airframe CPU engine (via `airframe` lib) | Wired; uses CPU `Engine` not `GpuRuntime` |
-| `MockInferenceAdapter` | Deterministic mock for tests | Active |
-
-### Known issues
-
-| Item | File | Issue |
-|------|------|--------|
-| **`set_model` does not persist** | `commands/model.rs:12,26` | Doc says "persists to user config." It doesn't. `Config::save()` is never called. Restart loses selection. |
-| `ensure_model_exists()` targets hardcoded port 11435 | `commands/model.rs:5,22` | The FIXME is accurate: skipped in real flow. Function is dead in practice. |
-| License validator has two dev backdoors with explicit TODO | `license/validator.rs:70,80` | `"TODO: REMOVE BEFORE PRODUCTION"` — both are still present |
-| `ChatCommand` has hardcoded model path fallback | `commands/chat.rs:22` | `"D:/shimmy-test-models/..."` hardcoded as default model string; will break on any other machine |
-| `LocalInferenceAdapter` uses CPU `Engine`, not `GpuRuntime` | `adapters/local_adapter.rs` | In-process path bypasses the GPU pipeline entirely; behavior differs from server path |
-| `history.rs` doc claims "No lock file issues / Zero lock cleanup needed" | `history.rs:61,62` | WAL mode does not guarantee this unconditionally; claim is overstated |
-| `read_image` OCR mode advertised in description but not implemented | `tools/image.rs` | Returns error if `mode=ocr` is attempted |
-| `docs_tests.rs` has a single TODO placeholder | `tools/docs_tests.rs:9` | `"TODO: Add tests for documentation tools when implemented"` |
-
----
-
-## How the Three Connect
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Console as "shimmy-console (dev CLI)"
-    participant ShimmySrv as "shimmy (product server)"
-    participant AirframeSrv as "shimmy_server_gpu (GPU server)"
-    participant Lib as "airframe lib (GPU runtime)"
-
-    Note over User,Lib: Path A - console to Shimmy GPU server (primary)
-    User->>Console: shimmy chat "hello"
-    Console->>AirframeSrv: POST http://127.0.0.1:8080/v1/chat/completions
-    AirframeSrv->>Lib: GpuRuntime::prefill / decode
-    Lib-->>AirframeSrv: tokens
-    AirframeSrv-->>Console: response JSON
-
-    Note over User,Lib: Path B - console to Shimmy product server to Airframe in-process
-    User->>Console: shimmy chat --adapter shimmy-srv
-    Console->>ShimmySrv: POST /v1/chat/completions
-    ShimmySrv->>Lib: AirframeEngine::load() to GpuRuntime
-    Lib-->>ShimmySrv: tokens
-    ShimmySrv-->>Console: SSE stream / JSON
-
-    Note over User,Lib: Path C - console in-process (CPU only)
-    User->>Console: shimmy chat --adapter local
-    Console->>Lib: LocalInferenceAdapter to CPU Engine::prefill
-    Lib-->>Console: tokens (CPU path, not GPU)
+SHIMMY SERVER (the live product path) BYPASSES GpuRuntime entirely:
+   server_inference.rs → pipeline.run_full_model_prefill_chunked_with_cache_state() DIRECT
+                        + libfse metrics / text scan
+   (no GpuRuntime, no generate_isf — it drives the bindless pipeline straight)
 ```
 
 ---
 
-## GPU Pipeline Stack (Airframe Library)
+## 3. The Rube Goldberg inventory — "two of everything"
 
-```mermaid
-flowchart TB
-    GGUF["GGUF file (mmap'd)"] --> LOADER["backend/bindless/loader.rs — tensor slice mapping"]
-    LOADER --> META["backend/bindless/metadata.rs — GGUF header + tensor manifest"]
-    META --> PREFLIGHT["backend/bindless/preflight.rs — RoPE tables, KV buffer sizing"]
-    PREFLIGHT --> KVCACHE["backend/bindless/kv_cache.rs — per-layer K/V GPU buffers"]
-    KVCACHE --> PIPELINE["backend/bindless/pipeline/ — FullModelCtx, inference.rs, layer.rs"]
-    PIPELINE --> WGSL2["WGSL shaders\n(sh_layer_v1.wgsl, sh_layer_q4k.wgsl,\nsh_rmsnorm.wgsl, sh_rope_shift.wgsl, …)"]
-    PIPELINE --> SHIFT["backend/bindless/pipeline_shift.rs — helical KV compaction"]
-    PIPELINE --> RUNTIME2["runtime/gpu.rs — GpuRuntime (top-level API)"]
-    RUNTIME2 --> SAMPLING["runtime/sampling.rs — greedy / top-p / temperature / repetition"]
-```
+| # | Duplication / pile-up | Where | Note |
+|---|----------------------|-------|------|
+| 1 | **Two inference orchestrators in the facade** | `gpu.rs::generate` (imperative) vs `gpu.rs::generate_isf` (reactive) | same pipeline, two control styles stacked |
+| 2 | **Server bypasses the facade** | `server_inference.rs` calls `pipeline.*` directly, not `GpuRuntime` | 3rd live entry path (facade / engine / direct) |
+| 3 | **Two "fabric" libraries** | `libfse` (text DFA) vs `airframe_observe::isf` (inference graph) | confusable names; different jobs, but both called "fabric" |
+| 4 | **Two verification subsystems** | `validation/*` vs `conformance/*` | overlapping intent, separate trees |
+| 5 | **backend top-level vs backend/bindless** | `backend/pipeline.rs`, `backend/wgpu.rs`, `backend/tdr.rs` sit beside `backend/bindless/` | likely legacy/alt path beside the real bindless engine — **needs confirmation** |
+| 6 | **Four control modules** | `control.rs` (trait) + 3 impls | trait is clean; spread across 4 files |
+| 7 | **Many diagnostic binaries** | 9+ `src/bin/*` tools | overlapping verification intent (layer_dump, quant_verify, frontier_compare, cert_check…) |
+| 8 | **The blob hack (206)** | `loader.rs` 3 hardcoded sub-range bindings, remainder dumped in blob_2 | the symptom this whole spike started from |
 
 ---
 
-## What Is Complete vs. Incomplete
+## 4. What is actually clean (keep it)
 
-### Complete and validated
-
-- Airframe GPU engine: GGUF load, WebGPU bindless pipeline, per-token decode, KV cache, helical shift, multi-model support
-- `shimmy_server_gpu` HTTP API: job queue, streaming, OpenAI-compat chat completions
-- `shimmy` product server: OpenAI-compat, Ollama-compat, Anthropic-compat, health/metrics, Axum router, CORS
-- `shimmy` → Airframe in-process engine bridge (`engine/airframe.rs`)
-- `shimmy-console` chat loop (against GPU server)
-- Tool registry: file_ops, git, command, analysis, docs, image (base64/meta modes), system, loader
-- SQLite history storage
-- `cargo clippy -- -D warnings` clean; `cargo test` 324 passed / 0 failed
-
-### Partial / scaffolded
-
-- `shimmy-console` commands: analyze, edit, config — skeletons, not implemented
-- `shimmy-console` model persistence — function broken (never saves)
-- `shimmy` universal engine routing — struct exists, not wired
-- `shimmy` tool and workflow routes — stubs registered only
-- `shimmy` MLX and SafeTensors native engines — dead code
-- `read_image` OCR mode — described but not implemented
-- License validation — wired but two dev backdoors present with explicit TODO-remove markers
-- Vision API — `read_image` tool reads and encodes images; no multimodal inference path exists yet
-
-### Future / planned but not started
-
-- Vision inference pipeline (multimodal GGUF, visual tokens)
-- CLI `pull` command (HuggingFace download)
-- SSE streaming error path (`send_error` → async)
-- Console `--adapter shimmy-srv` flag (currently hardcoded to `ShimmyServerAdapter`)
-- Telemetry / tracing (`println!` → `tracing::info!` migration deferred post-v2.0)
-- `ensure_model_exists()` with ephemeral port support
-- `read_image` OCR mode
+- **`control.rs` InferenceControl trait** — a genuine, small control-plane abstraction.
+  Plug-in `InferenceControl` implementors (`fse_control`, `math_bypass`, `schoolmarm`)
+  intervene per token. This is the "deliberate control plane" idea, realized as a trait.
+- **`airframe_observe`** — the "rank the numbers from the GGUF" crate: `facts` + `observer`
+  + `isf` separation is coherent; it is the verification/observability layer done right.
+- **`core/dequant/*`** — one module per quant type, no cross-talk. Clean.
+- **Single data model**: tensors are absolute byte offsets in ONE buffer; chunking is a
+  *binding-layer* concern only, so metadata/spec never move. (This is why the multi-buffer
+  strategy from the spike discussion is low-risk to the data model.)
 
 ---
 
-## Where to Extend for Vision API and Agentic Products
+## 5. Simplification seams (where complexity can be cut)
 
-### Vision API path
+1. **Unify the inference entry point.** Make `shimmy_server_gpu` go through `GpuRuntime`
+   (or make `GpuRuntime` the *only* facade) instead of driving `pipeline.*` directly.
+   Kills duplication #2 and collapses #1 toward one path. Biggest single win.
 
-The `read_image` tool in `crates/console/src/tools/image.rs` is the natural anchor. Current state: reads file, decodes dimensions, returns base64. To add vision inference:
+2. **Disambiguate the two fabrics by role, not name.**
+   - `libfse` = text/rule scanning DFA → keep for `fse_control` + server text scan.
+   - `airframe_observe::isf` = inference orchestration graph → keep for `generate_isf`.
+   Document the boundary so future work stops conflating them. (No code move needed yet —
+   just a Written-Down contract.)
 
-1. Add a `VisionInferenceAdapter` to `crates/console/src/adapters/`
-2. Wire a multimodal GGUF engine (LLaVA-style) into `shimmy_integration/src/engine/`
-3. Add a `/v1/chat/completions` multimodal content-block parser in `shimmy_integration/src/openai_compat/`
-4. Activate OCR mode in `read_image` (currently advertised but not implemented)
+3. **Resolve the blob design at the load layer** (the earlier "multiple real buffers"
+   strategy): split the model into N independent `wgpu::Buffer`s at `load_from_disk`,
+   each ≤ `effective_chunk`. Removes the single-buffer `max_buffer_size` risk AND the
+   tail-alignment fragility. Supersedes the sub-range hack cleanly.
 
-### Agentic product path
+4. **Confirm & prune `backend/*` top-level vs `backend/bindless/*`.** If the top-level
+   `pipeline.rs`/`wgpu.rs`/`tdr.rs` are dead/legacy, retire them so there is ONE engine.
 
-The `chat` command already has a tool-call dispatch loop. The gaps are:
+5. **Consolidate `validation/*` + `conformance/*`** if their intent overlaps (verify first).
+   One verification tree, not two.
 
-1. `analyze` and `edit` commands need implementations
-2. Model selection needs to actually persist (`set_model` bug)
-3. Session continuity needs the `SessionStore` wired into the chat loop
-4. Tool call results need to feed back into the context window (partially handled in `chat.rs` loop, but incomplete)
+6. **The "control plane for reading GGUFs" you remember may never have been built.**
+   What exists is `BindlessMetadata`/`loader.rs` (read+upload) — no higher-level
+   *strategy* layer for load/chunk decisions. If you want a deliberate load-strategy
+   module (probe adapter → decide chunking → load), that is a NEW small module, not
+   a refactor of what's there. The multi-buffer strategy (#3) is the first cut of it.
+
+---
+
+## 6. Open questions — RESOLVED (via targeted greps)
+
+**Q1: Is `generate_isf` wired?**  
+Answer: **NO.** Zero callers found. `generate_isf()` is defined in `gpu.rs` but never invoked by any bin or server. It is currently ORPHANED code despite being declared "production path" in public changelog. This is a critical gap.
+
+**Q2: Are top-level `backend/pipeline.rs`, `backend/wgpu.rs`, `backend/tdr.rs` live?**  
+Answer: **LEGACY/TEST ONLY.** Only referenced in `backend/tests.rs` (`LogitMaskPipeline`, `WgpuContext`). Not used by production bindless path. Safe to retire or fold into test utilities.
+
+**Q3: What is `runtime/engine.rs` role?**  
+Answer: **CPU inference engine facade.** Used by `shimmy_eval.rs` (benchmarks evals against CPU vs GPU). Contains `Engine::new(model)` + tests. Separate from `GpuRuntime`. Role: CPU reference implementation for parity testing. Keep, but don't promote as primary facade.
+
+**Q4: Do `validation/*` and `conformance/*` overlap?**  
+Answer: **Both active, different purposes.** `validation/*` used by `core/error.rs`, `runtime/multi_token_engine.rs`, `validation/artifacts.rs`, `slice_validator.rs`. `conformance/*` used by `diff.rs`, `fixtures.rs`. Validation = error/evidence/projection; Conformance = diff/fixtures/parity. They complement rather than duplicate. Defer consolidation.
+
+---
+
+## 6b. External appraisal — prioritized remediation sequence
+
+A second independent review confirms the map and adds a dependency-ordered execution plan:
+
+1. **Fix the load layer first (the 206 root)**  
+   Make multi-buffer strategy real at `BindlessModel::load_from_disk`. Split into N independent `wgpu::Buffer`s, each ≤ effective chunk size. Removes single-buffer `max_buffer_size` risk + tail-alignment fragility. This is the highest-leverage structural change.
+
+2. **Unify inference entry points (kill the three-path Rube Goldberg)**  
+   Force product path through the facade:
+   - Make `GpuRuntime` the **only** public way to run inference.
+   - Change `server_inference.rs` to go through `generate_isf` (not direct pipeline calls).
+   - Since `generate_isf` is currently ORPHANED (Q1), wire it up first, prove parity, then retire imperative `generate`.
+
+3. **Disambiguate the two fabrics permanently**  
+   Write a one-page boundary contract doc:
+   - `libfse` = low-level text/rule DFA scanner (keep for `fse_control` + server text scan).
+   - `airframe_observe::isf` = Inference Saturation Fabric (reactive graph). Keep for `generate_isf`.
+   No code move needed yet — just stop the name collision.
+
+4. **Confirm and prune obvious dead/legacy surface**  
+   - Retire top-level `backend/pipeline.rs`, `backend/wgpu.rs`, `backend/tdr.rs` (Q2 confirmed legacy).
+   - Leave `runtime/engine.rs` alone (Q3 confirmed: CPU reference, keep for parity testing).
+   - **DO NOT touch** `validation/*` + `conformance/*` yet (Q4: they complement; deleting verification early creates ghosts).
+   - Leave diagnostic binary zoo alone until core paths unified.
+
+5. **Only after the above**  
+   - Consolidate verification trees if overlap is proven.
+   - Thin the 9+ diagnostic binaries.
+   - The "control plane for reading GGUFs" can emerge as a small load-strategy module on top of the now-clean multi-buffer loader.
+
+**Why this order:** Load → orchestration → product integration → cleanup respects the dependency graph. You attack accumulation (three entry points + blob hack) before polishing clean parts. Resulting shape: clean data model + one load strategy + one inference facade + explicit control plane + explicit observe fabric. Lowest long-term debt surface.
+
+---
+
+## 7. TL;DR for the "egg rolling down the hill"
+
+The machine is not uniformly garbage — the **control trait**, the **observe crate**, and
+the **dequant tree** are deliberate and clean. The Rube Goldberg-ness is *accumulation*:
+three inference entry paths, two fabrics with confusingly similar names, two verification
+subtrees, a likely-legacy backend layer, and a 3-binding blob hack bolted onto a single
+giant buffer. The highest-leverage simplifications are (1) one inference entry point and
+(2) moving the chunk decision up into the load layer as N real buffers. Both shrink the
+surface area without touching the clean parts.

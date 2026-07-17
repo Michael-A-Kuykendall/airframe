@@ -42,6 +42,8 @@ schoolmarm = "0.1.1"
 sha2 = "0.10"
 aho-corasick = { version = "1.1", features = ["std"] }
 shimmyjinja = { version = "0.5.0" }
+# PPT + Invariant testing framework (objective quality gates). See src/invariant_ppt.rs.
+lazy_static = "1.4"
 
 # Optional: ISF (Inference Saturation Fabric) — depends on dzero.
 # Enable with --features isf. Not published to crates.io.

@@ -71,7 +71,11 @@ async fn test_layer1_weights_on_gpu() -> Result<(), Box<dyn std::error::Error>> 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Copy Encoder"),
     });
-    encoder.copy_buffer_to_buffer(&gpu_model.gpu_buffer, attn_q_offset, &staging_buffer, 0, 32);
+    // Map the absolute file offset into the correct blob buffer (multi-buffer).
+    let chunk0 = gpu_model.effective_chunk;
+    let buf_idx = (attn_q_offset / chunk0) as usize;
+    let buf_off = attn_q_offset % chunk0;
+    encoder.copy_buffer_to_buffer(&gpu_model.gpu_buffers[buf_idx], buf_off, &staging_buffer, 0, 32);
     let idx = queue.submit(Some(encoder.finish()));
 
     let buffer_slice = staging_buffer.slice(..);

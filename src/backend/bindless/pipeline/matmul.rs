@@ -46,7 +46,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffer.as_entire_binding(),
+                    resource: model.gpu_buffers[0].as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,

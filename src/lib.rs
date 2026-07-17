@@ -22,3 +22,8 @@ pub mod backend;
 pub mod fse_control;
 pub mod math_bypass_control;
 pub mod schoolmarm_control;
+
+// PPT + Invariant testing framework: objective, AI-independent quality gates.
+// Provides assert_invariant (embedded in production logic) plus property/contract
+// test harness used by tests/test_contracts.rs. See docs on the PPT methodology.
+pub mod invariant_ppt;

@@ -74,8 +74,9 @@ async fn verify_final_norm_algebraic_isolation() -> Result<(), Box<dyn std::erro
         usage: wgpu::BufferUsages::STORAGE,
     });
     let model = BindlessModel {
-        gpu_buffer: weight_blob,
+        gpu_buffers: vec![weight_blob],
         size: (dim * std::mem::size_of::<f32>()) as u64,
+        effective_chunk: (dim * std::mem::size_of::<f32>()) as u64,
         dummy_buf,
         metadata: BindlessMetadata {
             version: 3,
