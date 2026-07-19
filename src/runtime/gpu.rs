@@ -419,7 +419,7 @@ impl GpuRuntime {
             dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync,
         > = std::sync::Arc::new(move |batched: Vec<f32>, _token_count: u32| {
             let cache_guard = kv_for_prefill.lock().unwrap();
-            match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
+            let result = match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
                 device_ref,
                 queue_ref,
                 model_ref,
@@ -432,7 +432,29 @@ impl GpuRuntime {
             ) {
                 Ok((hidden, _l21, logits)) => (hidden, logits),
                 Err(_) => (vec![], vec![]),
+            };
+            // ── PPT Invariant Capture: the prefill pass is the golden [BOS,Hello]
+            // forward; its last-token activation IS the position=1 layer output
+            // the vault oracle rows reference. Emit FinalLogits at position=1. ──
+            if std::env::var("AIRFRAME_CAPTURE_INVARIANT")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+            {
+                if let Some(sink) =
+                    crate::backend::bindless::pipeline::inference::invariant_capture_sink_mut()
+                {
+                    let rms = airframe_observe::facts::rms(&result.1);
+                    let checksum = airframe_observe::facts::checksum(&result.1);
+                    sink.push(airframe_observe::facts::CapturedLayer {
+                        layer_idx: u32::MAX,
+                        position: 1,
+                        rms,
+                        checksum,
+                        is_final_logits: true,
+                    });
+                }
             }
+            result
         });
 
         // ── Closure: GPU decode forward pass ─────────────────────────────
@@ -459,7 +481,7 @@ impl GpuRuntime {
                 embd_quant_type_val,
             );
             let cache_guard = kv_for_forward.lock().unwrap();
-            match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
+            let result = match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
                 device_ref,
                 queue_ref,
                 model_ref,
@@ -472,7 +494,27 @@ impl GpuRuntime {
             ) {
                 Ok((hidden, _l21, logits)) => (hidden, logits),
                 Err(_) => (vec![], vec![]),
+            };
+            // ── PPT Invariant Capture: append FinalLogits to the probe sink ──
+            if std::env::var("AIRFRAME_CAPTURE_INVARIANT")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+            {
+                if let Some(sink) =
+                    crate::backend::bindless::pipeline::inference::invariant_capture_sink_mut()
+                {
+                    let rms = airframe_observe::facts::rms(&result.1);
+                    let checksum = airframe_observe::facts::checksum(&result.1);
+                    sink.push(airframe_observe::facts::CapturedLayer {
+                        layer_idx: u32::MAX,
+                        position: current_pos,
+                        rms,
+                        checksum,
+                        is_final_logits: true,
+                    });
+                }
             }
+            result
         });
 
         // ── Closure: sampling ─────────────────────────────────────────────
@@ -841,6 +883,50 @@ impl GpuRuntime {
     /// Use shimmyjinja::render_chat_template() to apply it.
     pub fn chat_template(&self) -> Option<&str> {
         self.spec.chat_template.as_deref()
+    }
+
+    // ── PPT Invariant Cage diagnostic accessors ────────────────────────────
+    pub fn embd_quant_type(&self) -> u32 {
+        self.embd_quant_type
+    }
+    pub fn embd_weight_offset(&self) -> u64 {
+        self.embd_weight_offset
+    }
+    pub fn row_bytes(&self) -> u64 {
+        self.row_bytes
+    }
+    /// Get the quant type for any tensor by name (diagnostic).
+    pub fn tensor_type(&self, name: &str) -> Option<u32> {
+        self.model.metadata.get_tensor_type(name)
+    }
+    /// Get the byte offset for any tensor by name (diagnostic).
+    pub fn tensor_offset(&self, name: &str) -> Option<u64> {
+        self.model.metadata.get_tensor_offset(name)
+    }
+    /// Dequantize any tensor from the GGUF blob (diagnostic).
+    pub fn dequant_tensor_f32(&self, name: &str, count: u32) -> Vec<f32> {
+        if let Some(off) = self.tensor_offset(name) {
+            let qt = self.tensor_type(name).unwrap_or(0);
+            self.pipeline.run_dequant_any_hot(
+                &self.device, &self.queue, &self.model,
+                off as u32, count, qt,
+            )
+        } else {
+            vec![]
+        }
+    }
+    /// Dequantize a single embedding row for diagnostics.
+    pub fn dequant_token_embd(&self, token_id: u32) -> Vec<f32> {
+        let dim = self.spec.n_embd as u32;
+        let row_offset = self.embd_weight_offset + (token_id as u64 * self.row_bytes);
+        self.pipeline.run_dequant_any_hot(
+            &self.device,
+            &self.queue,
+            &self.model,
+            row_offset as u32,
+            dim,
+            self.embd_quant_type,
+        )
     }
 
     fn load_output_head_f32(

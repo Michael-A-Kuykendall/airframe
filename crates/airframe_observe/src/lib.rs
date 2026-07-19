@@ -63,4 +63,6 @@ mod internal;
 
 pub use facts::{alpha_key_of, HaltReason, InferenceFact};
 pub use isf::{GenerateOutput, ISFState, InferenceSaturationFabric};
+pub use observer::{CandleCompareObserver, VaultOracleObserver};
+pub use output::ObservationData;
 pub use session::ObservationSession;

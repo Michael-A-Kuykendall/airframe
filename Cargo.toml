@@ -43,19 +43,13 @@ sha2 = "0.10"
 aho-corasick = { version = "1.1", features = ["std"] }
 shimmyjinja = { version = "0.5.0" }
 
-# Vault database (DuckDB) for model metadata + golden reference oracles
-# Optional — only used by Python vault tooling, not by the Rust inference engine.
-# Enable with --features duckdb if you need the Rust duckdb bindings locally.
-duckdb = { version = "1.1", features = ["bundled"], optional = true }
-
 # Optional: ISF (Inference Saturation Fabric) — depends on dzero.
 # Enable with --features isf. Not published to crates.io.
 airframe-observe = { path = "crates/airframe_observe", version = "0.1.0", optional = true }
 
 [features]
 isf = ["dep:airframe-observe"]
-duckdb = ["dep:duckdb"]
-dev = ["duckdb", "isf"]
+dev = ["isf"]
 
 [dev-dependencies]
 sha2 = "0.10"
@@ -69,3 +63,7 @@ path = "src/bin/layer_dump_gpu.rs"
 [[bin]]
 name = "vault_seed"
 path = "src/bin/vault_seed.rs"
+
+[[bin]]
+name = "invariant_probe"
+path = "src/bin/invariant_probe.rs"

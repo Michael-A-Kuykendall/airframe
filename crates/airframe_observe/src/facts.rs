@@ -270,6 +270,18 @@ pub fn f32_to_bits(v: f32) -> u32 {
     v.to_bits()
 }
 
+/// A single captured layer activation from the invariant probe.
+/// Lightweight (rms + checksum only) so the sink stays small across many
+/// layers/positions. Mirrors the `layer_oracles` golden-row shape.
+#[derive(Clone, Debug)]
+pub struct CapturedLayer {
+    pub layer_idx: u32,
+    pub position: u32,
+    pub rms: f32,
+    pub checksum: i64,
+    pub is_final_logits: bool,
+}
+
 /// Helper: decode u32 bits back to f32.
 pub fn bits_to_f32(bits: u32) -> f32 {
     f32::from_bits(bits)

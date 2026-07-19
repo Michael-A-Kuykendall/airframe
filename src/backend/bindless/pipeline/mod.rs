@@ -2,7 +2,7 @@
 // Inference methods: see inference.rs, layer.rs, dequant.rs, matmul.rs
 
 pub(super) mod dequant;
-pub(super) mod inference;
+pub mod inference;
 pub(super) mod layer;
 pub(super) mod matmul;
 

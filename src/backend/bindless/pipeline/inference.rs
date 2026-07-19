@@ -10,6 +10,113 @@ use wgpu::util::DeviceExt;
 /// Result type for model inference returning three activation vectors
 type InferenceResult = Result<(Vec<f32>, Vec<f32>, Vec<f32>), String>;
 
+// ── PPT Invariant Capture Hook ───────────────────────────────────────────────
+// Gated behind the `isf` feature (which also gates `airframe_observe`). When the
+// invariant probe sets `AIRFRAME_CAPTURE_INVARIANT=1`, each transformer layer's
+// post-layer activation is read back from the GPU and appended to a global
+// in-memory sink. This is the CAPTURE side of the PPT invariant cage — it must
+// NOT run in normal inference (the gate short-circuits before any GPU work).
+#[cfg(feature = "isf")]
+pub static mut INVARIANT_CAPTURE: Option<*mut Vec<airframe_observe::facts::CapturedLayer>> = None;
+
+/// A single captured layer activation (rms + checksum, lightweight — no full
+/// vector retained, to keep the sink small across many layers/positions).
+#[cfg(feature = "isf")]
+#[derive(Clone)]
+pub struct CapturedLayer {
+    pub layer_idx: u32,
+    pub position: u32,
+    pub rms: f32,
+    pub checksum: i64,
+    pub is_final_logits: bool,
+}
+
+/// Install the capture sink. `sink` must outlive the forward pass.
+#[cfg(feature = "isf")]
+pub fn set_invariant_capture_sink(sink: &mut Vec<airframe_observe::facts::CapturedLayer>) {
+    // SAFETY: the probe owns `sink` for the duration of the forward pass; we
+    // store the pointer and only deref it synchronously inside the forward call.
+    unsafe {
+        INVARIANT_CAPTURE = Some(sink as *mut Vec<airframe_observe::facts::CapturedLayer>);
+    }
+}
+
+/// Clear the capture sink (call after the forward pass completes).
+#[cfg(feature = "isf")]
+pub fn clear_invariant_capture_sink() {
+    unsafe {
+        INVARIANT_CAPTURE = None;
+    }
+}
+
+/// Borrow the registered capture sink mutably, if one is set.
+#[cfg(feature = "isf")]
+pub fn invariant_capture_sink_mut(
+) -> Option<&'static mut Vec<airframe_observe::facts::CapturedLayer>> {
+    unsafe { INVARIANT_CAPTURE.map(|p| &mut *p) }
+}
+
+/// Read back the post-layer activation and append a `CapturedLayer` to the sink.
+/// Mirrors the existing `trace_prefill_layers` readback (copy → submit → poll →
+/// map → read → unmap) but routes the values into the probe's capture sink.
+#[cfg(feature = "isf")]
+fn emit_layer_capture(
+    layer_idx: u32,
+    position: u32,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    activation_buffer: &wgpu::Buffer,
+    readback_buffer: &wgpu::Buffer,
+    offset: u64,
+    byte_len: u64,
+) {
+    if !std::env::var("AIRFRAME_CAPTURE_INVARIANT")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let sink = match invariant_capture_sink_mut() {
+        Some(s) => s,
+        None => return,
+    };
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&format!("Invariant Capture Layer {}", layer_idx)),
+    });
+    enc.copy_buffer_to_buffer(activation_buffer, offset, readback_buffer, 0, byte_len);
+    queue.submit(Some(enc.finish()));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU device lost during invariant capture");
+    let slice = readback_buffer.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |res| {
+        let _ = tx.send(res);
+    });
+    loop {
+        device
+            .poll(wgpu::PollType::Poll)
+            .expect("GPU device lost during invariant capture poll");
+        if let Ok(res) = rx.try_recv() {
+            res.expect("invariant capture buffer map failed");
+            break;
+        }
+    }
+    let mapped = slice.get_mapped_range();
+    let vals: &[f32] = bytemuck::cast_slice(&mapped);
+    let rms = airframe_observe::facts::rms(vals);
+    let checksum = airframe_observe::facts::checksum(vals);
+    drop(mapped);
+    readback_buffer.unmap();
+    sink.push(airframe_observe::facts::CapturedLayer {
+        layer_idx,
+        position,
+        rms,
+        checksum,
+        is_final_logits: false,
+    });
+}
+
 impl BindlessPipeline {
     pub fn run_full_model(
         &self,
@@ -1053,6 +1160,23 @@ impl BindlessPipeline {
                     tdr.yield_if_needed(&label)?;
                 }
             }
+
+            // ── PPT Invariant Capture (gated; no-op unless env + session set) ──
+            // Emits a LayerOutput fact for layer `i` at `current_pos+1`, because
+            // `current_pos` is the *start* index of the batch and the captured
+            // activation is the LAST token in the batch (the one we care about).
+            // For the golden [BOS,Hello] prefill (current_pos=0) this is position 1.
+            #[cfg(feature = "isf")]
+            emit_layer_capture(
+                i as u32,
+                current_pos + 1,
+                device,
+                queue,
+                &activation_buffer,
+                &pre_norm_buffer,
+                last_token_offset,
+                (dim as u64) * 4,
+            );
 
             if trace_prefill_layers {
                 // Layer trace readback — uses its own encoder, separate from tdr.
