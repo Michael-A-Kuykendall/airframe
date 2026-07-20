@@ -94,14 +94,26 @@ impl GpuRuntime {
 
         // GPU init
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })
-            .await
-            .map_err(|e| format!("No GPU adapter found: {}", e))?;
+
+        // Enumerate adapters and prefer DiscreteGpu over IntegratedGpu.
+        // Fixes multi-GPU systems (laptops with NVIDIA/AMD + Intel iGPU)
+        // where wgpu's default adapter selection often picks the integrated GPU.
+        let adapters = instance.enumerate_adapters(wgpu::Backends::all());
+        let adapter = adapters
+            .iter()
+            .find(|a| a.get_info().device_type == wgpu::DeviceType::DiscreteGpu)
+            .or_else(|| adapters.iter().find(|a| a.get_info().device_type == wgpu::DeviceType::IntegratedGpu))
+            .or_else(|| adapters.first())
+            .ok_or_else(|| format!("No GPU adapter found"))
+            .map(|a| {
+                eprintln!(
+                    "[GpuRuntime] Selected adapter: {} ({:?}, backend={:?})",
+                    a.get_info().name,
+                    a.get_info().device_type,
+                    a.get_info().backend
+                );
+                a
+            })?;
 
         let adapter_limits = adapter.limits();
 
