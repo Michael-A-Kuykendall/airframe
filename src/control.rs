@@ -59,3 +59,78 @@ impl InferenceControl for NoopControl {
         ControlDecision::Allow
     }
 }
+
+/// Run multiple controls in order; the first non-`Allow` decision wins.
+///
+/// This is the engine-level primitive for composing independent gates
+/// (e.g. FSE reject + grammar enforce) without re-implementing chaining
+/// at every call site.
+pub struct ChainControl(pub Vec<Box<dyn InferenceControl + Send + Sync>>);
+
+impl InferenceControl for ChainControl {
+    fn intervene(&self, event: &InferenceEvent<'_>) -> ControlDecision {
+        for c in &self.0 {
+            match c.intervene(event) {
+                ControlDecision::Allow => continue,
+                other => return other,
+            }
+        }
+        ControlDecision::Allow
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::kvcache::KvSnapshot;
+
+    fn ev(token: usize) -> InferenceEvent<'static> {
+        InferenceEvent {
+            tokens: &[],
+            candidate_token: token,
+            step: 0,
+            kv: KvSnapshot { len: 0, version: 0 },
+            text: "",
+        }
+    }
+
+    struct Allow;
+    impl InferenceControl for Allow {
+        fn intervene(&self, _: &InferenceEvent<'_>) -> ControlDecision {
+            ControlDecision::Allow
+        }
+    }
+    struct Block;
+    impl InferenceControl for Block {
+        fn intervene(&self, _: &InferenceEvent<'_>) -> ControlDecision {
+            ControlDecision::BlockAndTerminate("nope".into())
+        }
+    }
+    struct Early;
+    impl InferenceControl for Early {
+        fn intervene(&self, _: &InferenceEvent<'_>) -> ControlDecision {
+            ControlDecision::EarlyExit
+        }
+    }
+
+    #[test]
+    fn chain_returns_allow_when_all_allow() {
+        let c = ChainControl(vec![Box::new(Allow), Box::new(Allow)]);
+        assert_eq!(c.intervene(&ev(0)), ControlDecision::Allow);
+    }
+
+    #[test]
+    fn chain_returns_first_non_allow() {
+        let c = ChainControl(vec![Box::new(Allow), Box::new(Block), Box::new(Early)]);
+        assert!(matches!(
+            c.intervene(&ev(0)),
+            ControlDecision::BlockAndTerminate(_)
+        ));
+    }
+
+    #[test]
+    fn chain_early_exit_beats_later_block() {
+        let c = ChainControl(vec![Box::new(Allow), Box::new(Early), Box::new(Block)]);
+        assert_eq!(c.intervene(&ev(0)), ControlDecision::EarlyExit);
+    }
+}

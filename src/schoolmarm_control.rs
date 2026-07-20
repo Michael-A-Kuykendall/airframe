@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 /// Applies grammar policies to generated text during inference to constrain outputs.
 pub struct SchoolmarmControl {
-    state: Mutex<GrammarState>,
+    state: Arc<Mutex<GrammarState>>,
     decoder: Arc<dyn TokenDecoder>,
 }
 
@@ -14,9 +14,16 @@ impl SchoolmarmControl {
         let state =
             GrammarState::new(grammar).map_err(|e| format!("Grammar init failed: {}", e))?;
         Ok(Self {
-            state: Mutex::new(state),
+            state: Arc::new(Mutex::new(state)),
             decoder,
         })
+    }
+
+    /// Create a SchoolmarmControl that walks an externally-owned, shared
+    /// `GrammarState`. Required when the same state must also drive a
+    /// pre-sample mask (the mask reads the state this control advances).
+    pub fn new_shared(state: Arc<Mutex<GrammarState>>, decoder: Arc<dyn TokenDecoder>) -> Self {
+        Self { state, decoder }
     }
 }
 

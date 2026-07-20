@@ -8,6 +8,7 @@ use crate::backend::bindless::loader::BindlessModel;
 use crate::backend::bindless::metadata::BindlessMetadata;
 use crate::backend::bindless::pipeline::BindlessPipeline;
 use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
+use crate::control::InferenceControl;
 use crate::core::dequant::{
     dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,
 };
@@ -66,7 +67,7 @@ pub struct GpuRuntime {
     model: BindlessModel,
     pipeline: BindlessPipeline,
     shift_pipeline: RopeShiftPipeline,
-    tokenizer: Tokenizer,
+    tokenizer: Arc<Tokenizer>,
     spec: ModelSpec,
     output_head_f32: wgpu::Buffer,
     kv_cache: Arc<Mutex<KVCache>>,
@@ -167,7 +168,7 @@ impl GpuRuntime {
         }));
 
         // Load model
-        let tokenizer = Tokenizer::from_gguf_file(&model_path_str)?;
+        let tokenizer = Arc::new(Tokenizer::from_gguf_file(&model_path_str)?);
         // Auto-derive model spec from GGUF metadata — works with any GGUF model
         let mut header_file = std::fs::File::open(model_path)?;
         let header_meta = BindlessMetadata::new(&mut header_file);
@@ -389,7 +390,7 @@ impl GpuRuntime {
         let pipeline_ref: &'static crate::backend::bindless::pipeline::BindlessPipeline =
             unsafe { &*(&self.pipeline as *const _) };
         let tokenizer_ref: &'static shimmytok::Tokenizer =
-            unsafe { &*(&self.tokenizer as *const _) };
+            unsafe { &*(&*self.tokenizer as *const Tokenizer) };
         let output_head_ref: &'static wgpu::Buffer =
             unsafe { &*(&self.output_head_f32 as *const _) };
         let kv_cache_isf = self.kv_cache.clone();
@@ -620,15 +621,20 @@ impl GpuRuntime {
     /// `on_token` is called for each generated token (for streaming).
     /// Returns the full generated text.
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     pub fn generate(
         &self,
         prompt: &str,
         params: &SamplingParams,
-        mut on_token: Option<Box<dyn FnMut(&str) + Send>>,
+        on_token: Option<Box<dyn FnMut(&str) + Send>>,
+        _control: Option<Box<dyn InferenceControl + Send + Sync>>,
+        _modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
+        _trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let prompt_tokens = self.tokenizer.encode(prompt, true)?;
         let dim = self.spec.n_embd as u32;
         let mut rng = Rng::new(params.seed);
+        let mut on_token = on_token;
 
         // Reset KV cache
         {
@@ -872,6 +878,15 @@ impl GpuRuntime {
     /// Get a reference to the tokenizer.
     pub fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
+    }
+    pub fn tokenizer_arc(&self) -> Arc<Tokenizer> {
+        self.tokenizer.clone()
+    }
+    pub fn eos_token(&self) -> u32 {
+        self.eos_token
+    }
+    pub fn im_end_token(&self) -> Option<u32> {
+        self.im_end_token
     }
 
     /// Get a reference to the model spec.
@@ -1191,4 +1206,42 @@ mod tests {
         let p2 = p.clone();
         assert_eq!(p2.extra_stop_tokens, p.extra_stop_tokens);
     }
+}
+
+/// Create an FSE (Fused Semantic Execution) control from reject patterns.
+pub fn fse_control_from_patterns(
+    patterns: &str,
+) -> Option<Box<dyn InferenceControl + Send + Sync>> {
+    if patterns.is_empty() {
+        return None;
+    }
+    use crate::fse_control::FseControl;
+    use libfse::{FseMap, FseOpcode, Rule};
+    let rules: Vec<Rule> = if patterns.is_empty() {
+        Vec::new()
+    } else {
+        patterns
+            .split(',')
+            .enumerate()
+            .map(|(i, p)| {
+                let trimmed = p.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(Rule::new(trimmed.as_bytes(), FseOpcode::Reject(i as u32)))
+                }
+            })
+            .flatten()
+            .collect()
+    };
+    FseMap::compile(rules).ok().and_then(|map| {
+        FseControl::new(map)
+            .ok()
+            .map(|c| Box::new(c) as Box<dyn InferenceControl + Send + Sync>)
+    })
+}
+
+/// Create a trace callback (stub — trace not yet wired).
+pub fn trace_callback(trace_path: &str) -> Option<Box<dyn FnMut(usize, &[f32], f64) + Send>> {
+    None
 }
