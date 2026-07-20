@@ -97,7 +97,11 @@ fn query_vault_rows(vault: &Path, model_name: &str, quant: &str) -> Vec<VaultRow
         .arg(&sql)
         .output()
         .expect("failed to run duckdb CLI");
-    assert!(out.status.success(), "duckdb query failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "duckdb query failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).expect("duckdb output not utf-8");
     if stdout.trim().is_empty() {
         return vec![];
@@ -174,7 +178,11 @@ fn certify_all_vault_models_against_gpu() {
             };
             let drms = (cap.rms - r.expected_rms as f32).abs();
             let cs_ok = cap.checksum == r.checksum;
-            let tol = if r.operation == "final_logits" { FINAL_LOGITS_TOL } else { LAYER_OUTPUT_TOL };
+            let tol = if r.operation == "final_logits" {
+                FINAL_LOGITS_TOL
+            } else {
+                LAYER_OUTPUT_TOL
+            };
             if drms > tol || !cs_ok {
                 let reason = format!(
                     "layer {} [{}]: gpu_rms={:.6} vault_rms={:.6} drms={:.6} (tol {:.3}) cs_match={} (gpu={} vault={})",
@@ -192,7 +200,11 @@ fn certify_all_vault_models_against_gpu() {
                 }
             }
             None => {
-                eprintln!("[certify] {} PASS (all {} oracle rows match)", tag, rows.len());
+                eprintln!(
+                    "[certify] {} PASS (all {} oracle rows match)",
+                    tag,
+                    rows.len()
+                );
             }
         }
     }

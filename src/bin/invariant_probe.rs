@@ -99,41 +99,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     clear_invariant_capture_sink();
 
     // ── Embedding diagnostics ──────────────────────────────────────────
-    let tokens = rt
-        .tokenizer()
-        .encode("Hello", true)
-        .unwrap_or_default();
+    let tokens = rt.tokenizer().encode("Hello", true).unwrap_or_default();
     let bos_id = tokens.first().copied().unwrap_or(1);
     let hello_id = tokens.get(1).copied().unwrap_or(15043);
     let bos_embd = rt.dequant_token_embd(bos_id);
     let hello_embd = rt.dequant_token_embd(hello_id);
     // RMS and checksum of the raw Hello embedding (input to layer 0)
-    let hello_rms = (hello_embd.iter().map(|x| x*x).sum::<f32>() / hello_embd.len() as f32).sqrt();
-    use airframe_observe::facts::{rms, checksum as cs};
-    eprintln!("[diag] Hello embedding: rms={:.6} checksum={}", hello_rms, cs(&hello_embd));
+    let hello_rms =
+        (hello_embd.iter().map(|x| x * x).sum::<f32>() / hello_embd.len() as f32).sqrt();
+    use airframe_observe::facts::{checksum as cs, rms};
+    eprintln!(
+        "[diag] Hello embedding: rms={:.6} checksum={}",
+        hello_rms,
+        cs(&hello_embd)
+    );
 
     // ── Verify attn_norm weight tensor directly ──────────────────────────
     // Dequant the attn_norm weight and print first 5 values.
     let nw = rt.dequant_tensor_f32("blk.0.attn_norm.weight", 8);
-    eprintln!("[diag] blk.0.attn_norm.first8={:?}", nw.iter().map(|v| format!("{:.6}", v)).collect::<Vec<_>>().join(", "));
+    eprintln!(
+        "[diag] blk.0.attn_norm.first8={:?}",
+        nw.iter()
+            .map(|v| format!("{:.6}", v))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     // Print the exact absolute offset from Rust metadata
     let ann_off = rt.tensor_offset("blk.0.attn_norm.weight").unwrap_or(0);
     eprintln!("[diag] blk.0.attn_norm.weight abs_offset={}", ann_off);
     let fw = rt.dequant_tensor_f32("blk.0.ffn_norm.weight", 8);
-    eprintln!("[diag] blk.0.ffn_norm.first8={:?}", fw.iter().map(|v| format!("{:.6}", v)).collect::<Vec<_>>().join(", "));
+    eprintln!(
+        "[diag] blk.0.ffn_norm.first8={:?}",
+        fw.iter()
+            .map(|v| format!("{:.6}", v))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     let ow = rt.dequant_tensor_f32("output_norm.weight", 8);
-    eprintln!("[diag] output_norm.first8={:?}", ow.iter().map(|v| format!("{:.6}", v)).collect::<Vec<_>>().join(", "));
+    eprintln!(
+        "[diag] output_norm.first8={:?}",
+        ow.iter()
+            .map(|v| format!("{:.6}", v))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
     // ── Norm weight type diagnostic ────────────────────────────────────
     // Check what quant type the norm weights are stored as.
     // The preflight code copies dim*4 bytes as F32 — if they're F16, that's a buffer overread.
     let spec = rt.spec();
-    eprintln!("[diag] rms_eps={} temp_buffer_size={} dim={} ff_dim={}",
-        spec.rms_eps, spec.temp_buffer_size, spec.n_embd, spec.ff_dim);
-    eprintln!("[diag] n_head={} n_head_kv={} head_dim={} n_layer={}",
-        spec.n_head, spec.n_head_kv, spec.head_dim, spec.n_layer);
-    eprintln!("[diag] embd_quant_type={} row_bytes={} embd_weight_offset={}",
-        rt.embd_quant_type(), rt.row_bytes(), rt.embd_weight_offset());
+    eprintln!(
+        "[diag] rms_eps={} temp_buffer_size={} dim={} ff_dim={}",
+        spec.rms_eps, spec.temp_buffer_size, spec.n_embd, spec.ff_dim
+    );
+    eprintln!(
+        "[diag] n_head={} n_head_kv={} head_dim={} n_layer={}",
+        spec.n_head, spec.n_head_kv, spec.head_dim, spec.n_layer
+    );
+    eprintln!(
+        "[diag] embd_quant_type={} row_bytes={} embd_weight_offset={}",
+        rt.embd_quant_type(),
+        rt.row_bytes(),
+        rt.embd_weight_offset()
+    );
 
     let embed_diag = EmbedDiag {
         quant_type: rt.embd_quant_type(),

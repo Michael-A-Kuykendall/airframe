@@ -908,8 +908,12 @@ impl GpuRuntime {
         if let Some(off) = self.tensor_offset(name) {
             let qt = self.tensor_type(name).unwrap_or(0);
             self.pipeline.run_dequant_any_hot(
-                &self.device, &self.queue, &self.model,
-                off as u32, count, qt,
+                &self.device,
+                &self.queue,
+                &self.model,
+                off as u32,
+                count,
+                qt,
             )
         } else {
             vec![]
