@@ -16,9 +16,11 @@
 
 Airframe is the GPU inference core powering [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy). It runs full transformer inference directly on the GPU via WGSL compute shaders — works on NVIDIA, AMD, Intel, and Apple Silicon.
 
-**⚡ v0.2.7**: Inference Saturation Fabric (ISF) refit complete — 10/10 smoke tests PASS across all architectures (llama/phi2/gemma2/qwen2/qwen3/starcoder2). TDR (Timeout Detection and Recovery) transport integrated, encoder pools operational, Qwen3 attention.scale tensor mapping added defensively. DuckDB now optional (shimmy builds cleanly without it).
+**⚡ v0.2.9**: batch_count fix for QKV shader (was killing all threads), GPU adapter selection now prefers discrete GPU over integrated, grammar control hooks integrated, PPT invariant cage (B1-B3) for regression detection. **357 tests pass.**
 
 **⚡ v0.2.6**: LM head tile dispatch for large-vocab models (Gemma-2 256K, Qwen3, Llama-3.2-3B).
+
+**⚡ v0.2.7**: Inference Saturation Fabric (ISF) refit complete. TDR transport, encoder pools, DuckDB optional.
 
 **⚡ v0.2.1**: [TurboShimmy INT4 KV Cache](#-turboshimmy-int4-kv-cache) — ~7× less KV VRAM with one env var. Run Llama-3.2-3B on 4 GB GPUs.
 

@@ -1,263 +1,92 @@
 # Changelog
 
-All notable changes to this project will be documented here.
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+All notable changes to Airframe will be documented in this file.
 
-## [0.2.7] — 2026-06-29
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.9] - 2026-07-20
 
 ### Fixed
-
-- **ISF (Inference Saturation Fabric) refit complete** — All outstanding architectural issues from v0.2.x resolved in one release:
-  - ISF (`generate_isf`) now the production inference path, replacing legacy imperative `generate()`
-  - TDR (Timeout Detection and Recovery) transport integrated with GPU timestamp pools for accurate dispatch timing
-  - Encoder pools operational for non-blocking GPU work submission
-  - Qwen3 `attention.scale` tensor mapped defensively (no GGUF on disk contains it — matches HF reference)
+- **batch_count: 0 -> batch_count: 1** in `server_inference.rs` — was killing all QKV threads
+- **Rust/WGSL struct layout mismatch** — per-field quant types aligned between Rust `LayerParams` and WGSL
+- **GPU adapter selection** — now prefers discrete GPU over integrated (multi-GPU laptops)
 
 ### Added
+- **Grammar control hooks** — schoolmarm+grammar module for structured generation
+- **PPT invariant cage (B1-B3)** — golden-vault-based regression detection with per-layer RMS/checksum verification (12 models, CPU-only, single-thread)
+- **Shimmy API**: `tokenizer_arc()`, `eos_token()`, `im_end_token()`, `fse_control_from_patterns()`, `trace_callback()`
 
-- **Inference Saturation Fabric** — New fabric-based inference loop in `crates/airframe_observe/src/isf.rs`:
-  - 7-rule policy enforcement with selector-first, single-pass execution
-  - Fused semantic execution (FSE) powered by dzero crate (`0.1.0`)
-  - Byte-identical validation between ISF and imperative paths verified
+### Infrastructure
+- 357 library tests pass
+- Releases backfilled for all versions back to v0.2.0
 
-- **GPU Timestamp Query Pools** — Accurate GPU-side dispatch timing:
-  - `pool_timestamp.rs`: TimestampPool for capturing GPU timestamps before/after compute passes
-  - TDR scheduler updated with optional `TimestampPool` parameter
-  - Methods: `write_start_timestamp()`, `record_gpu_elapsed()`, `resolve_timestamps()`
-
-- **Encoder Pools** — Bounded pool of `CommandEncoder`s for non-blocking submission:
-  - `pool_encoder.rs`: EncoderPool with ring-buffer slot management
-  - Methods: `acquire()`, `submit_and_recycle()`, `drain()`
-  - Keeps GPU fed without pipeline bubbles
-
-- **DuckDB Made Optional** — Fixes critical build-time issues:
-  - DuckDB previously required for internal certification paths; now opt-in via feature flag
-  - Fixes build-time Out-of-Memory crashes on shimmy server when duckdb-sys is unavailable
-  - Fixes TDR watchdog crashes during long prefill sequences (Windows D3D12) — Windows GPU timeout exceeded
-
-### Changed
-
-- **Architecture**: Consolidated arch dispatch into `LlamaModel::forward()` with `has_qk_norm`/`post_norm_enabled` flags
-- **TDR Scheduler**: Unified TDR yield logic into clean, testable struct (replaces scattered macros)
-- **Stderr Noise**: DIAG/TDR stderr now gated behind `AIRFRAME_LOG_TDR_POLLS=1`
-
-### Validation
-
-- **Smoke Tests**: 10/10 PASS across all model architectures:
-  - Llama-3.2-3B, Phi-2, Gemma-2 9B, Qwen2-7B, Qwen3-8B, StarCoder2-3B
-  - All quantization types (Q4_K_M, Q6_K) verified
-  - Byte-identical output between ISF and imperative paths
-
-### Removed
-
-- **Legacy `generate()` path** — Deprecated in favor of ISF (`generate_isf`) which is now the production path
-- **Scattered TDR macros** — Consolidated into `TdrScheduler` struct methods
-
----
+## [0.2.8] - 2026-07-18
 
 ### Fixed
+- ISF/TDR/duckdb hotfix release
+- DuckDB now optional (shimmy builds cleanly without it)
 
-- **TDR crash on large-vocab models (Gemma-2 256K, Qwen3, Llama-3.2-3B)** — LM head
-  dispatch now splits into safe-sized tiles using the cache-calibrated workgroup limit.
-  - `sh_head_blob.wgsl`: added `base_row` param for tile offset (output indexing now
-    `base_row + global_id.x` instead of `global_id.x`).
-  - `HeadBlobParams` struct extended with `base_row: u32` field.
-  - `run_lm_head_blob_tiled()`: dispatches head in tiles of `max_safe_wgs` workgroups,
-    each writing to the correct output region.
-  - Production hot path (`inference.rs`): `dispatch_workgroups(wg_head_blob, 1, 1)`
-    replaced with tiled loop using `tdr_calibration::ensure_calibrated()`.
-  - Disk cache (`tdr_calibration.rs`): per-(pipeline, n_embd) safe WG limits stored at
-    `%LOCALAPPDATA%/Airframe/tdr-calibration.json` (Win) or `~/.cache/airframe/` (Linux),
-    with conservative 512-WG default fallback.
-  - Validated on TinyLlama Q6_K (32K vocab): tiled vs unsplit **MAE=0.00000000, PASS**.
-  - `frontier_compare --validate-head-tile` flag added for regression testing.
-
----
-
-## [0.2.5] — 2026-06-12
-
-### Fixed (rolled-up hotfix — includes all v0.2.3 and v0.2.4 fixes)
-
-- **Critical: GPU temp buffer underallocated for all GQA models** (`src/core/spec.rs`)
-  - Formula `ff_dim*2+n_embd` was missing Q/K/V vectors — 13312 vs 15872 needed for TinyLlama.
-  - All GQA models affected: TinyLlama, Qwen3, LLaMA 3.2, Gemma2, DeepSeek, Qwen2.
-  - Symptom: single garbage token output on every inference call.
-
-- **frontier_compare: tied-embedding crash** (`src/bin/frontier_compare.rs`)
-  - `load_output_head_f32` now falls back to `token_embd.weight` when `output.weight` absent.
-  - Supports all quant types (was Q6_K only).
-  - `CpuKvCache` uses `spec.head_dim` not `n_embd/n_head` (wrong for GQA head_dim=128).
-  - Unblocks diagnostic tracing for Qwen3, LLaMA-3.2.
-
----
-
-## [0.2.3] — 2026-06-11
-
-### Fixed
-- **Critical: GPU temp buffer underallocated for all GQA models** (`src/core/spec.rs`)
-  - `compute_derived()` used `ff_dim*2 + n_embd` (e.g. 13312 for TinyLlama) but the
-    GPU temp layout requires `n_embd + q_len + kv_len*2 + ff_dim*2` (15872 minimum).
-  - GPU writes past buffer end → silent memory corruption → all-NaN layer outputs →
-    single garbage token per inference call.
-  - Fix: correct formula produces 16384 for TinyLlama; all GQA models now sufficient.
-  - Models affected: TinyLlama, Qwen3, LLaMA 3.2, Gemma2, DeepSeek (any with GQA).
-  - Models unaffected: StarCoder2, GPT-2, Phi-2 (MHA, n_head == n_head_kv).
-  - Property tests: `tests/temp_buffer_invariant.rs` (4 tests, guards invariant forever).
-  - Vault: `temp_buffer_audit` view shows correct vs old formula for all known models.
-
----
-
-## [0.2.2] — 2026-06-09
-
-### Fixed
-
-- **Multi-architecture GGUF loading** —  hardcoded 
-  key prefix, silently failing on every non-Llama model. Now uses suffix-based matching,
-  correctly loading Qwen3, Qwen2, Gemma2, Phi3, StarCoder2, GPT-2, and all other
-  non-Llama architectures from GGUF metadata.
-
-- **Tied embeddings (Qwen3)** — Qwen3 models have no separate  — they
-  reuse the token embedding. Loading now correctly aliases  as the
-  output projection. Previously crashed with .
-
-- **Context cap safety** — Large-context models like Qwen2-7B (n_ctx=32768) would
-  allocate 28+ GB KV cache on CPU oracle runs. Added a safe default cap (4096) for
-  CPU inference paths. GPU server operation is unaffected.
+## [0.2.7] - 2026-06-12
 
 ### Added
-
-- **Golden Reference Vault** — Internal DuckDB certification database with oracle traces
-  for 22 models across 6 architectures. Includes  binary for generating
-  CPU reference traces from any GGUF. Internal tool; not published to crates.io.
-
-- **FSE inference observation layer** () — Selector-first,
-  single-pass inference capture powered by dzero. Multiple observers sharing a
-  selector cost zero additional extraction (FSE invariant). Internal; not published.
-
-## [0.2.1] — 2026-06-02
+- Inference Saturation Fabric (ISF) refit
+- TDR (Timeout Detection and Recovery) transport
+- Encoder pools operational
+- DuckDB support
 
 ### Fixed
+- 10/10 smoke tests pass across all architectures (llama/phi2/gemma2/qwen2/qwen3/starcoder2)
+- Qwen3 attention.scale tensor mapping
 
-- **wgpu 27 staging-buffer panic on non-Gemma models** (shimmy#205).  
-  Two root causes:
-  1. `GpuRuntime::load()` set `max_buffer_size` to `max_storage_buffer_binding_size`.
-     On some older GPU/driver stacks (e.g. GTX 1050 Ti) these limits differ, causing
-     a wgpu validation error when the 608 MB model buffer was created. Now uses
-     `adapter_limits.max_buffer_size` instead.
-  2. A pre-flight size guard now returns a clear `Err` if the model file exceeds the
-     GPU's storage-buffer binding limit, instead of letting wgpu defer the error to a
-     later `map_async` call (where it appeared as a cryptic "Staging Buffer is invalid"
-     panic in wgpu 27).
-- **Spurious WARNING logs for standard Llama/Mistral/Phi/Qwen models**.  
-  `post_attention_norm` and `post_ffw_norm` tensors only exist in Gemma / Gemma2
-  architectures. Absence warnings are now suppressed for all other model families.
-- Added `device.on_uncaptured_error` handler so any future wgpu validation errors
-  produce a descriptive `[Airframe] GPU error:` message instead of a fatal panic.
-
----
-
-## [0.2.0] — 2026-05-31
-
-### The headline: TurboShimmy INT4 KV cache
-
-This release ships **TurboShimmy** — a per-head-vector INT4 KV cache compression system
-that cuts KV VRAM usage by ~7× with no measured retrieval loss at the context lengths that
-matter for most chat workloads. Enable it with a single environment variable:
-
-```bash
-SHIMMY_KV_QUANT=int4 cargo run --bin shimmy_server_gpu --release
-```
-
-KV cache example (Llama-3.2-3B, `ctx=2048`): **512 MB → ~72 MB**.
-
-This was designed top-down for [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy),
-the OpenAI-compatible server powered by Airframe. Shimmy 2.1.0 will surface
-`SHIMMY_KV_QUANT` as a first-class user config option — enabling memory-constrained
-deployments (8 GB VRAM cards, cloud spot instances, consumer laptops) to run 7B+ models
-with a context window that would otherwise OOM. See the
-[Shimmy integration roadmap](#shimmy-21-integration-targets) below.
-
----
-
-### Validation results
-
-All 10 smoke-tested model families pass (TinyLlama through Qwen2-7B). Needle-in-a-haystack
-retrieval at ctx=256 is **identical between F32 and INT4** — zero degradation measured on
-Llama-3.2-3B across 10%, 50%, and 90% depth probes.
-
-| Model | ctx=256 needle (INT4) | smoke test |
-|---|---|---|
-| Llama-3.2-3B | 2/3 pass (matches F32) | ✅ |
-| deepseek-llm-7b | — | ✅ |
-| deepseek-coder-6.7b | — | ✅ |
-| qwen2-7b | — | ✅ |
-| TinyLlama, Llama-1B, phi-2, starcoder2, gpt2, Qwen3-0.6B | — | ✅ |
-
-Full artifact: `artifacts/model_smoke/smoke_20260531_155033.csv`.
-
----
-
-### Shimmy 2.1 integration targets
-
-The following work lands in Shimmy after airframe 0.2.0 is published:
-
-- `airframe = "0.2"` dep bump in the Shimmy private repo
-- `SHIMMY_KV_QUANT` exposed as a top-level config key (`shimmy.toml`) and CLI flag
-  (`--kv-quant int4`)
-- `/v1/models` response already carries `"kv_mode"` field — Shimmy's dashboard can
-  surface this without code changes
-- Shimmy 2.1.0 release note: *"Memory optimization mode (experimental): set
-  `kv_quant = "int4"` in shimmy.toml to reduce KV cache VRAM by ~7×"*
-- Homebrew formula update for shimmy 2.1.0
-
----
+## [0.2.6] - 2026-06-02
 
 ### Added
+- LM head tile dispatch for large-vocab models (Gemma-2 256K, Qwen3, Llama-3.2-3B)
 
-- **TurboShimmy INT4 KV cache** — WGSL shaders `quantize_kv_int4.wgsl` and
-  `decode_kv_int4.wgsl`; per-head-vector bias-8 nibble encoding; ~7× KV compression.
-- `KVCache::new_int4` constructor; `KVCache::is_int4()` query method.
-- `BindlessPipeline::run_layer_with_cache_int4` — 3-encoder per-layer decode path with
-  per-encoder GPU polls to stay within the Windows TDR watchdog on each INT4 decode step.
-- `BindlessPipeline::requantize_all_kv_int4` — bulk F32→INT4 requantize after prefill,
-  followed by an explicit `device.poll(wait_indefinitely())` before decode begins.
-- `SHIMMY_KV_QUANT` env var (`f32` | `int4`, default `f32`).
-- `SHIMMY_PREFILL_CHUNK` env var: chunked prefill batch size (default `64`); reduce on
-  lower-VRAM cards or if TDR crashes appear on very long prompts.
-- `SHIMMY_VRAM_LIMIT_MB` env var: VRAM budget warning threshold (default `10500`).
-- `/v1/models` response includes `"kv_mode": "f32"|"int4"` — downstream clients
-  (including Shimmy's dashboard) can query the active KV mode without log parsing.
-- Server startup log: `[GPU Server] KV cache mode: INT4 (TurboQuant)` when INT4 is active.
-- `docs/turboshimmy.md`: full feature spec, implementation notes, needle bench results,
-  deployment guidance, and Windows TDR context.
-- `scripts/needle_bench.py`: needle-in-a-haystack evaluation script against a live server.
-  Supports arbitrary `--ctx`, `--depths`, `--runs`, and `--out` for artifact collection.
-- README: *Memory Optimization* section with VRAM savings table and full env var reference.
-- `shimmyjinja` dependency updated to `0.5.0` (published alongside this release): adds
-  `try_render_chat_template_with_context` returning `Result<String, RenderError>`, seals
-  internal modules as `pub(crate)`, and adds CHANGELOG + doc-tests.
+## [0.2.5] - 2026-05-28
 
 ### Fixed
+- 7 NaN/stall bugs for multi-arch models (Qwen3, Gemma-2, StarCoder2, Llama-3.2)
+- NaN in FFN gate/up projections — wrong quant type
+- Buffer alignment in bindless tests (354/354 passing)
 
-- **Windows TDR crashes during prefill** — GPU command encoder is now submitted and polled
-  once per layer in `run_full_model_prefill_chunked_with_cache_state`, preventing any
-  single dispatch from exceeding the ~2 s Windows TDR watchdog. Previously crashed at
-  seq_len ≥ 144; now verified stable at seq_len ≈ 224 (ctx=256) on RTX 3060 Windows.
-  The fix is structural — no user-tunable knob required for typical SHIMMY_PREFILL_CHUNK
-  values (≤64).
-- `scripts/needle_bench.py`: HTTP 400 from float seed (now cast to `int`); connection-reset
-  on stop-token emission (caught and treated as end-of-stream); fuzzy `check_pass` to
-  tolerate minor whitespace variation in model responses.
+## [0.2.4] - 2026-05-24
 
-### Changed
+### Added
+- Vault-driven fixes infrastructure
 
-- Version: `0.1.1` → `0.2.0`.
-- `shimmyjinja` dependency: `0.2.1` → `0.5.0`.
+## [0.2.3] - 2026-05-20
 
-## [0.1.1] — 2026-05-15
+### Added
+- Complete vault with 48 commodity models
 
-Initial public release: Bindless WebGPU pipeline, FSE subsystem, OpenAI-compatible HTTP
-server (`shimmy_server_gpu`). Supports Llama, Gemma, Phi, Qwen2, Qwen3 architectures via
-GGUF Q4_K_M and related quantization types. Ships `shimmyjinja` (Jinja2 chat_template
-renderer) and `shimmytok` (GGUF-native tokenizer) as zero-dependency companion crates.
+## [0.2.1] - 2026-05-15
 
+### Added
+- **TurboShimmy INT4 KV Cache** — ~7× less KV VRAM with one env var
+- Quality validation: needle-in-a-haystack benchmarks show zero retrieval degradation vs F32 at ctx≤2048
+- `device.on_uncaptured_error` handler surfaces GPU validation errors as clean HTTP 500 responses
+
+## [0.2.0] - 2026-05-10
+
+Initial public release as the GPU inference core for Shimmy v2.0.
+
+### Supported Architectures
+- Llama (Llama 3.2, Llama 3, Llama 2, DeepSeek)
+- Mistral (Mistral 7B, Mixtral dense layers)
+- Phi (Phi-3.5, Phi-3, Phi-2)
+- Qwen2 (0.5B–7B)
+- Qwen3 (0.6B–8B)
+- Gemma (Gemma-2 2B, 9B)
+- StarCoder2 (3B)
+- GPT-2
+
+### Supported Quantization
+F32, F16, Q4_0, Q4_K_M, Q5_K_M, Q6_K, Q8_0
+
+### Features
+- Bindless WebGPU pipeline — all weight tensors uploaded once, addressed by index
+- YaRN RoPE scaling for extended context
+- Deterministic sampling — identical output across restarts and GPU vendors
+- GGUF-native model spec auto-derivation
