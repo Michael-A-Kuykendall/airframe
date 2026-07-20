@@ -25,7 +25,6 @@ use airframe::backend::bindless::pipeline::inference::{
 use airframe::runtime::gpu::GpuRuntime;
 use airframe_observe::facts::CapturedLayer;
 use serde::Serialize;
-use shimmytok::Tokenizer;
 use std::path::Path;
 
 #[derive(Serialize)]
@@ -107,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // RMS and checksum of the raw Hello embedding (input to layer 0)
     let hello_rms =
         (hello_embd.iter().map(|x| x * x).sum::<f32>() / hello_embd.len() as f32).sqrt();
-    use airframe_observe::facts::{checksum as cs, rms};
+    use airframe_observe::facts::checksum as cs;
     eprintln!(
         "[diag] Hello embedding: rms={:.6} checksum={}",
         hello_rms,
