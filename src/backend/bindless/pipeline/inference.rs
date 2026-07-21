@@ -56,6 +56,55 @@ pub fn invariant_capture_sink_mut(
     unsafe { INVARIANT_CAPTURE.map(|p| &mut *p) }
 }
 
+// ── PPT Invariant Per-Tensor Capture Hook ───────────────────────────────────
+// Mirrors the layer sink but carries the per-kernel activation stats
+// (q/k/v/post-attn/ffn/output RMS+checksum) for one transformer layer. This is
+// what lets the certify loop PIN a broken sub-kernel (QKV vs Attn vs FFN) once
+// a layer diverges. Populated by `run_layer_with_cache_debug`, which already
+// reads those tensors back into CPU vecs — so this is zero extra GPU work.
+#[cfg(feature = "isf")]
+pub static mut INVARIANT_PTENSOR_CAPTURE: Option<*mut Vec<CapturedPerTensor>> = None;
+
+/// One layer's per-kernel activation stats (lightweight — RMS+checksum only).
+#[cfg(feature = "isf")]
+#[derive(Clone)]
+pub struct CapturedPerTensor {
+    pub layer_idx: u32,
+    pub position: u32,
+    pub q_rms: f32,
+    pub q_checksum: i64,
+    pub k_rms: f32,
+    pub k_checksum: i64,
+    pub v_rms: f32,
+    pub v_checksum: i64,
+    pub post_rms: f32,
+    pub post_checksum: i64,
+    pub ffn_rms: f32,
+    pub ffn_checksum: i64,
+    pub output_rms: f32,
+    pub output_checksum: i64,
+}
+
+#[cfg(feature = "isf")]
+pub fn set_invariant_ptensor_capture_sink(sink: &mut Vec<CapturedPerTensor>) {
+    unsafe {
+        INVARIANT_PTENSOR_CAPTURE = Some(sink as *mut Vec<CapturedPerTensor>);
+    }
+}
+
+#[cfg(feature = "isf")]
+pub fn clear_invariant_ptensor_capture_sink() {
+    unsafe {
+        INVARIANT_PTENSOR_CAPTURE = None;
+    }
+}
+
+#[cfg(feature = "isf")]
+pub fn invariant_ptensor_capture_sink_mut(
+) -> Option<&'static mut Vec<CapturedPerTensor>> {
+    unsafe { INVARIANT_PTENSOR_CAPTURE.map(|p| &mut *p) }
+}
+
 /// Read back the post-layer activation and append a `CapturedLayer` to the sink.
 /// Mirrors the existing `trace_prefill_layers` readback (copy → submit → poll →
 /// map → read → unmap) but routes the values into the probe's capture sink.
@@ -114,6 +163,49 @@ fn emit_layer_capture(
         rms,
         checksum,
         is_final_logits: false,
+    });
+}
+
+/// Push a layer's per-kernel activation stats into the per-tensor capture sink.
+/// `q/k/v/post/ffn/output` are the CPU-readback vecs from `run_layer_with_cache_debug`.
+/// Gated identically to `emit_layer_capture` (env + sink) so it is a no-op in
+/// normal inference and when no per-tensor sink is installed.
+#[cfg(feature = "isf")]
+pub fn emit_ptensor_capture(
+    layer_idx: u32,
+    position: u32,
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    post: &[f32],
+    ffn: &[f32],
+    output: &[f32],
+) {
+    if !std::env::var("AIRFRAME_CAPTURE_INVARIANT")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let sink = match invariant_ptensor_capture_sink_mut() {
+        Some(s) => s,
+        None => return,
+    };
+    sink.push(CapturedPerTensor {
+        layer_idx,
+        position,
+        q_rms: airframe_observe::facts::rms(q),
+        q_checksum: airframe_observe::facts::checksum(q),
+        k_rms: airframe_observe::facts::rms(k),
+        k_checksum: airframe_observe::facts::checksum(k),
+        v_rms: airframe_observe::facts::rms(v),
+        v_checksum: airframe_observe::facts::checksum(v),
+        post_rms: airframe_observe::facts::rms(post),
+        post_checksum: airframe_observe::facts::checksum(post),
+        ffn_rms: airframe_observe::facts::rms(ffn),
+        ffn_checksum: airframe_observe::facts::checksum(ffn),
+        output_rms: airframe_observe::facts::rms(output),
+        output_checksum: airframe_observe::facts::checksum(output),
     });
 }
 

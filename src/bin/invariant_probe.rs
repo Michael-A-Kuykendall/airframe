@@ -21,6 +21,8 @@
 
 use airframe::backend::bindless::pipeline::inference::{
     clear_invariant_capture_sink, set_invariant_capture_sink,
+    clear_invariant_ptensor_capture_sink, set_invariant_ptensor_capture_sink,
+    CapturedPerTensor,
 };
 use airframe::runtime::gpu::GpuRuntime;
 use airframe_observe::facts::CapturedLayer;
@@ -43,6 +45,18 @@ struct FinalJson {
 }
 
 #[derive(Serialize)]
+struct PerTensorJson {
+    layer_idx: u32,
+    position: u32,
+    q_rms: f32,
+    k_rms: f32,
+    v_rms: f32,
+    post_rms: f32,
+    ffn_rms: f32,
+    output_rms: f32,
+}
+
+#[derive(Serialize)]
 struct EmbedDiag {
     quant_type: u32,
     weight_offset: u64,
@@ -58,6 +72,7 @@ struct ProbeOutput {
     model: String,
     layers: Vec<LayerJson>,
     final_logits: Option<FinalJson>,
+    per_tensor: Vec<PerTensorJson>,
     embed_diag: EmbedDiag,
 }
 
@@ -79,6 +94,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     std::env::set_var("AIRFRAME_CAPTURE_INVARIANT", "1");
     let mut sink: Vec<CapturedLayer> = Vec::new();
     set_invariant_capture_sink(&mut sink);
+    // Per-tensor sink (q/k/v/post/ffn/output). Populated when the forward uses
+    // the debug layer path (run_layer_with_cache_debug); the production
+    // generate_isf path does not emit per-tensor, so this stays empty unless a
+    // --per-tensor forward is enabled (follow-up).
+    let mut pt_sink: Vec<CapturedPerTensor> = Vec::new();
+    set_invariant_ptensor_capture_sink(&mut pt_sink);
 
     let rt = GpuRuntime::load(Path::new(model_path)).await?;
 
@@ -96,6 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _text = rt.generate_isf(prompt, &params, None)?;
 
     clear_invariant_capture_sink();
+    clear_invariant_ptensor_capture_sink();
 
     // ── Embedding diagnostics ──────────────────────────────────────────
     let tokens = rt.tokenizer().encode("Hello", true).unwrap_or_default();
@@ -192,10 +214,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     layers.sort_by_key(|l| (l.position, l.layer_idx));
 
+    let per_tensor: Vec<PerTensorJson> = pt_sink
+        .iter()
+        .map(|c| PerTensorJson {
+            layer_idx: c.layer_idx,
+            position: c.position,
+            q_rms: c.q_rms,
+            k_rms: c.k_rms,
+            v_rms: c.v_rms,
+            post_rms: c.post_rms,
+            ffn_rms: c.ffn_rms,
+            output_rms: c.output_rms,
+        })
+        .collect();
+
     let out = ProbeOutput {
         model: model_name.clone(),
         layers,
         final_logits,
+        per_tensor,
         embed_diag,
     };
     println!("{}", serde_json::to_string(&out)?);

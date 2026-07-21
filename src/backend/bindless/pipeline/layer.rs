@@ -1589,6 +1589,34 @@ impl BindlessPipeline {
         let ffn_down_vals = self.readback_helper(device, &ffn_down_staging);
         let output = self.readback_helper(device, &output_staging);
 
+        // ── PPT Invariant Per-Tensor Capture ──
+        // These vecs are already read back from the GPU; route them into the
+        // per-tensor capture sink (gated by AIRFRAME_CAPTURE_INVARIANT + a
+        // installed sink) so the certify loop can localize a broken sub-kernel.
+        // Zero extra GPU work — we only compute RMS/checksum on the CPU vecs.
+        #[cfg(feature = "isf")]
+        {
+            if std::env::var("AIRFRAME_CAPTURE_INVARIANT")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+            {
+                if let Some(_sink) =
+                    crate::backend::bindless::pipeline::inference::invariant_ptensor_capture_sink_mut()
+                {
+                    crate::backend::bindless::pipeline::inference::emit_ptensor_capture(
+                        layer_idx as u32,
+                        kv_cache.get_seq_len(),
+                        &q_vals,
+                        &k_vals,
+                        &v_vals,
+                        &post_attn_vals,
+                        &ffn_down_vals,
+                        &output,
+                    );
+                }
+            }
+        }
+
         (
             output,
             post_attn_vals,

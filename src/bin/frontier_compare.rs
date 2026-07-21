@@ -19,6 +19,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+#[cfg(feature = "isf")]
+use airframe::backend::bindless::pipeline::inference::{
+    set_invariant_ptensor_capture_sink, clear_invariant_ptensor_capture_sink, CapturedPerTensor,
+};
+
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(long)]
@@ -83,6 +88,28 @@ struct LayerComparison {
     output: SummaryStats,
 }
 
+/// Per-kernel capture emitted via the `airframe_observe` sink
+/// (`run_layer_with_cache_debug` → `emit_ptensor_capture`). Mirrors
+/// `LayerComparison` but carries RMS+checksum for vault comparison.
+#[cfg(feature = "isf")]
+#[derive(Serialize)]
+struct CapturedPerTensorJson {
+    layer_idx: u32,
+    position: u32,
+    q_rms: f32,
+    q_checksum: i64,
+    k_rms: f32,
+    k_checksum: i64,
+    v_rms: f32,
+    v_checksum: i64,
+    post_rms: f32,
+    post_checksum: i64,
+    ffn_rms: f32,
+    ffn_checksum: i64,
+    output_rms: f32,
+    output_checksum: i64,
+}
+
 #[derive(Serialize)]
 struct LayerDiag {
     layer_idx: usize,
@@ -127,6 +154,8 @@ struct ProbeOutput {
     gpu_topk: Vec<LogitTopK>,
     layers: Vec<LayerComparison>,
     layer_diags: Vec<LayerDiag>,
+    #[cfg(feature = "isf")]
+    captured_per_tensor: Vec<CapturedPerTensorJson>,
 }
 
 #[derive(Clone)]
@@ -148,6 +177,18 @@ fn main() -> Result<()> {
 
 async fn async_main() -> Result<()> {
     let args = Args::parse();
+
+    // Install the per-tensor capture sink so `run_layer_with_cache_debug`
+    // routes q/k/v/post/ffn/output RMS+checksum into `pt_sink`. Gated by the
+    // `isf` feature (which also gates the capture API). Lives for the whole
+    // async_main scope so the static pointer stays valid through the compare loop.
+    #[cfg(feature = "isf")]
+    let mut pt_sink: Vec<CapturedPerTensor> = Vec::new();
+    #[cfg(feature = "isf")]
+    {
+        std::env::set_var("AIRFRAME_CAPTURE_INVARIANT", "1");
+        set_invariant_ptensor_capture_sink(&mut pt_sink);
+    }
     let prompt = load_prompt(&args)?;
     let tokenizer = Tokenizer::from_gguf_file(&args.model).map_err(|err| {
         LibshimmyError::Unsupported(format!("failed to load tokenizer from GGUF: {err}"))
@@ -606,7 +647,30 @@ async fn async_main() -> Result<()> {
         gpu_topk: topk(&gpu_logits, 10),
         layers: layer_comparisons,
         layer_diags,
+        #[cfg(feature = "isf")]
+        captured_per_tensor: pt_sink
+            .iter()
+            .map(|c| CapturedPerTensorJson {
+                layer_idx: c.layer_idx,
+                position: c.position,
+                q_rms: c.q_rms,
+                q_checksum: c.q_checksum,
+                k_rms: c.k_rms,
+                k_checksum: c.k_checksum,
+                v_rms: c.v_rms,
+                v_checksum: c.v_checksum,
+                post_rms: c.post_rms,
+                post_checksum: c.post_checksum,
+                ffn_rms: c.ffn_rms,
+                ffn_checksum: c.ffn_checksum,
+                output_rms: c.output_rms,
+                output_checksum: c.output_checksum,
+            })
+            .collect(),
     };
+
+    #[cfg(feature = "isf")]
+    clear_invariant_ptensor_capture_sink();
 
     let json = serde_json::to_string_pretty(&probe).map_err(|err| {
         LibshimmyError::Unsupported(format!("failed to serialize probe output: {err}"))
