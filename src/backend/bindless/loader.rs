@@ -246,9 +246,9 @@ impl BindlessModel {
         // Explicitly drop mmap here to prove Preflight copied what it needed
         drop(mmap);
 
-        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("GGUF Dummy Blob"),
-            contents: &[0u8; 4],
+            contents: &vec![0u8; 1048576],
             usage: wgpu::BufferUsages::STORAGE,
         });
 

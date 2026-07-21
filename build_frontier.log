@@ -1,0 +1,11 @@
+   Compiling airframe v0.2.9 (C:\Users\micha\repos\airframe-workspace\airframe)
+warning: unused variable: `trace_path`
+    --> src\runtime\gpu.rs:1257:23
+     |
+1257 | pub fn trace_callback(trace_path: &str) -> Option<Box<dyn FnMut(usize, &[f32], f64) + Send>> {
+     |                       ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_trace_path`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `airframe` (lib) generated 1 warning (run `cargo fix --lib -p airframe` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.65s
