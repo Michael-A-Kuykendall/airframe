@@ -97,6 +97,35 @@ sense that the *dispatch logic* is no longer hardcoded in WGSL.
 
 ---
 
+## 7. Saturation fabric as the control core (the missing synthesis)
+
+Source: `dzero-cas/D0-ENGINE-ARCHITECTURE.md` (copied to `.beads/reference/`, gitignored).
+D0 = reactive fact engine: data emits facts → facts activate rules → rules fire actions,
+once, regardless of observer count. Three tiers + alpha index + saturation loop.
+
+The fabric maps 1:1 onto inference dispatch — this is WHY it is the control core, not just
+an observer:
+
+| D0 | Inference equivalent |
+|---|---|
+| Tier 1 Structural (auto-emitted on data) | `TensorFact{quant_type, shape, offset, arch}` asserted on GGUF load (B2) |
+| Tier 2 Semantic (derived by rules) | `DispatchFact{shader, params, offset}` derived from `TensorFact` via B1 registry (B3a) |
+| Tier 3 Consequent (consumed, drives mutation) | forward pass reads saturated `DispatchFact`s and executes — no if/then |
+| Alpha index (route fact to matching rules) | each `TensorFact` fans to exactly its dispatch rule |
+
+Consequence for B3b: `dequant_dispatch()`'s `if qt==` ladder becomes a **fabric rule** —
+on `TensorFact`, the alpha index fires the dispatch rule, which emits
+`DispatchFact{formula_index}`; the shader consumes that as a uniform. The "reactive inward
+graph" is the control plane. `airframe_observe::isf` already provides the engine; we extend
+the fact vocabulary (`TensorFact`/`DispatchFact`) and write the dispatch rules — no fabric
+rebuild.
+
+**Confidence: ~100% on the architecture.** Fabric = reactive control core; GGUF facts =
+structural tier; B1 formula registry = spec-audited rule bodies (the math); saturation =
+dispatch resolution; gpu.rs swap = adopt fabric-driven forward pass.
+
+---
+
 ## 6. References (for B1)
 
 - GGUF/GGML quant spec: quant enum values and block layouts (Q4_0=2, Q5_0=6, Q8_0=8,
