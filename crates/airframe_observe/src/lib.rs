@@ -55,6 +55,7 @@ pub mod observer;
 pub mod observers;
 pub mod output;
 pub mod plan;
+pub mod quant_formula;
 pub mod session;
 
 // Private experimentation / tuning surface (Saturation Fabric, TDR, beads integration).

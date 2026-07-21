@@ -210,6 +210,20 @@ impl ModelRoutePlan {
         self.digest = self.compute_digest();
     }
 
+    /// Resolve a GGML quant type id to its canonical dispatch formula slot.
+    ///
+    /// The slot is the stable index the shader consumes (`formula_index`),
+    /// owned by `airframe_observe::quant_formula` — NOT the raw GGML type id.
+    /// This is the `quant_type → formula_index` mapping the dispatch control
+    /// plane hangs on (replaces the WGSL `if qt==` ladder in B3b).
+    ///
+    /// Gated behind `isf` because the authoritative formula registry lives in
+    /// the `airframe-observe` crate (optional dependency).
+    #[cfg(feature = "isf")]
+    pub fn quant_formula_slot(&self, quant_type: u32) -> Option<u32> {
+        airframe_observe::quant_formula::slot_for_type(quant_type).map(|s| s.as_u32())
+    }
+
     fn compute_digest(&self) -> String {
         let mut hasher = DefaultHasher::new();
         self.route_version.hash(&mut hasher);
@@ -315,5 +329,23 @@ mod tests {
 
         assert!(!route.hard_errors.is_empty());
         assert!(!route.strict_mode_pass);
+    }
+
+    #[cfg(feature = "isf")]
+    #[test]
+    fn quant_formula_slot_maps_ggml_type_to_registry_index() {
+        let spec = base_spec();
+        let has = |name: &str| {
+            matches!(
+                name,
+                "blk.0.attn_q.weight" | "blk.0.attn_k.weight" | "blk.0.attn_v.weight"
+            )
+        };
+        let route = ModelRoutePlan::from_spec_and_tensors(&spec, has);
+
+        // Q6_K (14) -> slot 7; Q4_0 (2) -> slot 2; unsupported -> None
+        assert_eq!(route.quant_formula_slot(14), Some(7));
+        assert_eq!(route.quant_formula_slot(2), Some(2));
+        assert_eq!(route.quant_formula_slot(99), None);
     }
 }
