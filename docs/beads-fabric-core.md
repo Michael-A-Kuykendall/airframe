@@ -1,8 +1,12 @@
-# feat/inference-fabric-core — Self-Contained Bead Spec
+# feat/inference-fabric-core — Bead Spec (frozen backup)
 
-> **RECOVERY ANCHOR.** If context is lost, read THIS file top to bottom. It is the
-> complete source of truth for the refactor. No other conversation or doc is required.
-> Branch: `feat/inference-fabric-core`. Tracker: `bd` issues (mirrors this file).
+> **AUTHORITATIVE SOURCE = the `bd` issue tracker.** Anchor bead `airframe-v9w` + the 10
+> task beads (`airframe-69c`, `airframe-ppo`, `airframe-0zh`, `airframe-c90`, `airframe-6gc`,
+> `airframe-0q2`, `airframe-y26`, `airframe-ed6`, `airframe-937`, `airframe-3z9`). Run
+> `bd show airframe-v9w` to recover everything. This committed markdown is a **frozen backup
+> only** — the `bd` issues are the live source of truth (everything needed to do the work is
+> in the beads; done-work and rejected approaches are not presented as tasks).
+> Branch: `feat/inference-fabric-core`.
 
 ---
 
