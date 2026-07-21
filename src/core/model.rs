@@ -20,6 +20,10 @@ use std::path::Path;
 pub struct Model {
     pub spec: ModelSpec,
     pub weights: HashMap<WeightId, Tensor>,
+    /// Control-plane facts: one `TensorFact` per GGUF tensor, asserted from the
+    /// header at load (B2). Gated behind `isf`; absent in non-isf builds.
+    #[cfg(feature = "isf")]
+    pub tensor_facts: Vec<airframe_observe::facts::InferenceFact>,
 }
 
 /// GGUF tensor metadata
@@ -44,7 +48,32 @@ impl Model {
         Self {
             spec,
             weights: HashMap::new(),
+            #[cfg(feature = "isf")]
+            tensor_facts: Vec::new(),
         }
+    }
+
+    /// Build one `TensorFact` per GGUF tensor, derived directly from the GGUF
+    /// header (quant_type / dimensions / offset) plus the GGUF-metadata-derived
+    /// arch descriptor (`arch_params`). No hardcoded quant lists — this is the
+    /// structural control-plane fact the dispatch rules (B3a) fan out from.
+    ///
+    /// Gated behind `isf` because the canonical fact vocabulary lives in
+    /// `airframe-observe`.
+    #[cfg(feature = "isf")]
+    pub fn tensor_facts_from_gguf(
+        tensors: &[GgufTensorInfo],
+        arch_params: &str,
+    ) -> Vec<airframe_observe::facts::InferenceFact> {
+        tensors
+            .iter()
+            .map(|t| airframe_observe::facts::InferenceFact::TensorFact {
+                quant_type: t.ggml_type,
+                shape: t.dimensions.iter().map(|&d| d as u32).collect(),
+                offset: t.offset,
+                arch_params: arch_params.to_string(),
+            })
+            .collect()
     }
 
     pub fn insert_weight(&mut self, id: WeightId, tensor: Tensor) {
@@ -188,6 +217,15 @@ impl Model {
 
         // Validate all required weights are present
         validate_required_weights(&model, n_layer)?;
+
+        // B2: assert one TensorFact per GGUF tensor, derived from the header
+        // (quant_type / dimensions / offset) plus the GGUF-metadata-derived arch
+        // descriptor. No hardcoded quant lists. This is the structural control-
+        // plane fact the dispatch rules (B3a) fan out from.
+        #[cfg(feature = "isf")]
+        {
+            model.tensor_facts = Model::tensor_facts_from_gguf(&tensor_infos, model.spec.arch_string());
+        }
 
         Ok(model)
     }
@@ -1556,6 +1594,63 @@ mod tests {
         let model = Model::new(spec);
         assert_eq!(model.weights.len(), 0);
         assert_eq!(model.spec.n_vocab, 32000);
+    }
+
+    /// B2 acceptance: the loader's `TensorFact` assertions mirror the GGUF
+    /// tensor metadata exactly — one fact per tensor, with quant_type / shape /
+    /// offset / arch_params copied from the header (no hardcoded quant lists).
+    #[cfg(feature = "isf")]
+    #[test]
+    fn tensor_facts_mirror_gguf_metadata() {
+        use airframe_observe::facts::InferenceFact;
+
+        // Represent the GGUF tensor-info section (as parsed by parse_tensor_infos).
+        let tensors = vec![
+            GgufTensorInfo {
+                name: "blk.0.attn_q.weight".to_string(),
+                dimensions: vec![256, 1024],
+                ggml_type: 14,
+                offset: 0,
+            },
+            GgufTensorInfo {
+                name: "blk.0.ffn_down.weight".to_string(),
+                dimensions: vec![1024, 256],
+                ggml_type: 12,
+                offset: 4096,
+            },
+            GgufTensorInfo {
+                name: "token_embd.weight".to_string(),
+                dimensions: vec![32000, 1024],
+                ggml_type: 2,
+                offset: 8192,
+            },
+        ];
+
+        let facts = Model::tensor_facts_from_gguf(&tensors, "llama");
+
+        // Count matches the GGUF tensor count.
+        assert_eq!(facts.len(), tensors.len());
+
+        for (t, f) in tensors.iter().zip(facts.iter()) {
+            match f {
+                InferenceFact::TensorFact {
+                    quant_type,
+                    shape,
+                    offset,
+                    arch_params,
+                } => {
+                    assert_eq!(*quant_type, t.ggml_type, "quant_type must match GGUF header");
+                    assert_eq!(
+                        *shape,
+                        t.dimensions.iter().map(|&d| d as u32).collect::<Vec<_>>(),
+                        "shape must match GGUF header"
+                    );
+                    assert_eq!(*offset, t.offset, "offset must match GGUF header");
+                    assert_eq!(arch_params, "llama", "arch_params derived from GGUF metadata");
+                }
+                other => panic!("expected TensorFact, got {:?}", other),
+            }
+        }
     }
 
     #[test]

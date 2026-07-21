@@ -205,6 +205,19 @@ pub enum InferenceFact {
         ffn_checksum: i64,
         output_checksum: i64,
     },
+
+    // ── Tier 1: Control-plane dispatch facts (B2) ───────────────────────────
+    /// One fact per GGUF tensor, asserting its quant_type / shape / offset
+    /// directly from the GGUF header — no hardcoded quant lists in Rust.
+    /// This is the structural tier the dispatch control plane (B3a) fans out
+    /// from: each TensorFact routes to exactly its DispatchFact rule via the
+    /// alpha index. `arch_params` is the GGUF-metadata-derived arch descriptor.
+    TensorFact {
+        quant_type: u32,
+        shape: Vec<u32>,
+        offset: u64,
+        arch_params: String,
+    },
 }
 
 /// Discriminant constants for alpha indexing.
@@ -220,6 +233,7 @@ pub const KEY_FAMILY_CONTEXT: u64 = 8;
 pub const KEY_PER_TENSOR_OUTPUT: u64 = 9;
 pub const KEY_DISPATCH_TIMING: u64 = 10;
 pub const KEY_TDR_RISK_HIGH: u64 = 11;
+pub const KEY_TENSOR_FACT: u64 = 20;
 pub const KEY_DISPATCH_COMPLETED: u64 = 18;
 // ISF: Inference Saturation Fabric keys
 pub const KEY_PROMPT_TOKEN: u64 = 12;
@@ -244,6 +258,7 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::LogitsClean => Some(AlphaKey(KEY_LOGITS_CLEAN)),
         InferenceFact::FamilyContext { .. } => Some(AlphaKey(KEY_FAMILY_CONTEXT)),
         InferenceFact::PerTensorOutput { .. } => Some(AlphaKey(KEY_PER_TENSOR_OUTPUT)),
+        InferenceFact::TensorFact { .. } => Some(AlphaKey(KEY_TENSOR_FACT)),
         InferenceFact::DispatchTiming { .. } => Some(AlphaKey(KEY_DISPATCH_TIMING)),
         InferenceFact::DispatchCompleted { .. } => Some(AlphaKey(KEY_DISPATCH_COMPLETED)),
         InferenceFact::TdrRiskHigh { .. } => Some(AlphaKey(KEY_TDR_RISK_HIGH)),
@@ -345,6 +360,12 @@ mod tests {
                 post_checksum: 0,
                 ffn_checksum: 0,
                 output_checksum: 0,
+            },
+            InferenceFact::TensorFact {
+                quant_type: 14,
+                shape: vec![256, 32000],
+                offset: 123456,
+                arch_params: "llama".to_string(),
             },
         ];
         for f in &facts {
