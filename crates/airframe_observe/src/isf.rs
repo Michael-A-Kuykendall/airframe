@@ -17,7 +17,7 @@
 use crate::facts::{
     alpha_key_of, HaltReason, InferenceFact, KEY_DECODE_STEP, KEY_DISPATCH_COMPLETED,
     KEY_EMBEDDING_READY, KEY_EMBEDDING_REQUEST, KEY_PREFILL_BATCH_READY, KEY_PREFILL_COMPLETE,
-    KEY_PROMPT_TOKEN, KEY_TDR_RISK_HIGH,
+    KEY_PROMPT_TOKEN, KEY_TDR_RISK_HIGH, KEY_TENSOR_FACT,
 };
 use dzero::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric};
 use std::sync::{Arc, Mutex};
@@ -25,6 +25,38 @@ use std::sync::{Arc, Mutex};
 /// Re-export RunBudget::default() so callers don't need dzero directly.
 pub fn d0_run_budget() -> RunBudget {
     RunBudget::default()
+}
+
+/// B3a dispatch rule: TensorFact → DispatchFact.
+///
+/// Given a `TensorFact` (structural control-plane fact from the GGUF header,
+/// B2), look up the B1 quant-formula registry by `quant_type` and emit a
+/// `DispatchFact` carrying the registry-derived `formula_index` (the B1 slot)
+/// the shader consumes (B3b). This IS the replacement for the WGSL
+/// `dequant_dispatch` `if qt==` ladder: the dispatch *decision* lives here,
+/// spec-cited, not in the shader (Golden Rule 3).
+///
+/// `offset` is passed through so downstream consumers can locate the tensor in
+/// the blob. Unsupported quant types emit nothing (fail-closed).
+pub fn tensor_fact_dispatch_rule(
+    fact: &InferenceFact,
+    _store: &FactStore<InferenceFact>,
+) -> Vec<InferenceFact> {
+    if let InferenceFact::TensorFact {
+        quant_type, offset, ..
+    } = fact
+    {
+        match crate::quant_formula::slot_for_type(*quant_type) {
+            Some(slot) => vec![InferenceFact::DispatchFact {
+                quant_type: *quant_type,
+                formula_index: slot.as_u32(),
+                offset: *offset,
+            }],
+            None => vec![],
+        }
+    } else {
+        vec![]
+    }
 }
 
 /// Output from one generate() call.
@@ -553,6 +585,17 @@ impl InferenceSaturationFabric {
             });
         }
 
+        // ── Rule: TensorFact → DispatchFact (B3a) ──────────────────────────
+        // On each structural TensorFact, emit the registry-derived DispatchFact.
+        // This is the reactive replacement for the WGSL dequant_dispatch ladder;
+        // the dispatch decision (formula_index) comes from the B1 registry.
+        {
+            let dispatch = tensor_fact_dispatch_rule;
+            program.register(AlphaKey(KEY_TENSOR_FACT), move |fact, store| {
+                dispatch(fact, store)
+            });
+        }
+
         let fabric = SaturationFabric::new(
             program,
             alpha_key_of,
@@ -560,6 +603,17 @@ impl InferenceSaturationFabric {
         );
 
         Self { fabric, state }
+    }
+
+    /// Assert control-plane `TensorFact`s (from GGUF load, B2) into the fabric
+    /// so the B3a dispatch rule emits a `DispatchFact` per tensor. Called when a
+    /// model is bound to the inference session (B4 wires this).
+    pub fn assert_tensor_facts(&mut self, facts: &[InferenceFact]) {
+        for f in facts {
+            if matches!(f, InferenceFact::TensorFact { .. }) {
+                self.fabric.assert(f.clone());
+            }
+        }
     }
 
     /// Assert all prompt tokens and run to fixpoint.
@@ -586,5 +640,67 @@ impl InferenceSaturationFabric {
             tokens_generated,
             halt_reason,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::facts::InferenceFact;
+
+    /// B3a acceptance: the dispatch rule fires per tensor and emits a
+    /// `DispatchFact` carrying the correct B1 registry `formula_index` for
+    /// every supported quant type (and nothing for unsupported types).
+    #[test]
+    fn dispatch_rule_emits_dispatch_fact_per_quant_type() {
+        // (ggml type id, expected registry formula_index slot)
+        let cases: [(u32, u32); 8] = [
+            (0, 0),  // F32
+            (1, 1),  // F16
+            (2, 2),  // Q4_0
+            (6, 3),  // Q5_0
+            (8, 4),  // Q8_0
+            (12, 5), // Q4_K
+            (13, 6), // Q5_K
+            (14, 7), // Q6_K
+        ];
+
+        for (qt, expected_slot) in cases {
+            let tf = InferenceFact::TensorFact {
+                quant_type: qt,
+                shape: vec![256, 32000],
+                offset: 12345,
+                arch_params: "llama".to_string(),
+            };
+            let out = tensor_fact_dispatch_rule(&tf, &FactStore::new());
+            match out.as_slice() {
+                [InferenceFact::DispatchFact {
+                    quant_type,
+                    formula_index,
+                    offset,
+                }] => {
+                    assert_eq!(*quant_type, qt, "DispatchFact must echo quant_type");
+                    assert_eq!(
+                        *formula_index, expected_slot,
+                        "DispatchFact formula_index must match B1 registry slot for qt={}",
+                        qt
+                    );
+                    assert_eq!(*offset, 12345, "DispatchFact must pass through offset");
+                }
+                other => panic!("expected exactly one DispatchFact for qt={}, got {:?}", qt, other),
+            }
+        }
+
+        // Unsupported quant type → no DispatchFact (fail-closed).
+        let tf_bad = InferenceFact::TensorFact {
+            quant_type: 99,
+            shape: vec![1],
+            offset: 0,
+            arch_params: "x".to_string(),
+        };
+        assert!(
+            tensor_fact_dispatch_rule(&tf_bad, &FactStore::new()).is_empty(),
+            "unsupported quant type must emit no DispatchFact"
+        );
     }
 }

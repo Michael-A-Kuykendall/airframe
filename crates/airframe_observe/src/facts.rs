@@ -208,15 +208,27 @@ pub enum InferenceFact {
 
     // ── Tier 1: Control-plane dispatch facts (B2) ───────────────────────────
     /// One fact per GGUF tensor, asserting its quant_type / shape / offset
-    /// directly from the GGUF header — no hardcoded quant lists in Rust.
-    /// This is the structural tier the dispatch control plane (B3a) fans out
-    /// from: each TensorFact routes to exactly its DispatchFact rule via the
-    /// alpha index. `arch_params` is the GGUF-metadata-derived arch descriptor.
+    /// directly from the GGUF header — no hardcoded quant lists. This is the
+    /// structural tier the dispatch control plane (B3a) fans out from: each
+    /// TensorFact routes to exactly its DispatchFact rule via the alpha index.
+    /// `arch_params` is the GGUF-metadata-derived arch descriptor.
     TensorFact {
         quant_type: u32,
         shape: Vec<u32>,
         offset: u64,
         arch_params: String,
+    },
+
+    // ── Tier 2: Control-plane dispatch facts (B3a) ──────────────────────────
+    /// Semantic dispatch fact derived from a `TensorFact` by the B3a rule.
+    /// Carries the registry-derived dequant `formula_index` (the B1 slot) the
+    /// shader consumes as `formula_index`, plus the tensor `offset` passthrough.
+    /// This REPLACES the WGSL `if qt==` ladder (B3b): the dispatch *decision*
+    /// lives here (spec-cited, in the B1 registry), not in the shader.
+    DispatchFact {
+        quant_type: u32,
+        formula_index: u32,
+        offset: u64,
     },
 }
 
@@ -234,6 +246,7 @@ pub const KEY_PER_TENSOR_OUTPUT: u64 = 9;
 pub const KEY_DISPATCH_TIMING: u64 = 10;
 pub const KEY_TDR_RISK_HIGH: u64 = 11;
 pub const KEY_TENSOR_FACT: u64 = 20;
+pub const KEY_DISPATCH_FACT: u64 = 21;
 pub const KEY_DISPATCH_COMPLETED: u64 = 18;
 // ISF: Inference Saturation Fabric keys
 pub const KEY_PROMPT_TOKEN: u64 = 12;
@@ -259,6 +272,7 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::FamilyContext { .. } => Some(AlphaKey(KEY_FAMILY_CONTEXT)),
         InferenceFact::PerTensorOutput { .. } => Some(AlphaKey(KEY_PER_TENSOR_OUTPUT)),
         InferenceFact::TensorFact { .. } => Some(AlphaKey(KEY_TENSOR_FACT)),
+        InferenceFact::DispatchFact { .. } => Some(AlphaKey(KEY_DISPATCH_FACT)),
         InferenceFact::DispatchTiming { .. } => Some(AlphaKey(KEY_DISPATCH_TIMING)),
         InferenceFact::DispatchCompleted { .. } => Some(AlphaKey(KEY_DISPATCH_COMPLETED)),
         InferenceFact::TdrRiskHigh { .. } => Some(AlphaKey(KEY_TDR_RISK_HIGH)),
