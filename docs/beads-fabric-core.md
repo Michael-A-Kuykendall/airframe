@@ -7,6 +7,12 @@
 > only** — the `bd` issues are the live source of truth (everything needed to do the work is
 > in the beads; done-work and rejected approaches are not presented as tasks).
 > Branch: `feat/inference-fabric-core`.
+>
+> **Branch model:** `feat/fabric-control-plane` is the consolidation "master" where each
+> completed bead branch (`feat/fabric-control-plane-b<N>`) is merged (`--no-ff`), then the
+> bead branch is deleted. Bead branches are cut from the consolidation branch (B1 from
+> `feat/inference-fabric-core`). See workspace `AGENTS.md` "Fabric Control Plane — Branch &
+> Bead Workflow" for the full cycle.
 
 ---
 
