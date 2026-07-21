@@ -319,6 +319,14 @@ impl BindlessPipeline {
                     binding: 2,
                     resource: params_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.blob_binding_1(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.blob_binding_2(),
+                },
             ],
         });
         let mut encoder =
@@ -427,6 +435,26 @@ impl BindlessPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -464,6 +492,14 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: model.blob_binding_1(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: model.blob_binding_2(),
                 },
             ],
         });

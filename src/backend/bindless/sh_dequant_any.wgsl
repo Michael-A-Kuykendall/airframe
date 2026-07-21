@@ -22,16 +22,30 @@ struct DequantAnyParams {
     pad: u32,
 };
 
-@group(0) @binding(0) var<storage, read>       gguf_blob : array<u32>;
+@group(0) @binding(0)  var<storage, read> blob_0: array<u32>;
+@group(0) @binding(10) var<storage, read> blob_1: array<u32>;
+@group(0) @binding(11) var<storage, read> blob_2: array<u32>;
 @group(0) @binding(1) var<storage, read_write> output    : array<f32>;
 @group(0) @binding(2) var<uniform>             params    : DequantAnyParams;
 
 // ---------------------------------------------------------------------------
 // Byte-level read helper
 // ---------------------------------------------------------------------------
+const BLOB_SPLIT_0: u32 = 500000000u;
+const BLOB_SPLIT_1: u32 = 1000000000u;
+
+fn read_blob(word_idx: u32) -> u32 {
+    if word_idx < BLOB_SPLIT_0 {
+        return blob_0[word_idx];
+    } else if word_idx < BLOB_SPLIT_1 {
+        return blob_1[word_idx - BLOB_SPLIT_0];
+    } else {
+        return blob_2[word_idx - BLOB_SPLIT_1];
+    }
+}
+
 fn read_byte(byte_idx: u32) -> u32 {
-    let word = gguf_blob[byte_idx / 4u];
-    return (word >> ((byte_idx % 4u) * 8u)) & 0xFFu;
+    return extractBits(read_blob(byte_idx / 4u), (byte_idx % 4u) * 8u, 8u);
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +70,7 @@ fn get_scale_min_k4(j: u32, scales_base_byte: u32) -> vec2<u32> {
 // Q4_0 element dequant (18-byte blocks, 32 elements)
 // ---------------------------------------------------------------------------
 fn dequant_q4_0_elem(block_base: u32, e: u32) -> f32 {
-    let scale_packed = extractBits(gguf_blob[block_base / 4u],
+    let scale_packed = extractBits(read_blob(block_base / 4u),
                                    (block_base % 4u) * 8u, 16u);
     let scale = unpack2x16float(scale_packed).x;
     let qs_byte = block_base + 2u + (e % 16u);
@@ -69,7 +83,7 @@ fn dequant_q4_0_elem(block_base: u32, e: u32) -> f32 {
 // Q8_0 element dequant (34-byte blocks, 32 elements)
 // ---------------------------------------------------------------------------
 fn dequant_q8_0_elem(block_base: u32, e: u32) -> f32 {
-    let scale_packed = extractBits(gguf_blob[block_base / 4u],
+    let scale_packed = extractBits(read_blob(block_base / 4u),
                                    (block_base % 4u) * 8u, 16u);
     let scale = unpack2x16float(scale_packed).x;
     let qs_byte = block_base + 2u + e;
@@ -82,11 +96,11 @@ fn dequant_q8_0_elem(block_base: u32, e: u32) -> f32 {
 // Q4_K element dequant (144-byte superblocks, 256 elements)
 // ---------------------------------------------------------------------------
 fn dequant_q4k_elem(block_base: u32, e: u32) -> f32 {
-    let d_packed = extractBits(gguf_blob[block_base / 4u],
+    let d_packed = extractBits(read_blob(block_base / 4u),
                                (block_base % 4u) * 8u, 16u);
     let d = unpack2x16float(d_packed).x;
     let dmin_byte = block_base + 2u;
-    let dmin_packed = extractBits(gguf_blob[dmin_byte / 4u],
+    let dmin_packed = extractBits(read_blob(dmin_byte / 4u),
                                   (dmin_byte % 4u) * 8u, 16u);
     let dmin_val = unpack2x16float(dmin_packed).x;
     let scales_base = block_base + 4u;
@@ -106,18 +120,18 @@ fn dequant_q4k_elem(block_base: u32, e: u32) -> f32 {
     } else {
         nibble = read_byte(ql_byte) >> 4u;
     }
-    return sc_val * (f32(nibble) - 8.0) - m_val;
+    return sc_val * f32(nibble) - m_val;
 }
 
 // ---------------------------------------------------------------------------
 // Q5_K element dequant (176-byte superblocks, 256 elements)
 // ---------------------------------------------------------------------------
 fn dequant_q5k_elem(block_base: u32, e: u32) -> f32 {
-    let d_packed = extractBits(gguf_blob[block_base / 4u],
+    let d_packed = extractBits(read_blob(block_base / 4u),
                                (block_base % 4u) * 8u, 16u);
     let d = unpack2x16float(d_packed).x;
     let dmin_byte = block_base + 2u;
-    let dmin_packed = extractBits(gguf_blob[dmin_byte / 4u],
+    let dmin_packed = extractBits(read_blob(dmin_byte / 4u),
                                   (dmin_byte % 4u) * 8u, 16u);
     let dmin_val = unpack2x16float(dmin_packed).x;
     let scales_base = block_base + 4u;
@@ -153,7 +167,7 @@ fn dequant_q6k_elem(block_base: u32, e: u32) -> f32 {
     let qh_base     = block_base + 128u;
     let scales_base = block_base + 192u;
     let d_byte      = block_base + 208u;
-    let d_packed = extractBits(gguf_blob[d_byte / 4u],
+    let d_packed = extractBits(read_blob(d_byte / 4u),
                                (d_byte % 4u) * 8u, 16u);
     let d = unpack2x16float(d_packed).x;
 
@@ -189,7 +203,7 @@ fn dequant_q6k_elem(block_base: u32, e: u32) -> f32 {
 // F16 dequant
 // ---------------------------------------------------------------------------
 fn dequant_f16_at(byte_offset: u32) -> f32 {
-    let packed = extractBits(gguf_blob[byte_offset / 4u],
+    let packed = extractBits(read_blob(byte_offset / 4u),
                              (byte_offset % 4u) * 8u, 16u);
     return unpack2x16float(packed).x;
 }
@@ -225,7 +239,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     } else if (qt == 1u) { // F16 — 2 bytes per element
         val = dequant_f16_at(off + i * 2u);
     } else if (qt == 0u) { // F32 — 4 bytes per element
-        val = bitcast<f32>(gguf_blob[(off / 4u) + i]);
+        val = bitcast<f32>(read_blob((off / 4u) + i));
     } else { // Q4_0 (qt == 2) and fallback — 32-elem blocks, 18 bytes
         let b = i / 32u;
         let e = i % 32u;
