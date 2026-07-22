@@ -354,7 +354,7 @@ impl BindlessPipeline {
         // in this buffer → blob[offset_bytes] → correct absolute position.
         let mut blob_full = blob.to_vec();
         // Pad to a multiple of 4 bytes so the last word is fully readable.
-        while blob_full.len() % 4 != 0 {
+        while !blob_full.len().is_multiple_of(4) {
             blob_full.push(0u8);
         }
         let blob_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

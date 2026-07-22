@@ -190,6 +190,12 @@ mod parity_tests {
             batch_count: 0,
             q_weight_k: 0,
             k_weight_k: 0,
+            formula_qk: 0,
+            formula_v: 0,
+            formula_attn_out: 0,
+            formula_ffn_down: 0,
+            formula_ffn_gate: 0,
+            formula_ffn_up: 0,
         };
 
         let (mid_vec, gpu_output) = pipeline.run_layer_stepwise_test(

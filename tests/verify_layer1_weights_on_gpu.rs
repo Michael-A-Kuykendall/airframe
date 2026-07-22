@@ -58,7 +58,7 @@ async fn test_layer1_weights_on_gpu() -> Result<(), Box<dyn std::error::Error>> 
     file.read_exact(&mut file_bytes)?;
 
     println!("File bytes [{}..{}]:", attn_q_offset, attn_q_offset + 32);
-    println!("{:02x?}", &file_bytes);
+    println!("{:02x?}", file_bytes);
 
     // Read same bytes from GPU buffer
     let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {

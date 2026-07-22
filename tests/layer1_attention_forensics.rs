@@ -113,6 +113,12 @@ async fn layer1_attention_forensics() -> Result<(), Box<dyn std::error::Error>> 
         batch_count: 1,
         q_weight_k: 0,
         k_weight_k: 0,
+        formula_qk: 0,
+        formula_v: 0,
+        formula_attn_out: 0,
+        formula_ffn_down: 0,
+        formula_ffn_gate: 0,
+        formula_ffn_up: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);

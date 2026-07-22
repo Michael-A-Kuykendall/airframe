@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "airframe"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "aho-corasick",
  "airframe-observe",

@@ -974,7 +974,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 state.position = Some(0);
             }
             // Update queue positions for remaining
-            for (_, s) in st.iter_mut() {
+            for s in st.values_mut() {
                 if s.status == "queued" {
                     if let Some(p) = s.position {
                         if p > 0 {

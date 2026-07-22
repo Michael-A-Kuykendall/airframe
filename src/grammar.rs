@@ -37,6 +37,7 @@ end ::= "// END_RUST_FILE"
 ///
 /// Returns `None` when `mode` is not grammar-driven (e.g. `"none"`/`"creative"`),
 /// so callers can use the result directly as an `Option` of each hook.
+#[allow(clippy::type_complexity)]
 pub fn grammar_hooks(
     mode: &str,
     tokenizer: Arc<Tokenizer>,

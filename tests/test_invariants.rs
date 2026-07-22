@@ -194,10 +194,7 @@ fn run_probe(model_path: &str, model_tag: &str) -> Option<ProbeOut> {
         return None;
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let json_line = stdout
-        .lines()
-        .filter(|l| l.trim_start().starts_with('{'))
-        .last();
+    let json_line = stdout.lines().rfind(|l| l.trim_start().starts_with('{'));
     match json_line {
         Some(line) => match serde_json::from_str::<ProbeOut>(line) {
             Ok(p) => Some(p),

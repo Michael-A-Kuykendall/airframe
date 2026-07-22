@@ -10,7 +10,8 @@
 //! This test PROVES equality by computation rather than by running inference:
 //!   * Rust side  — `core::mem::offset_of!` gives the repr(C) byte offset per field.
 //!   * WGSL side  — naga parses the shader and reports each member's byte offset
-//!                  per the WGSL layout rules.
+//!     per the WGSL layout rules.
+//!
 //! We assert the two `(name, offset)` sequences are identical, field for field.
 //!
 //! All members of these structs are 4-byte scalars (u32/f32), so both layouts

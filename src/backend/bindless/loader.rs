@@ -53,7 +53,7 @@ pub fn compute_chunk_plan(file_size: u64, adapter_limit: u64) -> ChunkPlan {
     assert_alignment(effective_chunk, "loader::compute_chunk_plan");
     assert_buffer_within_limit(effective_chunk, "loader::compute_chunk_plan");
 
-    let num_chunks = ((file_size + effective_chunk - 1) / effective_chunk) as usize;
+    let num_chunks = file_size.div_ceil(effective_chunk) as usize;
     assert_chunk_count_within_limit(num_chunks, "loader::compute_chunk_plan");
 
     ChunkPlan {
@@ -100,7 +100,7 @@ impl BindlessModel {
 
     /// Binding resource for blob_0: bytes [0, min(effective_chunk, size)).
     pub fn blob_binding_0(&self) -> wgpu::BindingResource<'_> {
-        if self.gpu_buffers.len() > 0 {
+        if !self.gpu_buffers.is_empty() {
             self.gpu_buffers[0].as_entire_binding()
         } else {
             self.dummy_buf.as_entire_binding()

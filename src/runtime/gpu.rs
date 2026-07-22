@@ -2,6 +2,7 @@
 //!
 //! `GpuRuntime` owns the wgpu device, model weights, compute pipelines,
 //! KV cache, and tokenizer. It exposes `load()` → `GpuSession` → `generate()`.
+#![allow(clippy::type_complexity)]
 
 use crate::backend::bindless::kv_cache::KVCache;
 use crate::backend::bindless::loader::BindlessModel;
@@ -109,15 +110,14 @@ impl GpuRuntime {
                     .find(|a| a.get_info().device_type == wgpu::DeviceType::IntegratedGpu)
             })
             .or_else(|| adapters.first())
-            .ok_or_else(|| format!("No GPU adapter found"))
-            .map(|a| {
+            .ok_or_else(|| "No GPU adapter found".to_string())
+            .inspect(|a| {
                 eprintln!(
                     "[GpuRuntime] Selected adapter: {} ({:?}, backend={:?})",
                     a.get_info().name,
                     a.get_info().device_type,
                     a.get_info().backend
                 );
-                a
             })?;
 
         let adapter_limits = adapter.limits();
@@ -962,6 +962,7 @@ fn sample_token(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -1007,7 +1008,7 @@ pub fn fse_control_from_patterns(
         patterns
             .split(',')
             .enumerate()
-            .map(|(i, p)| {
+            .flat_map(|(i, p)| {
                 let trimmed = p.trim();
                 if trimmed.is_empty() {
                     None
@@ -1015,7 +1016,6 @@ pub fn fse_control_from_patterns(
                     Some(Rule::new(trimmed.as_bytes(), FseOpcode::Reject(i as u32)))
                 }
             })
-            .flatten()
             .collect()
     };
     FseMap::compile(rules).ok().and_then(|map| {

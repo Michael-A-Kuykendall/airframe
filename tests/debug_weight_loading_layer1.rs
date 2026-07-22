@@ -40,8 +40,8 @@ async fn debug_weight_read_layer1() -> Result<(), Box<dyn std::error::Error>> {
     file.read_exact(&mut l1_block)?;
 
     println!("\n=== FIRST Q4_0 BLOCK DATA ===");
-    println!("Layer 0 first 18 bytes: {:?}", &l0_block);
-    println!("Layer 1 first 18 bytes: {:?}", &l1_block);
+    println!("Layer 0 first 18 bytes: {:?}", l0_block);
+    println!("Layer 1 first 18 bytes: {:?}", l1_block);
 
     // Decode scale (F16 -> F32)
     let l0_scale_bytes = u16::from_le_bytes([l0_block[0], l0_block[1]]);

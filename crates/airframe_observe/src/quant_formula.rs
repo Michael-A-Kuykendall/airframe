@@ -78,10 +78,8 @@ fn get_scale_min_k4(j: usize, scales: &[u8]) -> (u32, u32) {
         let m = (scales[j + 4] & 63) as u32;
         (sc, m)
     } else {
-        let sc =
-            (((scales[j + 4] & 0x0f) as u32) | (((scales[j - 4] >> 6) & 3) as u32) << 4) as u32;
-        let m =
-            (((scales[j + 4] >> 4) & 0x0f) as u32 | (((scales[j] >> 6) & 3) as u32) << 4) as u32;
+        let sc = ((scales[j + 4] & 0x0f) as u32) | (((scales[j - 4] >> 6) & 3) as u32) << 4;
+        let m = ((scales[j + 4] >> 4) & 0x0f) as u32 | (((scales[j] >> 6) & 3) as u32) << 4;
         (sc, m)
     }
 }

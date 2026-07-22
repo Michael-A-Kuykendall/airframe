@@ -108,6 +108,7 @@ pub fn invariant_ptensor_capture_sink_mut() -> Option<&'static mut Vec<CapturedP
 /// Mirrors the existing `trace_prefill_layers` readback (copy → submit → poll →
 /// map → read → unmap) but routes the values into the probe's capture sink.
 #[cfg(feature = "isf")]
+#[allow(clippy::too_many_arguments)]
 fn emit_layer_capture(
     layer_idx: u32,
     position: u32,
@@ -170,6 +171,7 @@ fn emit_layer_capture(
 /// Gated identically to `emit_layer_capture` (env + sink) so it is a no-op in
 /// normal inference and when no per-tensor sink is installed.
 #[cfg(feature = "isf")]
+#[allow(clippy::too_many_arguments)]
 pub fn emit_ptensor_capture(
     layer_idx: u32,
     position: u32,

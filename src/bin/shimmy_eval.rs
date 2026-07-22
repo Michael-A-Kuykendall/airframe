@@ -1015,7 +1015,7 @@ async fn run_wikitext(
                 println!(
                     "WARNING: Failed to encode line {}: '{}...' - Error: {:?}, SKIPPING",
                     line_count + 1,
-                    &line.chars().take(50).collect::<String>(),
+                    line.chars().take(50).collect::<String>(),
                     e
                 );
                 skipped_lines += 1;

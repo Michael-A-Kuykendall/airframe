@@ -350,7 +350,7 @@ fn skip_metadata<R: Read + Seek>(reader: &mut R, kv_count: u64) -> Result<()> {
                 println!(
                     "    Raw bytes at pos {}: {:02x?}",
                     pos_before,
-                    &key_len.to_le_bytes()
+                    key_len.to_le_bytes()
                 );
 
                 // This is likely misalignment from a previous array - let's see what's actually here

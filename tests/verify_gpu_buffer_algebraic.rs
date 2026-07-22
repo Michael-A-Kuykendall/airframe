@@ -57,7 +57,7 @@ async fn verify_gpu_buffer_matches_file() -> Result<(), Box<dyn std::error::Erro
         layer1_attn_q_offset,
         layer1_attn_q_offset + 32
     );
-    println!("{:02x?}", &file_bytes);
+    println!("{:02x?}", file_bytes);
 
     // 5. Upload only this 32-byte window to GPU (device-limit safe)
     let gpu_window = device.create_buffer(&wgpu::BufferDescriptor {
