@@ -31,6 +31,8 @@
 
 Airframe is the GPU inference core powering [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy). It runs full transformer inference directly on the GPU via WGSL compute shaders — works on NVIDIA, AMD, Intel, and Apple Silicon.
 
+**⚡ v0.2.10**: GPU gibberish root cause fixed (dequant front-padding in `run_dequant_any_blob`), f16→f32 dequant corrected on RTX 3060, `Q5_0` quant slot added, WGSL if/else dispatch ladder retired for a fabric `TensorFact→DispatchFact` rule, and per-layer golden-vault certification (10/10 models certified).
+
 **⚡ v0.2.9**: batch_count fix for QKV shader (was killing all threads), GPU adapter selection now prefers discrete GPU over integrated, grammar control hooks integrated, PPT invariant cage (B1-B3) for regression detection. **357 tests pass.**
 
 **⚡ v0.2.6**: LM head tile dispatch for large-vocab models (Gemma-2 256K, Qwen3, Llama-3.2-3B).
@@ -95,16 +97,16 @@ LIBSHIMMY_MODEL_PATH=/path/to/model.gguf cargo run --example simple_flight -- "H
 | **Mistral** | Mistral 7B, Mixtral (dense layers) | ✅ Verified |
 | **Phi** | Phi-3.5, Phi-3, Phi-2 | ✅ Verified |
 | **Qwen2** | Qwen2 0.5B–7B | ✅ Verified (fixed in v0.2.2) |
-| **Qwen3** | Qwen3 0.6B–8B | ✅ Loads correctly (forward pass in progress) |
+| **Qwen3** | Qwen3 0.6B–8B | ✅ Verified (GPU forward pass certified layer-by-layer vs golden vault) |
 | **Gemma** | Gemma-2 2B, 9B | ✅ Verified (fixed in v0.2.2) |
 | **StarCoder2** | StarCoder2 3B | ✅ Verified |
 | **GPT-2** | GPT-2 | ✅ Verified |
 
 ## Supported Quantization
 
-`F32` · `F16` · `Q4_0` · `Q4_K_M` · `Q5_K_M` · `Q6_K` · `Q8_0`
+`F32` · `F16` · `Q4_0` · `Q4_K_M` · `Q5_0` · `Q5_K_M` · `Q6_K` · `Q8_0`
 
-All quantization types are implemented in both GPU shader and CPU reference paths, with parity validation — the same model produces bit-identical output on CPU and GPU.
+All quantization types are implemented in both GPU shader and CPU reference paths, validated by `quant_verify` (GPU/CPU dequant consistency) and per-layer golden-vault certification — the same model produces numerically consistent output on CPU and GPU, within numerical tolerance.
 
 ---
 

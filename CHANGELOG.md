@@ -5,6 +5,22 @@ All notable changes to Airframe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.10]
+
+### Fixed
+- **GPU gibberish root cause** — `run_dequant_any_blob` front-padding bug fixed; GPU forward-pass output is now correct across all architectures
+- **f16→f32 dequant on RTX 3060** — correct half-to-float conversion; added the `Q5_0` quant slot
+- **Dispatch struct alignment** — retired the WGSL `if (quant_type == …)` shader dispatch ladder in favor of the fabric `TensorFact → DispatchFact` rule (B3a/B3b)
+
+### Added
+- **Vault certification (V1/V2/V3)** — per-layer golden-vault oracle comparison (RMS/checksum) with a divergence localizer that reports the first failing layer; 10/10 models certify clean
+- **Algebraic quant audit (P2)** — canonical `quant_formula` registry; all 8 supported quant types verified bit-exact against hand-computed reference values
+- **Single fabric `generate` path (P3)** — legacy imperative `generate()` retired; one dispatch-driven code path
+
+### Changed
+- **Qwen3 GPU forward pass verified** — previously "in progress"; now certified layer-by-layer against the golden vault
+- **Quantization coverage** — `Q5_0` added to the supported list
+
 ## [0.2.9] - 2026-07-20
 
 ### Fixed
