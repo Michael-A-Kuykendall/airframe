@@ -66,6 +66,7 @@ pub struct GpuRuntime {
     queue: wgpu::Queue,
     model: BindlessModel,
     pipeline: BindlessPipeline,
+    #[allow(dead_code)]
     shift_pipeline: RopeShiftPipeline,
     tokenizer: Arc<Tokenizer>,
     spec: ModelSpec,
@@ -629,11 +630,13 @@ impl GpuRuntime {
         Ok(s.generated_text.clone())
     }
 
+    /// Generate text via the Inference Saturation Fabric (ISF) dispatch path.
     ///
-    /// `on_token` is called for each generated token (for streaming).
-    /// Returns the full generated text.
-    #[allow(clippy::type_complexity)]
-    #[allow(clippy::too_many_arguments)]
+    /// This is the single production entry point. `on_token` is called for each
+    /// generated token (for streaming). The control/logits/trace arguments are
+    /// accepted for API stability with callers pinned to the airframe 0.2.x
+    /// signature but are unused on the fabric path.
+    #[cfg(feature = "isf")]
     pub fn generate(
         &self,
         prompt: &str,
@@ -643,243 +646,9 @@ impl GpuRuntime {
         _modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
         _trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let prompt_tokens = self.tokenizer.encode(prompt, true)?;
-        let dim = self.spec.n_embd as u32;
-        let mut rng = Rng::new(params.seed);
-        let mut on_token = on_token;
-
-        // Reset KV cache
-        {
-            let mut cache = self.kv_cache.lock().unwrap();
-            cache.reset();
-        }
-
-        // Prefill: batch-dequant all prompt embeddings
-        let mut batched_embd = Vec::with_capacity(prompt_tokens.len() * dim as usize);
-        for &token_id in &prompt_tokens {
-            let row_offset = self.embd_weight_offset + (token_id as u64 * self.row_bytes);
-            let embd = self.pipeline.run_dequant_any_hot(
-                &self.device,
-                &self.queue,
-                &self.model,
-                row_offset as u32,
-                dim,
-                self.embd_quant_type,
-            );
-            batched_embd.extend_from_slice(&embd);
-        }
-
-        // Run prefill through all layers
-        let prefill_chunk: u32 = std::env::var("SHIMMY_PREFILL_CHUNK")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(512);
-        let (_final_act, _l21, prefill_logits) = {
-            let cache_guard = self.kv_cache.lock().unwrap();
-            self.pipeline
-                .run_full_model_prefill_chunked_with_cache_state(
-                    &self.device,
-                    &self.queue,
-                    &self.model,
-                    &batched_embd,
-                    Some(&self.output_head_f32),
-                    0,
-                    Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
-                    &self.spec,
-                    prefill_chunk,
-                )?
-        };
-
-        // Debug for garbage output diagnosis (1 of 8)
-        let hidden_rms: f32 =
-            _final_act.iter().map(|x| x * x).sum::<f32>().sqrt() / _final_act.len() as f32;
-        eprintln!(
-            "[DEBUG 1/8] Final hidden rms: {:.6}, first5: {:?}",
-            hidden_rms,
-            &_final_act[..5.min(_final_act.len())]
-        );
-        let mut top: Vec<(usize, f32)> = prefill_logits
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| (i, v))
-            .collect();
-        top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        eprintln!("[DEBUG 1/8] Prefill logits top5 tokens: {:?}", &top[..5]);
-
-        // Advance KV cache position
-        {
-            let mut cache = self.kv_cache.lock().unwrap();
-            for _ in 0..prompt_tokens.len() {
-                cache.increment()?;
-            }
-        }
-
-        let mut logits_vec = prefill_logits;
-        let mut generated_text = String::new();
-        let mut recent_tokens: Vec<u32> = Vec::new();
-
-        // Encode extra stop tokens to IDs once before the decode loop.
-        // Single-token strings only; multi-token stop strings are skipped.
-        let extra_stop_ids: Vec<u32> = params
-            .extra_stop_tokens
-            .iter()
-            .filter_map(|s| {
-                self.tokenizer.encode(s, false).ok().and_then(|v| {
-                    if v.len() == 1 {
-                        Some(v[0])
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect();
-
-        // Decode loop
-        let log_logits = std::env::var("AIRFRAME_LOG_LOGITS")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        for _step in 0..params.max_tokens {
-            if log_logits {
-                let mut top: Vec<(usize, f32)> = logits_vec
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &v)| (i, v))
-                    .collect();
-                top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                let argmax = top[0].0;
-                let top5: Vec<(usize, f32)> = top.into_iter().take(5).collect();
-                eprintln!("[LOGITS] step={} argmax={} top5={:?}", _step, argmax, top5);
-            }
-            let next_token = sample_token(
-                &mut logits_vec,
-                params.temperature,
-                params.top_p,
-                params.repetition_penalty,
-                &recent_tokens,
-                &mut rng,
-            );
-
-            recent_tokens.push(next_token);
-            if recent_tokens.len() > 64 {
-                recent_tokens.remove(0);
-            }
-
-            // EOS check
-            if next_token == self.eos_token {
-                break;
-            }
-            if let Some(im_end) = self.im_end_token {
-                if next_token == im_end {
-                    break;
-                }
-            }
-            if extra_stop_ids.contains(&next_token) {
-                break;
-            }
-
-            // Decode token to text
-            let piece = self.tokenizer.decode_single(next_token, true)?;
-            generated_text.push_str(&piece);
-
-            if let Some(cb) = on_token.as_mut() {
-                cb(&piece);
-            }
-
-            // Helical shift if approaching cache limit
-            {
-                let mut cache = self.kv_cache.lock().unwrap();
-                let current_len = cache.get_seq_len();
-
-                if current_len >= cache.max_len() - 4 {
-                    let keep_sink = 4;
-                    let shift_amt = cache.max_len() / 4;
-                    for layer_idx in 0..self.spec.n_layer {
-                        if cache.is_int4() {
-                            self.shift_pipeline.execute_int4(
-                                &self.device,
-                                &self.queue,
-                                cache.get_k_buffer(layer_idx),
-                                cache.get_v_buffer(layer_idx),
-                                cache.get_k_packed_buffer(layer_idx),
-                                cache.get_v_packed_buffer(layer_idx),
-                                cache.get_k_scale_buffer(layer_idx),
-                                cache.get_v_scale_buffer(layer_idx),
-                                keep_sink,
-                                shift_amt,
-                                current_len,
-                                self.spec.n_head_kv as u32,
-                                self.spec.head_dim as u32,
-                                cache.max_len(),
-                            );
-                        } else {
-                            self.shift_pipeline.execute(
-                                &self.device,
-                                &self.queue,
-                                cache.get_k_buffer(layer_idx),
-                                cache.get_v_buffer(layer_idx),
-                                keep_sink,
-                                shift_amt,
-                                current_len,
-                                self.spec.n_head_kv as u32,
-                                self.spec.head_dim as u32,
-                                self.spec.rope_dim as u32,
-                                self.spec.rope_base,
-                                cache.max_len(),
-                            );
-                        }
-                    }
-                    cache.set_seq_len(current_len - shift_amt);
-                    cache.advance_window_base(shift_amt);
-                }
-            }
-
-            // Compute next logits — use the full-model chunked path (same as prefill)
-            // to avoid 22 individual layer readbacks per decode token.
-            // run_dequant_request for embedding + run_full_model_with_cache_state
-            // batches all 22 layers into ~3 submits instead of 22.
-            let row_offset = self.embd_weight_offset + (next_token as u64 * self.row_bytes);
-            let token_embd = self.pipeline.run_dequant_any_hot(
-                &self.device,
-                &self.queue,
-                &self.model,
-                row_offset as u32,
-                dim,
-                self.embd_quant_type,
-            );
-
-            let current_pos = {
-                let cache = self.kv_cache.lock().unwrap();
-                cache.get_seq_len()
-            };
-            let (new_hidden, _l21, new_logits) = {
-                let cache_guard = self.kv_cache.lock().unwrap();
-                self.pipeline
-                    .run_full_model_prefill_chunked_with_cache_state(
-                        &self.device,
-                        &self.queue,
-                        &self.model,
-                        &token_embd,
-                        Some(&self.output_head_f32),
-                        current_pos,
-                        Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
-                        &self.spec,
-                        1, // single token decode
-                    )?
-            };
-            let layer_output = new_hidden;
-            logits_vec = new_logits;
-
-            // Increment KV cache
-            {
-                let mut cache = self.kv_cache.lock().unwrap();
-                cache.increment()?;
-            }
-            // logits_vec already set above from run_full_model_prefill_chunked_with_cache_state
-            let _ = layer_output; // suppress unused warning
-        }
-
-        Ok(generated_text)
+        self.generate_isf(prompt, params, on_token)
     }
+
 
     /// Reset the KV cache (for a new conversation).
     pub fn reset(&self) {
