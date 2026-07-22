@@ -285,6 +285,59 @@ impl BindlessPipeline {
         count: u32,
         quant_type: u32,
     ) -> Vec<f32> {
+        // The model is uploaded to VRAM as word-granular blob buffers; the
+        // shader reads absolute word indices, so the bytes backing blob_0 are
+        // the raw GGUF bytes for the model's first chunk.
+        let blob = {
+            let buf = &model.gpu_buffers[0];
+            let size = buf.size();
+            let staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("DequantAny Hot Staging"),
+                size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            encoder.copy_buffer_to_buffer(buf, 0, &staging, 0, size);
+            queue.submit(Some(encoder.finish()));
+            let slice = staging.slice(..);
+            let (tx, rx) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+            loop {
+                device.poll(wgpu::PollType::Poll).ok();
+                if let Ok(res) = rx.try_recv() {
+                    res.expect("DequantAny hot staging map failed");
+                    break;
+                }
+            }
+            let data = slice.get_mapped_range();
+            let bytes: Vec<u8> = data.to_vec();
+            drop(data);
+            staging.unmap();
+            bytes
+        };
+        self.run_dequant_any_blob(device, queue, &blob, offset_bytes, count, quant_type)
+    }
+
+    /// Dequantize a tensor directly from raw GGUF blob bytes on the GPU.
+    ///
+    /// This is the core of [`Self::run_dequant_any_hot`] but takes a `&[u8]` blob
+    /// instead of a [`BindlessModel`], so it can be driven by synthetic blocks in
+    /// tests (e.g. the P2 algebraic audit) without loading a full model or
+    /// satisfying the multi-buffer split geometry. The blob must be 4-byte aligned
+    /// at `offset_bytes` (offsets are word-granular in `sh_dequant_any.wgsl`).
+    ///
+    /// Supports: 0=F32, 1=F16, 2=Q4_0, 8=Q8_0, 12=Q4_K, 13=Q5_K, 14=Q6_K.
+    pub fn run_dequant_any_blob(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        blob: &[u8],
+        offset_bytes: u32,
+        count: u32,
+        quant_type: u32,
+    ) -> Vec<f32> {
         let params = DequantAnyParams {
             offset_bytes,
             count,
@@ -296,6 +349,25 @@ impl BindlessPipeline {
             contents: bytemuck::bytes_of(&params),
             usage: wgpu::BufferUsages::UNIFORM,
         });
+        // Place the blob bytes at byte 0 so word index 0 → blob[0..4].
+        // The shader reads at word `offset_bytes/4`, which is byte `offset_bytes`
+        // in this buffer → blob[offset_bytes] → correct absolute position.
+        let mut blob_full = blob.to_vec();
+        // Pad to a multiple of 4 bytes so the last word is fully readable.
+        while blob_full.len() % 4 != 0 {
+            blob_full.push(0u8);
+        }
+        let blob_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("DequantAny Blob"),
+            contents: &blob_full,
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let dummy = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("DequantAny DummyBlob"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         let output_size = (count as usize * 4) as u64;
         let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("DequantAny Output"),
@@ -304,12 +376,12 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("DequantAny BindGroup Hot"),
+            label: Some("DequantAny BindGroup Blob"),
             layout: &self.dequant_any_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: blob_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -321,11 +393,11 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: dummy.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: dummy.as_entire_binding(),
                 },
             ],
         });
