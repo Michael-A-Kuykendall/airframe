@@ -11,7 +11,9 @@
 //! 5. Read results from observers
 
 use crate::facts::{alpha_key_of, InferenceFact, KernelKind, YieldReason, KEY_DISPATCH_TIMING};
-use crate::observers::{CandleCompareObserver, LayerStabilityObserver, VaultOracleObserver};
+use crate::observers::{
+    CandleCompareObserver, CertificationObserver, LayerStabilityObserver, VaultOracleObserver,
+};
 use dzero::{AlphaKey, ClosureProgram, ReactiveGraph, RunBudget, RunResult};
 use std::sync::{Arc, Mutex};
 
@@ -69,6 +71,7 @@ pub struct ObservationSession {
     graph: ReactiveGraph<InferenceFact>,
     vault_oracle: Option<VaultOracleObserver>,
     candle_compare: Option<CandleCompareObserver>,
+    certification: Option<CertificationObserver>,
     /// TDR scheduler — drives adaptive yield decisions via saturation fabric.
     pub scheduler: Option<TdrScheduler>,
     /// Arc-backed live TDR scheduler state (shared with the registered rule closure).
@@ -84,6 +87,7 @@ impl ObservationSession {
             graph,
             vault_oracle: None,
             candle_compare: None,
+            certification: None,
             scheduler: None,
             _tdr_sched_arc: None,
         }
@@ -182,6 +186,56 @@ impl ObservationSession {
             .register(CandleCompareObserver::alpha_key(), observer.rule());
         self.candle_compare = Some(observer);
         self.candle_compare.as_ref().unwrap()
+    }
+
+    /// Register the CertificationObserver (V2).
+    ///
+    /// Registers two rules — one on KEY_LAYER_OUTPUT and one on KEY_FINAL_LOGITS
+    /// — that compare each live observation against the VaultOracle reference
+    /// facts in the store, emitting CertificationPass / CertificationFail.
+    /// VaultOracle facts (V1) must be emitted into the session before the
+    /// observation facts they certify.
+    ///
+    /// `layer_tolerance` / `logits_tolerance` are the max relative RMS deltas
+    /// for a pass; use `CertificationObserver::with_defaults()` tolerances
+    /// (2.0 / 4.0) for the standard V2 gate via `register_certification_default`.
+    pub fn register_certification(
+        &mut self,
+        layer_tolerance: f32,
+        logits_tolerance: f32,
+    ) -> &CertificationObserver {
+        let observer = CertificationObserver::new(layer_tolerance, logits_tolerance);
+        self.graph.program.register(
+            CertificationObserver::layer_alpha_key(),
+            observer.layer_rule(),
+        );
+        self.graph.program.register(
+            CertificationObserver::logits_alpha_key(),
+            observer.logits_rule(),
+        );
+        self.certification = Some(observer);
+        self.certification.as_ref().unwrap()
+    }
+
+    /// Register the CertificationObserver with the standard V2 tolerances.
+    pub fn register_certification_default(&mut self) -> &CertificationObserver {
+        self.register_certification(
+            CertificationObserver::DEFAULT_LAYER_TOLERANCE,
+            CertificationObserver::DEFAULT_LOGITS_TOLERANCE,
+        )
+    }
+
+    /// Emit VaultOracle reference facts into the session.
+    /// Call before emitting the LayerOutput facts to be certified.
+    pub fn emit_vault_oracles(&mut self, oracles: impl IntoIterator<Item = InferenceFact>) {
+        for oracle in oracles {
+            self.emit(oracle);
+        }
+    }
+
+    /// Access certification results after saturation.
+    pub fn certification(&self) -> Option<&CertificationObserver> {
+        self.certification.as_ref()
     }
 
     /// Emit a fact into the session.
@@ -394,6 +448,143 @@ mod tests {
             result.facts_derived >= 2,
             "at least 2 derived facts from one LayerOutput emission (oracle + stability)"
         );
+    }
+
+    #[test]
+    fn certification_passes_within_tolerance() {
+        let mut session = ObservationSession::new();
+        session.register_certification_default();
+
+        // Oracle: layer 0, position 1, expected RMS 0.5, matching checksum.
+        let values = vec![0.5f32; 32];
+        session.emit(InferenceFact::VaultOracle {
+            model_id: 0,
+            layer_idx: 0,
+            position: 1,
+            expected_rms_bits: 0.5f32.to_bits(),
+            checksum: crate::facts::checksum(&values),
+        });
+        // Live output: all 0.5 → RMS 0.5 → exact match (rel_delta 0.0).
+        session.emit_layer_output(0, 1, &values);
+
+        let result = session.saturate();
+        assert!(result.saturated);
+
+        assert!(
+            session.contains(&InferenceFact::CertificationPass {
+                layer_idx: 0,
+                position: 1,
+                rms_delta_bits: 0.0f32.to_bits(),
+            }),
+            "exact RMS match should certify PASS"
+        );
+
+        let results = session.certification().unwrap().drain();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].passed);
+        assert!(results[0].checksum_match, "identical values → checksum match");
+        assert_eq!(results[0].rel_delta, 0.0);
+    }
+
+    #[test]
+    fn certification_passes_at_ratio_below_two() {
+        let mut session = ObservationSession::new();
+        session.register_certification_default();
+
+        // expected 0.5, observed 1.0 → rel_delta = 0.5/0.5 = 1.0 < 2.0 → PASS.
+        session.emit(InferenceFact::VaultOracle {
+            model_id: 0,
+            layer_idx: 2,
+            position: 1,
+            expected_rms_bits: 0.5f32.to_bits(),
+            checksum: 7,
+        });
+        session.emit_layer_output(2, 1, &vec![1.0f32; 8]);
+        assert!(session.saturate().saturated);
+
+        let results = session.certification().unwrap().drain();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].passed, "rel_delta 1.0 < 2.0 must PASS");
+        assert!((results[0].rel_delta - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn certification_fails_outside_tolerance() {
+        let mut session = ObservationSession::new();
+        session.register_certification_default();
+
+        // expected 0.5, observed 2.0 → rel_delta = 1.5/0.5 = 3.0 >= 2.0 → FAIL.
+        session.emit(InferenceFact::VaultOracle {
+            model_id: 0,
+            layer_idx: 5,
+            position: 1,
+            expected_rms_bits: 0.5f32.to_bits(),
+            checksum: 999,
+        });
+        session.emit_layer_output(5, 1, &vec![2.0f32; 16]);
+
+        let result = session.saturate();
+        assert!(result.saturated);
+
+        let results = session.certification().unwrap().drain();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].passed, "rel_delta 3.0 must FAIL");
+        assert!(!results[0].checksum_match, "checksums differ");
+        assert!((results[0].rel_delta - 3.0).abs() < 1e-6);
+
+        // A CertificationFail fact must be present with the divergent layer.
+        assert!(
+            session.contains(&InferenceFact::CertificationFail {
+                layer_idx: 5,
+                position: 1,
+                rms_delta_bits: 3.0f32.to_bits(),
+                observed_rms_bits: 2.0f32.to_bits(),
+                expected_rms_bits: 0.5f32.to_bits(),
+                checksum_match: false,
+            }),
+            "CertificationFail fact should be asserted"
+        );
+    }
+
+    #[test]
+    fn certification_final_logits_uses_logits_tolerance() {
+        let mut session = ObservationSession::new();
+        session.register_certification_default();
+
+        // Final-logits oracle is stored with layer_idx == -1.
+        // expected 1.0, observed 4.0 → rel_delta 3.0 < 4.0 → PASS (would FAIL
+        // under the 2.0 layer tolerance, proving the logits path is used).
+        session.emit(InferenceFact::VaultOracle {
+            model_id: 0,
+            layer_idx: -1,
+            position: 1,
+            expected_rms_bits: 1.0f32.to_bits(),
+            checksum: 42,
+        });
+        session.emit_final_logits(1, &vec![4.0f32; 8]);
+        assert!(session.saturate().saturated);
+
+        let results = session.certification().unwrap().drain();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_final_logits);
+        assert!(results[0].passed, "rel_delta 3.0 < 4.0 logits tolerance → PASS");
+        assert_eq!(
+            results[0].layer_idx,
+            crate::observers::FINAL_LOGITS_LAYER
+        );
+    }
+
+    #[test]
+    fn certification_ignores_uncovered_layers() {
+        let mut session = ObservationSession::new();
+        session.register_certification_default();
+
+        // No oracle for layer 3 → no certification fact, no result.
+        session.emit_layer_output(3, 1, &vec![0.5f32; 32]);
+        let result = session.saturate();
+        assert!(result.saturated);
+
+        assert!(session.certification().unwrap().drain().is_empty());
     }
 
     #[test]
