@@ -383,7 +383,6 @@ impl Default for ObservationSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facts::bits_to_f32;
 
     #[test]
     fn vault_oracle_captures_layer_outputs() {
