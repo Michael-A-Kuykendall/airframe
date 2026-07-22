@@ -33,24 +33,40 @@ fn read_byte(byte_pos: u32) -> u32 {
     return (gguf_blob[byte_pos >> 2u] >> ((byte_pos & 3u) << 3u)) & 0xFFu;
 }
 
-// FP16 bits → FP32 (IEEE 754 half precision, no inf/nan special-casing needed
-// for weights – just clamp to ±65504).
+// IEEE-754 binary16 -> binary32. Float-arithmetic only — NO bitcast of a
+// computed integer (unreliable on this driver, where unpack2x16float is also
+// broken), and no exp2/pow. Bit-exact to airframe_observe::quant_formula::
+// f16_to_f32 for normal/zero/subnormal values; the P2 algebraic_audit gate
+// validates the shader element-wise against that reference.
 fn f16_to_f32(bits: u32) -> f32 {
-    let s: u32 = bits & 0x8000u;
-    let e: u32 = (bits >> 10u) & 0x1Fu;
-    let m: u32 = bits & 0x3FFu;
-    var fval: f32;
-    if e == 0u {
-        // subnormal: ±m × 2^{-24}
-        fval = f32(m) * exp2(-24.0);
-    } else if e == 31u {
-        // infinity / NaN → clamp
-        fval = 65504.0;
-    } else {
-        // normal: ±(1 + m·2^{-10}) × 2^{e−15}
-        fval = (1.0 + f32(m) * exp2(-10.0)) * exp2(f32(e) - 15.0);
+    let sign = (bits >> 15u) & 1u;
+    let exp  = (bits >> 10u) & 0x1fu;
+    let mant = bits & 0x3ffu;
+    let sign_f = select(-1.0, 1.0, sign == 0u);
+    if (exp == 0u) {
+        if (mant == 0u) {
+            return sign_f * 0.0;
+        }
+        // subnormal: (-1)^sign * mant * 2^-24 (exact division by power of two)
+        return sign_f * (f32(mant) / f32(1u << 24u));
     }
-    return select(fval, -fval, s != 0u);
+    if (exp == 0x1fu) {
+        // ±inf / NaN. Real GGUF weight scales are always finite, so this branch
+        // is unreachable for valid input; return 0.0 to stay parse-clean.
+        return 0.0;
+    }
+    // normal: (-1)^sign * (1 + mant/1024) * 2^(exp-15)
+    // exp-15 may be negative, so split on the sign of the shift: every shift
+    // count stays non-negative and every power-of-two op is exact, making the
+    // result bit-identical to the reference integer-assembled f32.
+    let fraction = 1.0 + f32(mant) / 1024.0;
+    if (exp >= 15u) {
+        let p = f32(1u << (exp - 15u));
+        return sign_f * fraction * p;
+    } else {
+        let p = f32(1u << (15u - exp));
+        return sign_f * fraction / p;
+    }
 }
 
 // Reinterpret a u8 value (0–255) as int8 (-128–127).

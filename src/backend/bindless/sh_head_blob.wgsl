@@ -1,3 +1,39 @@
+
+// IEEE-754 binary16 -> binary32. Float-arithmetic only — NO bitcast of a
+// computed integer (unreliable on this driver, where unpack2x16float is also
+// broken). Bit-exact to airframe_observe::quant_formula::f16_to_f32 for
+// normal/zero/subnormal values; the P2 algebraic_audit gate validates the
+// shader element-wise against that reference.
+fn f16_to_f32(bits: u32) -> f32 {
+    let sign = (bits >> 15u) & 1u;
+    let exp  = (bits >> 10u) & 0x1fu;
+    let mant = bits & 0x3ffu;
+    let sign_f = select(-1.0, 1.0, sign == 0u);
+    if (exp == 0u) {
+        if (mant == 0u) {
+            return sign_f * 0.0;
+        }
+        // subnormal: (-1)^sign * mant * 2^-24 (exact division by power of two)
+        return sign_f * (f32(mant) / f32(1u << 24u));
+    }
+    if (exp == 0x1fu) {
+        // ±inf / NaN. Real GGUF weight scales are always finite, so this branch
+        // is unreachable for valid input; return 0.0 to stay parse-clean.
+        return 0.0;
+    }
+    // normal: (-1)^sign * (1 + mant/1024) * 2^(exp-15)
+    // exp-15 may be negative, so split on the sign of the shift: every shift
+    // count stays non-negative and every power-of-two op is exact, making the
+    // result bit-identical to the reference integer-assembled f32.
+    let fraction = 1.0 + f32(mant) / 1024.0;
+    if (exp >= 15u) {
+        let p = f32(1u << (exp - 15u));
+        return sign_f * fraction * p;
+    } else {
+        let p = f32(1u << (15u - exp));
+        return sign_f * fraction / p;
+    }
+}
 // sh_head_blob.wgsl
 // LM Head matmul — reads quantized weights directly from the GGUF blob.
 // One GPU thread per output vocabulary row.  No F32 dequant buffer needed.
@@ -90,11 +126,11 @@ fn get_scale_min_k4(j: u32, scales_base_byte: u32) -> vec2<u32> {
 fn dequant_q4k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     let d_packed = extractBits(read_wt_blob(block_base_byte / 4u),
                                (block_base_byte % 4u) * 8u, 16u);
-    let d = unpack2x16float(d_packed).x;
+    let d = f16_to_f32(d_packed);
     let dmin_byte = block_base_byte + 2u;
     let dmin_packed = extractBits(read_wt_blob(dmin_byte / 4u),
                                   (dmin_byte % 4u) * 8u, 16u);
-    let dmin_val = unpack2x16float(dmin_packed).x;
+    let dmin_val = f16_to_f32(dmin_packed);
     let scales_base = block_base_byte + 4u;
     let qs_base     = block_base_byte + 16u;
     let group        = elem_in_block / 64u;
@@ -123,7 +159,7 @@ fn dequant_q4k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 fn dequant_q6k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     let d_byte = block_base_byte + 208u;
     let d_packed = extractBits(read_wt_blob(d_byte / 4u), (d_byte % 4u) * 8u, 16u);
-    let d = unpack2x16float(d_packed).x;
+    let d = f16_to_f32(d_packed);
     let half    = elem_in_block / 128u;
     let half_e  = elem_in_block % 128u;
     let l       = half_e % 32u;
@@ -147,7 +183,7 @@ fn dequant_q6k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 fn dequant_q8_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     let scale_packed = extractBits(read_wt_blob(block_base_byte / 4u),
                                    (block_base_byte % 4u) * 8u, 16u);
-    let scale = unpack2x16float(scale_packed).x;
+    let scale = f16_to_f32(scale_packed);
     let qs_byte = block_base_byte + 2u + elem_in_block;
     let raw = read_wt_byte(qs_byte);
     let signed_val = select(i32(raw), i32(raw) - 256, raw >= 128u);
@@ -160,7 +196,7 @@ fn dequant_q8_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 fn dequant_f16_at(byte_offset: u32) -> f32 {
     let packed = extractBits(read_wt_blob(byte_offset / 4u),
                              (byte_offset % 4u) * 8u, 16u);
-    return unpack2x16float(packed).x;
+    return f16_to_f32(packed);
 }
 
 // ---------------------------------------------------------------------------
@@ -169,11 +205,11 @@ fn dequant_f16_at(byte_offset: u32) -> f32 {
 fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     let d_packed = extractBits(read_wt_blob(block_base_byte / 4u),
                                (block_base_byte % 4u) * 8u, 16u);
-    let d = unpack2x16float(d_packed).x;
+    let d = f16_to_f32(d_packed);
     let dmin_byte = block_base_byte + 2u;
     let dmin_packed = extractBits(read_wt_blob(dmin_byte / 4u),
                                   (dmin_byte % 4u) * 8u, 16u);
-    let dmin_val = unpack2x16float(dmin_packed).x;
+    let dmin_val = f16_to_f32(dmin_packed);
     let scales_base = block_base_byte + 4u;
     let qh_base     = block_base_byte + 16u;
     let qs_base     = block_base_byte + 48u;
@@ -204,7 +240,7 @@ fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 fn dequant_q5_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     let d_packed = extractBits(read_wt_blob(block_base_byte / 4u),
                                (block_base_byte % 4u) * 8u, 16u);
-    let d = unpack2x16float(d_packed).x;
+    let d = f16_to_f32(d_packed);
     let qh_word = read_wt_blob((block_base_byte + 2u) / 4u);
     let qh_shift = (block_base_byte + 2u) % 4u;
     let qh = extractBits(qh_word, qh_shift * 8u, 32u);
@@ -222,7 +258,7 @@ fn dequant_q5_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 fn dequant_q4_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     let scale_packed = extractBits(read_wt_blob(block_base_byte / 4u),
                                    (block_base_byte % 4u) * 8u, 16u);
-    let scale = unpack2x16float(scale_packed).x;
+    let scale = f16_to_f32(scale_packed);
     let qs_byte = block_base_byte + 2u + (elem_in_block % 16u);
     let qs = read_wt_byte(qs_byte);
     let nib = select(qs & 0x0Fu, qs >> 4u, elem_in_block >= 16u);

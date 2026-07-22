@@ -1,3 +1,39 @@
+
+// IEEE-754 binary16 -> binary32. Float-arithmetic only — NO bitcast of a
+// computed integer (unreliable on this driver, where unpack2x16float is also
+// broken). Bit-exact to airframe_observe::quant_formula::f16_to_f32 for
+// normal/zero/subnormal values; the P2 algebraic_audit gate validates the
+// shader element-wise against that reference.
+fn f16_to_f32(bits: u32) -> f32 {
+    let sign = (bits >> 15u) & 1u;
+    let exp  = (bits >> 10u) & 0x1fu;
+    let mant = bits & 0x3ffu;
+    let sign_f = select(-1.0, 1.0, sign == 0u);
+    if (exp == 0u) {
+        if (mant == 0u) {
+            return sign_f * 0.0;
+        }
+        // subnormal: (-1)^sign * mant * 2^-24 (exact division by power of two)
+        return sign_f * (f32(mant) / f32(1u << 24u));
+    }
+    if (exp == 0x1fu) {
+        // ±inf / NaN. Real GGUF weight scales are always finite, so this branch
+        // is unreachable for valid input; return 0.0 to stay parse-clean.
+        return 0.0;
+    }
+    // normal: (-1)^sign * (1 + mant/1024) * 2^(exp-15)
+    // exp-15 may be negative, so split on the sign of the shift: every shift
+    // count stays non-negative and every power-of-two op is exact, making the
+    // result bit-identical to the reference integer-assembled f32.
+    let fraction = 1.0 + f32(mant) / 1024.0;
+    if (exp >= 15u) {
+        let p = f32(1u << (exp - 15u));
+        return sign_f * fraction * p;
+    } else {
+        let p = f32(1u << (15u - exp));
+        return sign_f * fraction / p;
+    }
+}
 // sh_layer_q4k.wgsl
 // Full Transformer Layer — Mixed Q4_K/Q6_K weights (as used in Q4_K_M models).
 // Most weights are Q4_K (144-byte superblocks); attn_v and ffn_down are Q6_K (210-byte superblocks).
@@ -64,7 +100,7 @@ fn get_byte(byte_pos: u32) -> u32 {
 fn get_f16_at(byte_pos: u32) -> f32 {
     let word = gguf_blob[byte_pos / 4u];
     let bits16 = (word >> ((byte_pos % 4u) * 8u)) & 0xFFFFu;
-    return unpack2x16float(bits16).x;
+    return f16_to_f32(bits16);
 }
 
 // Read one F32 (4 bytes) from gguf_blob at a 4-byte aligned byte offset.
