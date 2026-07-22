@@ -31,7 +31,11 @@ fn f16_to_f32_dbg(bits: u16) -> f32 {
             f32::from_bits(sign_bit)
         } else {
             let val = (mant as f32) * 2f32.powi(-24);
-            if sign == 1 { -val } else { val }
+            if sign == 1 {
+                -val
+            } else {
+                val
+            }
         }
     } else if exp == 0x1f {
         let m = (mant as u32) << 13;
@@ -45,7 +49,9 @@ fn f16_to_f32_dbg(bits: u16) -> f32 {
 
 /// Deterministic PRNG (LCG) — no external deps, reproducible across runs.
 fn lcg(state: &mut u64) -> u8 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     (*state >> 33) as u8
 }
 
@@ -73,9 +79,9 @@ fn synth_block(type_id: u32, n_blocks: usize, seed: u64) -> Vec<u8> {
     // dmin field so exp can never reach 0x1F (inf/NaN). Offsets are the high
     // bytes of each scale/dmin f16 within one (super)block.
     let scale_hi_offsets: &[usize] = match type_id {
-        2 | 6 | 8 => &[1],       // Q4_0 / Q5_0 / Q8_0: single f16 scale @ [0..1]
-        12 | 13 => &[1, 3],      // Q4_K / Q5_K: d @ [0..1], dmin @ [2..3]
-        14 => &[209],            // Q6_K: d @ [208..210]
+        2 | 6 | 8 => &[1],  // Q4_0 / Q5_0 / Q8_0: single f16 scale @ [0..1]
+        12 | 13 => &[1, 3], // Q4_K / Q5_K: d @ [0..1], dmin @ [2..3]
+        14 => &[209],       // Q6_K: d @ [208..210]
         _ => &[],
     };
     for blk in 0..n_blocks {
@@ -110,7 +116,8 @@ async fn algebraic_audit_dequant_shader_vs_spec() {
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             required_limits: wgpu::Limits {
-                max_storage_buffers_per_shader_stage: adapter.limits()
+                max_storage_buffers_per_shader_stage: adapter
+                    .limits()
                     .max_storage_buffers_per_shader_stage,
                 ..wgpu::Limits::downlevel_defaults()
             },
@@ -125,14 +132,14 @@ async fn algebraic_audit_dequant_shader_vs_spec() {
     // 2. Every supported quant type (all 8). F16 uses 2-byte elements; the
     //    special path below handles it.
     let types: [(u32, usize); 8] = [
-        (0, 1),   // F32  (1 elem / 4 bytes)
-        (1, 4),   // F16  (2 bytes/elem) — dedicated path below
-        (2, 2),   // Q4_0
-        (6, 2),   // Q5_0
-        (8, 2),   // Q8_0
-        (12, 1),  // Q4_K
-        (13, 1),  // Q5_K
-        (14, 1),  // Q6_K
+        (0, 1),  // F32  (1 elem / 4 bytes)
+        (1, 4),  // F16  (2 bytes/elem) — dedicated path below
+        (2, 2),  // Q4_0
+        (6, 2),  // Q5_0
+        (8, 2),  // Q8_0
+        (12, 1), // Q4_K
+        (13, 1), // Q5_K
+        (14, 1), // Q6_K
     ];
 
     for (type_id, n_blocks) in types {
@@ -192,7 +199,12 @@ async fn algebraic_audit_dequant_shader_vs_spec() {
         // Shader (real production path).
         let got = pipeline.run_dequant_any_blob(&device, &queue, &blob, 0, count, type_id);
 
-        assert_eq!(got.len(), expected.len(), "type {} length mismatch", type_id);
+        assert_eq!(
+            got.len(),
+            expected.len(),
+            "type {} length mismatch",
+            type_id
+        );
         for (i, (exp, act)) in expected.iter().zip(got.iter()).enumerate() {
             assert!(
                 approx_eq(*exp, *act),

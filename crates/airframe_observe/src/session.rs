@@ -481,7 +481,10 @@ mod tests {
         let results = session.certification().unwrap().drain();
         assert_eq!(results.len(), 1);
         assert!(results[0].passed);
-        assert!(results[0].checksum_match, "identical values → checksum match");
+        assert!(
+            results[0].checksum_match,
+            "identical values → checksum match"
+        );
         assert_eq!(results[0].rel_delta, 0.0);
     }
 
@@ -566,11 +569,11 @@ mod tests {
         let results = session.certification().unwrap().drain();
         assert_eq!(results.len(), 1);
         assert!(results[0].is_final_logits);
-        assert!(results[0].passed, "rel_delta 3.0 < 4.0 logits tolerance → PASS");
-        assert_eq!(
-            results[0].layer_idx,
-            crate::observers::FINAL_LOGITS_LAYER
+        assert!(
+            results[0].passed,
+            "rel_delta 3.0 < 4.0 logits tolerance → PASS"
         );
+        assert_eq!(results[0].layer_idx, crate::observers::FINAL_LOGITS_LAYER);
     }
 
     #[test]

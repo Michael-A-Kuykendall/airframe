@@ -175,7 +175,10 @@ fn run_probe(model_path: &str, model_tag: &str) -> Option<ProbeOut> {
     let out = match out {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("[certify] SKIP {} (cannot launch invariant_probe: {})", model_tag, e);
+            eprintln!(
+                "[certify] SKIP {} (cannot launch invariant_probe: {})",
+                model_tag, e
+            );
             return None;
         }
     };
@@ -183,7 +186,10 @@ fn run_probe(model_path: &str, model_tag: &str) -> Option<ProbeOut> {
         eprintln!(
             "[certify] SKIP {} (invariant_probe failed: {})",
             model_tag,
-            String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")
+            String::from_utf8_lossy(&out.stderr)
+                .lines()
+                .last()
+                .unwrap_or("")
         );
         return None;
     }
@@ -196,7 +202,10 @@ fn run_probe(model_path: &str, model_tag: &str) -> Option<ProbeOut> {
         Some(line) => match serde_json::from_str::<ProbeOut>(line) {
             Ok(p) => Some(p),
             Err(e) => {
-                eprintln!("[certify] SKIP {} (probe JSON unparsable: {})", model_tag, e);
+                eprintln!(
+                    "[certify] SKIP {} (probe JSON unparsable: {})",
+                    model_tag, e
+                );
                 None
             }
         },
@@ -283,7 +292,11 @@ fn localize_divergence_across_vault_models() {
         let fails: Vec<_> = results.iter().filter(|r| !r.passed).collect();
 
         if fails.is_empty() {
-            eprintln!("[certify] {} PASS (all {} covered oracle rows match)", tag, results.len());
+            eprintln!(
+                "[certify] {} PASS (all {} covered oracle rows match)",
+                tag,
+                results.len()
+            );
             n_pass += 1;
         } else {
             // FIRST divergent layer = smallest layer_idx (final_logits sorts last).

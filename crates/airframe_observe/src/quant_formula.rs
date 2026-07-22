@@ -78,10 +78,10 @@ fn get_scale_min_k4(j: usize, scales: &[u8]) -> (u32, u32) {
         let m = (scales[j + 4] & 63) as u32;
         (sc, m)
     } else {
-        let sc = (((scales[j + 4] & 0x0f) as u32) | (((scales[j - 4] >> 6) & 3) as u32) << 4)
-            as u32;
-        let m = (((scales[j + 4] >> 4) & 0x0f) as u32 | (((scales[j] >> 6) & 3) as u32) << 4)
-            as u32;
+        let sc =
+            (((scales[j + 4] & 0x0f) as u32) | (((scales[j - 4] >> 6) & 3) as u32) << 4) as u32;
+        let m =
+            (((scales[j + 4] >> 4) & 0x0f) as u32 | (((scales[j] >> 6) & 3) as u32) << 4) as u32;
         (sc, m)
     }
 }
@@ -133,7 +133,11 @@ fn dequant_f16(block: &[u8], elem: usize) -> f32 {
 fn dequant_q4_0(block: &[u8], elem: usize) -> f32 {
     let d = f16_to_f32(rd_u16(block, 0));
     let qs_byte = block[2 + (elem % 16)];
-    let nib = if elem < 16 { qs_byte & 0x0f } else { qs_byte >> 4 };
+    let nib = if elem < 16 {
+        qs_byte & 0x0f
+    } else {
+        qs_byte >> 4
+    };
     (nib as f32 - 8.0) * d
 }
 
@@ -148,7 +152,11 @@ fn dequant_q5_0(block: &[u8], elem: usize) -> f32 {
     let qh = rd_u32(block, 2);
     let high_bit = (qh >> elem) & 1;
     let qs_byte = block[6 + (elem % 16)];
-    let low = if elem < 16 { qs_byte & 0x0f } else { qs_byte >> 4 };
+    let low = if elem < 16 {
+        qs_byte & 0x0f
+    } else {
+        qs_byte >> 4
+    };
     let val5 = low as u32 | (high_bit << 4);
     (val5 as f32 - 16.0) * d
 }
@@ -188,7 +196,11 @@ fn dequant_q4_k(block: &[u8], elem: usize) -> f32 {
     let m_val = dmin * m as f32;
 
     let qs_byte = qs[group * 32 + l];
-    let nibble = if sub == 0 { qs_byte & 0x0f } else { qs_byte >> 4 };
+    let nibble = if sub == 0 {
+        qs_byte & 0x0f
+    } else {
+        qs_byte >> 4
+    };
     sc_val * nibble as f32 - m_val
 }
 
@@ -217,7 +229,11 @@ fn dequant_q5_k(block: &[u8], elem: usize) -> f32 {
     let m_val = dmin * m as f32;
 
     let qs_byte = qs[group * 32 + l];
-    let nibble = if sub == 0 { qs_byte & 0x0f } else { qs_byte >> 4 };
+    let nibble = if sub == 0 {
+        qs_byte & 0x0f
+    } else {
+        qs_byte >> 4
+    };
 
     let high_bit = (qh[l] >> (elem / 32)) & 1;
     let q5 = nibble as u32 | (high_bit as u32) << 4;
@@ -246,7 +262,11 @@ fn dequant_q6_k(block: &[u8], elem: usize) -> f32 {
         half * 64 + l + 32
     };
     let ql_byte = block[ql_rel];
-    let lower4 = if quarter < 2 { ql_byte & 0x0f } else { ql_byte >> 4 };
+    let lower4 = if quarter < 2 {
+        ql_byte & 0x0f
+    } else {
+        ql_byte >> 4
+    };
 
     // qh: one byte per l within a half
     let qh_byte = block[128 + half * 32 + l];
@@ -435,8 +455,16 @@ mod tests {
         block[192] = 2; // scale for (half0, quarter0, l0) group
         block[0] = 0x01; // ql[0]: low nibble = 1
         let f = formula_for_type(14).expect("Q6_K registered");
-        assert!(((f.dequant)(&block, 0) + 62.0).abs() < 1e-6, "got {}", (f.dequant)(&block, 0));
-        assert!(((f.dequant)(&block, 1) + 64.0).abs() < 1e-6, "got {}", (f.dequant)(&block, 1));
+        assert!(
+            ((f.dequant)(&block, 0) + 62.0).abs() < 1e-6,
+            "got {}",
+            (f.dequant)(&block, 0)
+        );
+        assert!(
+            ((f.dequant)(&block, 1) + 64.0).abs() < 1e-6,
+            "got {}",
+            (f.dequant)(&block, 1)
+        );
     }
 
     #[test]

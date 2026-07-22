@@ -30,12 +30,7 @@ fn wgsl_member_offsets(src: &str, struct_name: &str) -> Vec<(String, u32)> {
             if let naga::TypeInner::Struct { members, .. } = &ty.inner {
                 return members
                     .iter()
-                    .map(|m| {
-                        (
-                            m.name.clone().unwrap_or_default(),
-                            m.offset,
-                        )
-                    })
+                    .map(|m| (m.name.clone().unwrap_or_default(), m.offset))
                     .collect();
             }
             panic!("`{struct_name}` in WGSL is not a struct");
@@ -45,12 +40,7 @@ fn wgsl_member_offsets(src: &str, struct_name: &str) -> Vec<(String, u32)> {
 }
 
 /// Assert a Rust struct's `offset_of!` layout matches the WGSL struct exactly.
-fn assert_layout_matches(
-    label: &str,
-    wgsl_src: &str,
-    wgsl_struct: &str,
-    rust: &[(&str, u32)],
-) {
+fn assert_layout_matches(label: &str, wgsl_src: &str, wgsl_struct: &str, rust: &[(&str, u32)]) {
     let wgsl = wgsl_member_offsets(wgsl_src, wgsl_struct);
 
     assert_eq!(
@@ -83,7 +73,10 @@ fn layer_params_rust_layout() -> Vec<(&'static str, u32)> {
     vec![
         ("dim", offset_of!(LayerParams, dim) as u32),
         ("head_count", offset_of!(LayerParams, head_count) as u32),
-        ("head_count_kv", offset_of!(LayerParams, head_count_kv) as u32),
+        (
+            "head_count_kv",
+            offset_of!(LayerParams, head_count_kv) as u32,
+        ),
         ("head_dim", offset_of!(LayerParams, head_dim) as u32),
         ("rope_dim", offset_of!(LayerParams, rope_dim) as u32),
         ("rms_eps", offset_of!(LayerParams, rms_eps) as u32),
@@ -91,26 +84,65 @@ fn layer_params_rust_layout() -> Vec<(&'static str, u32)> {
         ("temp_stride", offset_of!(LayerParams, temp_stride) as u32),
         ("quant_qk", offset_of!(LayerParams, quant_qk) as u32),
         ("quant_v", offset_of!(LayerParams, quant_v) as u32),
-        ("quant_attn_out", offset_of!(LayerParams, quant_attn_out) as u32),
-        ("quant_ffn_down", offset_of!(LayerParams, quant_ffn_down) as u32),
-        ("quant_ffn_gate", offset_of!(LayerParams, quant_ffn_gate) as u32),
+        (
+            "quant_attn_out",
+            offset_of!(LayerParams, quant_attn_out) as u32,
+        ),
+        (
+            "quant_ffn_down",
+            offset_of!(LayerParams, quant_ffn_down) as u32,
+        ),
+        (
+            "quant_ffn_gate",
+            offset_of!(LayerParams, quant_ffn_gate) as u32,
+        ),
         ("quant_ffn_up", offset_of!(LayerParams, quant_ffn_up) as u32),
-        ("attn_logit_softcap", offset_of!(LayerParams, attn_logit_softcap) as u32),
-        ("post_norm_enabled", offset_of!(LayerParams, post_norm_enabled) as u32),
-        ("qk_norm_enabled", offset_of!(LayerParams, qk_norm_enabled) as u32),
-        ("layer_norm_enabled", offset_of!(LayerParams, layer_norm_enabled) as u32),
-        ("ffn_kind_policy", offset_of!(LayerParams, ffn_kind_policy) as u32),
-        ("qkv_layout_policy", offset_of!(LayerParams, qkv_layout_policy) as u32),
+        (
+            "attn_logit_softcap",
+            offset_of!(LayerParams, attn_logit_softcap) as u32,
+        ),
+        (
+            "post_norm_enabled",
+            offset_of!(LayerParams, post_norm_enabled) as u32,
+        ),
+        (
+            "qk_norm_enabled",
+            offset_of!(LayerParams, qk_norm_enabled) as u32,
+        ),
+        (
+            "layer_norm_enabled",
+            offset_of!(LayerParams, layer_norm_enabled) as u32,
+        ),
+        (
+            "ffn_kind_policy",
+            offset_of!(LayerParams, ffn_kind_policy) as u32,
+        ),
+        (
+            "qkv_layout_policy",
+            offset_of!(LayerParams, qkv_layout_policy) as u32,
+        ),
         ("batch_offset", offset_of!(LayerParams, batch_offset) as u32),
         ("batch_count", offset_of!(LayerParams, batch_count) as u32),
         ("q_weight_k", offset_of!(LayerParams, q_weight_k) as u32),
         ("k_weight_k", offset_of!(LayerParams, k_weight_k) as u32),
         ("formula_qk", offset_of!(LayerParams, formula_qk) as u32),
         ("formula_v", offset_of!(LayerParams, formula_v) as u32),
-        ("formula_attn_out", offset_of!(LayerParams, formula_attn_out) as u32),
-        ("formula_ffn_down", offset_of!(LayerParams, formula_ffn_down) as u32),
-        ("formula_ffn_gate", offset_of!(LayerParams, formula_ffn_gate) as u32),
-        ("formula_ffn_up", offset_of!(LayerParams, formula_ffn_up) as u32),
+        (
+            "formula_attn_out",
+            offset_of!(LayerParams, formula_attn_out) as u32,
+        ),
+        (
+            "formula_ffn_down",
+            offset_of!(LayerParams, formula_ffn_down) as u32,
+        ),
+        (
+            "formula_ffn_gate",
+            offset_of!(LayerParams, formula_ffn_gate) as u32,
+        ),
+        (
+            "formula_ffn_up",
+            offset_of!(LayerParams, formula_ffn_up) as u32,
+        ),
     ]
 }
 
@@ -140,7 +172,10 @@ fn head_blob_params_matches_sh_head_blob() {
         ("vocab_size", offset_of!(HeadBlobParams, vocab_size) as u32),
         ("dim", offset_of!(HeadBlobParams, dim) as u32),
         ("weight_off", offset_of!(HeadBlobParams, weight_off) as u32),
-        ("formula_index", offset_of!(HeadBlobParams, formula_index) as u32),
+        (
+            "formula_index",
+            offset_of!(HeadBlobParams, formula_index) as u32,
+        ),
         ("softcap", offset_of!(HeadBlobParams, softcap) as u32),
         ("base_row", offset_of!(HeadBlobParams, base_row) as u32),
         ("_pad", offset_of!(HeadBlobParams, _pad) as u32),
@@ -156,9 +191,15 @@ fn head_blob_params_matches_sh_head_blob() {
 #[test]
 fn dequant_any_params_matches_sh_dequant_any() {
     let rust = vec![
-        ("offset_bytes", offset_of!(DequantAnyParams, offset_bytes) as u32),
+        (
+            "offset_bytes",
+            offset_of!(DequantAnyParams, offset_bytes) as u32,
+        ),
         ("count", offset_of!(DequantAnyParams, count) as u32),
-        ("formula_index", offset_of!(DequantAnyParams, formula_index) as u32),
+        (
+            "formula_index",
+            offset_of!(DequantAnyParams, formula_index) as u32,
+        ),
         ("pad", offset_of!(DequantAnyParams, pad) as u32),
     ];
     assert_layout_matches(

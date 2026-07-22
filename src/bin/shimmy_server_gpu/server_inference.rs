@@ -6,7 +6,9 @@
 use super::*;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams, formula_index_for_ggml};
+use airframe::backend::bindless::pipeline::{
+    formula_index_for_ggml, BindlessPipeline, LayerParams, RMSNormParams,
+};
 use airframe::control::{ControlDecision, InferenceControl, InferenceEvent};
 use airframe::core::routing::ModelRoutePlan;
 use airframe::core::spec::ModelSpec;

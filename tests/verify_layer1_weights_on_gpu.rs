@@ -75,7 +75,13 @@ async fn test_layer1_weights_on_gpu() -> Result<(), Box<dyn std::error::Error>> 
     let chunk0 = gpu_model.effective_chunk;
     let buf_idx = (attn_q_offset / chunk0) as usize;
     let buf_off = attn_q_offset % chunk0;
-    encoder.copy_buffer_to_buffer(&gpu_model.gpu_buffers[buf_idx], buf_off, &staging_buffer, 0, 32);
+    encoder.copy_buffer_to_buffer(
+        &gpu_model.gpu_buffers[buf_idx],
+        buf_off,
+        &staging_buffer,
+        0,
+        32,
+    );
     let idx = queue.submit(Some(encoder.finish()));
 
     let buffer_slice = staging_buffer.slice(..);

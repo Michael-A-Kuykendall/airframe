@@ -224,7 +224,8 @@ impl Model {
         // plane fact the dispatch rules (B3a) fan out from.
         #[cfg(feature = "isf")]
         {
-            model.tensor_facts = Model::tensor_facts_from_gguf(&tensor_infos, model.spec.arch_string());
+            model.tensor_facts =
+                Model::tensor_facts_from_gguf(&tensor_infos, model.spec.arch_string());
         }
 
         Ok(model)
@@ -1639,14 +1640,20 @@ mod tests {
                     offset,
                     arch_params,
                 } => {
-                    assert_eq!(*quant_type, t.ggml_type, "quant_type must match GGUF header");
+                    assert_eq!(
+                        *quant_type, t.ggml_type,
+                        "quant_type must match GGUF header"
+                    );
                     assert_eq!(
                         *shape,
                         t.dimensions.iter().map(|&d| d as u32).collect::<Vec<_>>(),
                         "shape must match GGUF header"
                     );
                     assert_eq!(*offset, t.offset, "offset must match GGUF header");
-                    assert_eq!(arch_params, "llama", "arch_params derived from GGUF metadata");
+                    assert_eq!(
+                        arch_params, "llama",
+                        "arch_params derived from GGUF metadata"
+                    );
                 }
                 other => panic!("expected TensorFact, got {:?}", other),
             }

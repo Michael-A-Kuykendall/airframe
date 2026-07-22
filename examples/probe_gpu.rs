@@ -23,7 +23,10 @@ fn main() {
             "ADAPTER_MAX_STORAGE_BUFFER_BINDING_SIZE: {}",
             adapter.limits().max_storage_buffer_binding_size
         );
-        println!("ADAPTER_MAX_BUFFER_SIZE: {}", adapter.limits().max_buffer_size);
+        println!(
+            "ADAPTER_MAX_BUFFER_SIZE: {}",
+            adapter.limits().max_buffer_size
+        );
 
         let (device, _queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {

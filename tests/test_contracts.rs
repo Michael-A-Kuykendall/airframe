@@ -40,9 +40,10 @@ fn storage_buffer_limit_contract() {
         "buffer over the 2 GB binding limit must violate the invariant"
     );
 
-    contract_test("storage_buffer_limit", &[
-        "Storage buffer must not exceed 2 GB binding limit",
-    ]);
+    contract_test(
+        "storage_buffer_limit",
+        &["Storage buffer must not exceed 2 GB binding limit"],
+    );
 }
 
 #[test]
@@ -58,7 +59,10 @@ fn alignment_contract() {
         "unaligned value must violate the alignment invariant"
     );
 
-    contract_test("alignment", &["Buffer size/offset must be 256-byte aligned"]);
+    contract_test(
+        "alignment",
+        &["Buffer size/offset must be 256-byte aligned"],
+    );
 }
 
 #[test]
@@ -68,15 +72,17 @@ fn chunk_count_contract() {
     assert_chunk_count_within_limit(1, "self_test");
     assert_chunk_count_within_limit(MAX_CHUNKS, "self_test");
 
-    let too_many = std::panic::catch_unwind(|| {
-        assert_chunk_count_within_limit(MAX_CHUNKS + 1, "self_test")
-    });
+    let too_many =
+        std::panic::catch_unwind(|| assert_chunk_count_within_limit(MAX_CHUNKS + 1, "self_test"));
     assert!(
         too_many.is_err(),
         "chunk count beyond MAX_CHUNKS must violate the invariant"
     );
 
-    contract_test("chunk_count", &["Chunk count must be within [1, MAX_CHUNKS]"]);
+    contract_test(
+        "chunk_count",
+        &["Chunk count must be within [1, MAX_CHUNKS]"],
+    );
 }
 
 #[test]

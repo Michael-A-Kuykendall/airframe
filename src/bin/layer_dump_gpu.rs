@@ -4,7 +4,9 @@
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::metadata::BindlessMetadata;
-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, formula_index_for_ggml};
+use airframe::backend::bindless::pipeline::{
+    formula_index_for_ggml, BindlessPipeline, LayerParams,
+};
 use serde::Serialize;
 use shimmytok::Tokenizer;
 use std::fs::File;

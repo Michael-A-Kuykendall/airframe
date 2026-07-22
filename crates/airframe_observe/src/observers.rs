@@ -220,7 +220,10 @@ impl CertificationObserver {
 
     /// Construct with the standard V2 gate tolerances (2.0 / 4.0).
     pub fn with_defaults() -> Self {
-        Self::new(Self::DEFAULT_LAYER_TOLERANCE, Self::DEFAULT_LOGITS_TOLERANCE)
+        Self::new(
+            Self::DEFAULT_LAYER_TOLERANCE,
+            Self::DEFAULT_LOGITS_TOLERANCE,
+        )
     }
 
     /// Rule for KEY_LAYER_OUTPUT: certify each LayerOutput against its oracle.

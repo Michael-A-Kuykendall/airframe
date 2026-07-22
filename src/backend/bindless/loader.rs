@@ -174,7 +174,8 @@ impl BindlessModel {
 
         // Compute the multi-buffer plan from the device's REAL binding limit.
         // compute_chunk_plan embeds the alignment / 2 GB / chunk-count invariants.
-        let chunk_plan = compute_chunk_plan(size, device.limits().max_storage_buffer_binding_size as u64);
+        let chunk_plan =
+            compute_chunk_plan(size, device.limits().max_storage_buffer_binding_size as u64);
         let effective_chunk = chunk_plan.effective_chunk;
         let num_chunks = chunk_plan.num_chunks;
         println!(
@@ -246,13 +247,16 @@ impl BindlessModel {
         // Explicitly drop mmap here to prove Preflight copied what it needed
         drop(mmap);
 
-let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("GGUF Dummy Blob"),
             contents: &vec![0u8; 1048576],
             usage: wgpu::BufferUsages::STORAGE,
         });
 
-        println!("[BindlessLoader] Upload Complete ({} buffers).", gpu_buffers.len());
+        println!(
+            "[BindlessLoader] Upload Complete ({} buffers).",
+            gpu_buffers.len()
+        );
 
         Self {
             gpu_buffers,

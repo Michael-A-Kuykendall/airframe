@@ -100,8 +100,7 @@ pub fn clear_invariant_ptensor_capture_sink() {
 }
 
 #[cfg(feature = "isf")]
-pub fn invariant_ptensor_capture_sink_mut(
-) -> Option<&'static mut Vec<CapturedPerTensor>> {
+pub fn invariant_ptensor_capture_sink_mut() -> Option<&'static mut Vec<CapturedPerTensor>> {
     unsafe { INVARIANT_PTENSOR_CAPTURE.map(|p| &mut *p) }
 }
 

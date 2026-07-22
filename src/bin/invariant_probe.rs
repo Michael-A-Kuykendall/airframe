@@ -20,9 +20,8 @@
 //! has zero effect on normal inference.
 
 use airframe::backend::bindless::pipeline::inference::{
-    clear_invariant_capture_sink, set_invariant_capture_sink,
-    clear_invariant_ptensor_capture_sink, set_invariant_ptensor_capture_sink,
-    CapturedPerTensor,
+    clear_invariant_capture_sink, clear_invariant_ptensor_capture_sink, set_invariant_capture_sink,
+    set_invariant_ptensor_capture_sink, CapturedPerTensor,
 };
 use airframe::runtime::gpu::GpuRuntime;
 use airframe_observe::facts::CapturedLayer;

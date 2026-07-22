@@ -35,7 +35,11 @@ async fn smoke(path: &str, tag: &str) {
         .generate("The capital of France is", &params, None, None, None, None)
         .expect("generate");
     eprintln!("[smoke] {} output: {:?}", tag, out);
-    assert!(!out.trim().is_empty(), "[smoke] {} produced empty output", tag);
+    assert!(
+        !out.trim().is_empty(),
+        "[smoke] {} produced empty output",
+        tag
+    );
 }
 
 #[tokio::test]

@@ -687,7 +687,10 @@ mod tests {
                     );
                     assert_eq!(*offset, 12345, "DispatchFact must pass through offset");
                 }
-                other => panic!("expected exactly one DispatchFact for qt={}, got {:?}", qt, other),
+                other => panic!(
+                    "expected exactly one DispatchFact for qt={}, got {:?}",
+                    qt, other
+                ),
             }
         }
 

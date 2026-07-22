@@ -172,12 +172,12 @@ pub struct CacheParams {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct HeadBlobParams {
-    pub vocab_size: u32, // rows of output.weight (= n_vocab)
-    pub dim: u32,        // cols of output.weight (= n_embd)
-    pub weight_off: u32, // word offset (byte_offset / 4) of output.weight inside the GGUF blob
+    pub vocab_size: u32,    // rows of output.weight (= n_vocab)
+    pub dim: u32,           // cols of output.weight (= n_embd)
+    pub weight_off: u32,    // word offset (byte_offset / 4) of output.weight inside the GGUF blob
     pub formula_index: u32, // B3b registry slot (0..7); dispatch decision made in Rust B1 registry (Golden Rule 3)
-    pub softcap: f32,    // final_logit_softcap (0.0 = disabled)
-    pub base_row: u32,   // output row offset for dispatch splitting (TDR tiles)
+    pub softcap: f32,       // final_logit_softcap (0.0 = disabled)
+    pub base_row: u32,      // output row offset for dispatch splitting (TDR tiles)
     pub _pad: u32,
 }
 

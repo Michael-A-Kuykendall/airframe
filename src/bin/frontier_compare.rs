@@ -1,6 +1,8 @@
 use airframe::backend::bindless::kv_cache::KVCache as GpuKvCache;
 use airframe::backend::bindless::loader::BindlessModel;
-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams, formula_index_for_ggml};
+use airframe::backend::bindless::pipeline::{
+    formula_index_for_ggml, BindlessPipeline, LayerParams, RMSNormParams,
+};
 use airframe::core::dequant::dequantize_q6_k;
 use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q8_0};
 use airframe::core::error::{LibshimmyError, Result};
@@ -21,7 +23,7 @@ use std::path::PathBuf;
 
 #[cfg(feature = "isf")]
 use airframe::backend::bindless::pipeline::inference::{
-    set_invariant_ptensor_capture_sink, clear_invariant_ptensor_capture_sink, CapturedPerTensor,
+    clear_invariant_ptensor_capture_sink, set_invariant_ptensor_capture_sink, CapturedPerTensor,
 };
 
 #[derive(Parser, Debug)]

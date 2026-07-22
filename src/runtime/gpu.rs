@@ -103,7 +103,11 @@ impl GpuRuntime {
         let adapter = adapters
             .iter()
             .find(|a| a.get_info().device_type == wgpu::DeviceType::DiscreteGpu)
-            .or_else(|| adapters.iter().find(|a| a.get_info().device_type == wgpu::DeviceType::IntegratedGpu))
+            .or_else(|| {
+                adapters
+                    .iter()
+                    .find(|a| a.get_info().device_type == wgpu::DeviceType::IntegratedGpu)
+            })
             .or_else(|| adapters.first())
             .ok_or_else(|| format!("No GPU adapter found"))
             .map(|a| {
@@ -648,7 +652,6 @@ impl GpuRuntime {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         self.generate_isf(prompt, params, on_token)
     }
-
 
     /// Reset the KV cache (for a new conversation).
     pub fn reset(&self) {
