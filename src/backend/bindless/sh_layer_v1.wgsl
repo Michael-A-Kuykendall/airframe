@@ -34,12 +34,12 @@ struct LayerParams {
     rms_eps: f32,       // 1e-5
     ffn_dim: u32,       // Feed-forward intermediate dim (e.g. 5632)
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
-    quant_qk: u32,        // attn_q / attn_k type
-    quant_v: u32,         // attn_v type
-    quant_attn_out: u32,  // attn_output type
-    quant_ffn_down: u32,  // ffn_down type
-    quant_ffn_gate: u32,  // ffn_gate type
-    quant_ffn_up: u32,    // ffn_up type
+    quant_qk: u32,        // attn_q / attn_k GGML type (for metadata/logging)
+    quant_v: u32,         // attn_v GGML type
+    quant_attn_out: u32,  // attn_output GGML type
+    quant_ffn_down: u32,  // ffn_down GGML type
+    quant_ffn_gate: u32,  // ffn_gate GGML type
+    quant_ffn_up: u32,    // ffn_up GGML type
     attn_logit_softcap: f32, // 0.0 = disabled; Gemma-2 uses 50.0
     post_norm_enabled: u32,   // 1 = apply post-attn/post-ffw norms (Gemma-2); 0 = disabled
     qk_norm_enabled: u32,     // 1 = apply per-head Q/K RMSNorm before attention (Qwen3); 0 = disabled
@@ -50,6 +50,16 @@ struct LayerParams {
     batch_count: u32,         // number of tokens in this chunk (guard for last chunk)
     q_weight_k: u32,          // stored K for attn_q.weight (packed Qwen3 etc; 0=dim)
     k_weight_k: u32,          // for attn_k
+    // B3b: formula_index slots (0..7) the shader consumes — replaces the
+    // WGSL if/then ladder. The dispatch *decision* lives in the Rust B1
+    // registry; the shader just switches on the slot. See Golden Rule 3.
+    // MUST stay at the END to match the Rust `LayerParams` byte layout.
+    formula_qk: u32,        // attn_q / attn_k
+    formula_v: u32,         // attn_v
+    formula_attn_out: u32,  // attn_output
+    formula_ffn_down: u32,  // ffn_down
+    formula_ffn_gate: u32,  // ffn_gate
+    formula_ffn_up: u32,    // ffn_up
 };
 
 struct CacheParams {
@@ -336,28 +346,30 @@ fn dequant_q4_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 }
 
 // -------------------------------------------------------------------------
-// Quant block metadata — indexed by GGML quant type code.
+// Quant block metadata — indexed by B1 formula slot (0..7):
+//   0=F32, 1=F16, 2=Q4_0, 3=Q5_0, 4=Q8_0, 5=Q4_K, 6=Q5_K, 7=Q6_K.
 // elems:   elements per block (0 = not a block type, handled separately)
 // bytes:   bytes per block
 // -------------------------------------------------------------------------
-const QUANT_ELEMS: array<u32, 16> = array<u32, 16>(
-    0, 0, 32, 0, 0, 0, 32, 0, 32, 0, 0, 0, 256, 256, 256, 0);
-const QUANT_BYTES: array<u32, 16> = array<u32, 16>(
-    0, 0, 18, 0, 0, 0, 22, 0, 34, 0, 0, 0, 144, 176, 210, 0);
+const QUANT_ELEMS: array<u32, 8> = array<u32, 8>(
+    0, 0, 32, 32, 32, 256, 256, 256);
+const QUANT_BYTES: array<u32, 8> = array<u32, 8>(
+    0, 0, 18, 22, 34, 144, 176, 210);
 
 // -------------------------------------------------------------------------
-// Unified dequant dispatch — one function, all quant type branches.
-// block_base_byte: byte offset of the quant block (for F16/F32: row start byte)
-// elem_in_block:   element index within the block (for F16/F32: column index)
-// -------------------------------------------------------------------------
-fn dequant_dispatch(qt: u32, block_base_byte: u32, elem_in_block: u32) -> f32 {
-    if (qt == 14u) { return dequant_q6k_elem(block_base_byte, elem_in_block); }
-    else if (qt == 13u) { return dequant_q5k_elem(block_base_byte, elem_in_block); }
-    else if (qt == 12u) { return dequant_q4k_elem(block_base_byte, elem_in_block); }
-    else if (qt == 6u)  { return dequant_q5_0_elem(block_base_byte, elem_in_block); }
-    else if (qt == 8u)  { return dequant_q8_0_elem(block_base_byte, elem_in_block); }
-    else if (qt == 2u)  { return dequant_q4_0_elem(block_base_byte, elem_in_block); }
-    else { return 0.0; }
+// B3b: formula-index dispatch — replaces the WGSL if/then ladder.
+// The dispatch *decision* (quant_type → formula_index) lives in the Rust
+// B1 registry; the shader just switches on the slot. Golden Rule 3.
+fn dequant_by_formula(slot: u32, block_base_byte: u32, elem_in_block: u32) -> f32 {
+    switch (slot) {
+        case 2u: { return dequant_q4_0_elem(block_base_byte, elem_in_block); }
+        case 3u: { return dequant_q5_0_elem(block_base_byte, elem_in_block); }
+        case 4u: { return dequant_q8_0_elem(block_base_byte, elem_in_block); }
+        case 5u: { return dequant_q4k_elem(block_base_byte, elem_in_block); }
+        case 6u: { return dequant_q5k_elem(block_base_byte, elem_in_block); }
+        case 7u: { return dequant_q6k_elem(block_base_byte, elem_in_block); }
+        default: { return 0.0; }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -453,21 +465,21 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // 2. MatMul (Row `row_idx`) against the staged attention-normalized provider.
     var dot: f32 = 0.0;
 
-    let qt = select(params.quant_qk, params.quant_v, target_stage == 2u);
+    let slot = select(params.formula_qk, params.formula_v, target_stage == 2u);
 
-    if (qt == 1u) { // F16
+    if (slot == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_byte_offset + (row_idx * params.dim + col) * 2u;
             dot += temp_state[temp_base + col] * dequant_f16_at(w_byte);
         }
-    } else if (qt == 0u) { // F32
+    } else if (slot == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_byte_offset / 4u + row_idx * params.dim + col;
             dot += temp_state[temp_base + col] * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Block quant types via unified dispatch
-        let epb = QUANT_ELEMS[qt];
-        let bpb = QUANT_BYTES[qt];
+        let epb = QUANT_ELEMS[slot];
+        let bpb = QUANT_BYTES[slot];
         if (epb > 0u) {
             let total_blocks = params.dim / epb;
             let row_start_byte = weight_byte_offset + row_idx * total_blocks * bpb;
@@ -475,7 +487,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let bb = row_start_byte + b * bpb;
                 for (var e = 0u; e < epb; e++) {
                     let col = b * epb + e;
-                    dot += temp_state[temp_base + col] * dequant_dispatch(qt, bb, e);
+                    dot += temp_state[temp_base + col] * dequant_by_formula(slot, bb, e);
                 }
             }
         }
@@ -727,7 +739,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var dot = 0.0;
     let weight_byte_offset = offsets.attn_out;
 
-    let wt = params.quant_attn_out;
+    let wt = params.formula_attn_out;
 
     if (wt == 1u) { // F16
         for (var col = 0u; col < attn_dim; col++) {
@@ -749,7 +761,7 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let bb = row_start_byte + b * bpb;
                 for (var e = 0u; e < epb; e++) {
                     let col = b * epb + e;
-                    dot += temp_state[temp_base + col] * dequant_dispatch(wt, bb, e);
+                    dot += temp_state[temp_base + col] * dequant_by_formula(wt, bb, e);
                 }
             }
         }
@@ -968,25 +980,25 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
     }
 
-    // Select Matrix and quant type
+    // Select Matrix and formula slot
     var weight_off: u32;
     var row_idx = idx;
-    var wt: u32;
+    var slot: u32;
 
     if (idx < ffn_dim) {
         // Non-gated (phi-2, GPT-2): use ffn_up for the single proj that feeds the gate slot.
         weight_off = select(offsets.ffn_gate, offsets.ffn_up, non_gated);
-        wt = params.quant_ffn_gate;
+        slot = params.formula_ffn_gate;
     } else {
         weight_off = offsets.ffn_up; // Up
         row_idx = idx - ffn_dim;
-        wt = params.quant_ffn_up;
+        slot = params.formula_ffn_up;
     }
 
     // MatMul
     var dot = 0.0;
 
-    if (wt == 1u) { // F16
+    if (slot == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
             let w_byte = weight_off + (row_idx * params.dim + col) * 2u;
             let val_x = select(activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
@@ -994,7 +1006,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                                non_gated);
             dot += val_x * dequant_f16_at(w_byte);
         }
-    } else if (wt == 0u) { // F32
+    } else if (slot == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
             let w_idx = weight_off / 4u + row_idx * params.dim + col;
             let val_x = select(activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
@@ -1003,8 +1015,8 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             dot += val_x * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Block quant types via unified dispatch
-        let epb = QUANT_ELEMS[wt];
-        let bpb = QUANT_BYTES[wt];
+        let epb = QUANT_ELEMS[slot];
+        let bpb = QUANT_BYTES[slot];
         if (epb > 0u) {
             let total_blocks = params.dim / epb;
             let row_start_byte = weight_off + row_idx * total_blocks * bpb;
@@ -1015,7 +1027,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let val_x = select(activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
                                        temp_state[temp_base + params.ffn_dim * 2u + col],
                                        non_gated);
-                    dot += val_x * dequant_dispatch(wt, bb, e);
+                    dot += val_x * dequant_by_formula(slot, bb, e);
                 }
             }
         }
@@ -1057,16 +1069,16 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let weight_off = offsets.ffn_down;
 
-    let qt_down = params.quant_ffn_down;
+    let slot_down = params.formula_ffn_down;
 
-    if (qt_down == 1u) { // F16
+    if (slot_down == 1u) { // F16
         for (var col = 0u; col < ffn_dim; col++) {
             let w_byte = weight_off + (idx * ffn_dim + col) * 2u;
             let val_gate = temp_state[temp_base + col];
             let val_up   = temp_state[temp_base + ffn_dim + col];
             dot += (val_gate * val_up) * dequant_f16_at(w_byte);
         }
-    } else if (qt_down == 0u) { // F32
+    } else if (slot_down == 0u) { // F32
         for (var col = 0u; col < ffn_dim; col++) {
             let w_idx = weight_off / 4u + idx * ffn_dim + col;
             let val_gate = temp_state[temp_base + col];
@@ -1074,8 +1086,8 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
             dot += (val_gate * val_up) * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Block quant types via unified dispatch
-        let epb = QUANT_ELEMS[qt_down];
-        let bpb = QUANT_BYTES[qt_down];
+        let epb = QUANT_ELEMS[slot_down];
+        let bpb = QUANT_BYTES[slot_down];
         if (epb > 0u) {
             let total_blocks = ffn_dim / epb;
             let row_start_byte = weight_off + idx * total_blocks * bpb;
@@ -1085,7 +1097,7 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let col = b * epb + e;
                     let val_gate = temp_state[temp_base + col];
                     let val_up   = temp_state[temp_base + ffn_dim + col];
-                    dot += (val_gate * val_up) * dequant_dispatch(qt_down, bb, e);
+                    dot += (val_gate * val_up) * dequant_by_formula(slot_down, bb, e);
                 }
             }
         }

@@ -468,6 +468,12 @@ impl BindlessPipeline {
             batch_count: batch_size,
             q_weight_k: 0,
             k_weight_k: 0,
+            formula_qk: 0,
+            formula_v: 0,
+            formula_attn_out: 0,
+            formula_ffn_down: 0,
+            formula_ffn_gate: 0,
+            formula_ffn_up: 0,
         };
 
         // Adaptive QKV micro-batch chunk size.
@@ -596,6 +602,12 @@ impl BindlessPipeline {
                 quant_ffn_down: compiled.quant_ffn_down,
                 quant_ffn_gate: compiled.quant_ffn_gate,
                 quant_ffn_up: compiled.quant_ffn_up,
+                formula_qk: formula_index_for_ggml(compiled.quant_qk),
+                formula_v: formula_index_for_ggml(compiled.quant_v),
+                formula_attn_out: formula_index_for_ggml(compiled.quant_attn_out),
+                formula_ffn_down: formula_index_for_ggml(compiled.quant_ffn_down),
+                formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
+                formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
                 ..params_base
             };
             if spec.arch_string() == "qwen3" {
@@ -975,7 +987,7 @@ impl BindlessPipeline {
                 vocab_size,
                 dim,
                 weight_off: head_weight_off,
-                quant_type: head_quant_type,
+                formula_index: formula_index_for_ggml(head_quant_type),
                 softcap: spec.final_logit_softcap,
                 base_row: 0,
                 _pad: 0,
@@ -1402,7 +1414,7 @@ impl BindlessPipeline {
                                 vocab_size,
                                 dim,
                                 weight_off: head_weight_off,
-                                quant_type: head_quant_type,
+                                formula_index: formula_index_for_ggml(head_quant_type),
                                 softcap: spec.final_logit_softcap,
                                 base_row,
                                 _pad: 0,

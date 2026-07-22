@@ -1,6 +1,6 @@
 use airframe::backend::bindless::kv_cache::KVCache as GpuKvCache;
 use airframe::backend::bindless::loader::BindlessModel;
-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
+use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams, formula_index_for_ggml};
 use airframe::core::dequant::dequantize_q6_k;
 use airframe::core::dequant::{dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q8_0};
 use airframe::core::error::{LibshimmyError, Result};
@@ -384,6 +384,30 @@ async fn async_main() -> Result<()> {
         (cpu_layers, cpu_hidden)
     };
 
+    let q_qk = gpu_model
+        .metadata
+        .get_tensor_type("blk.0.attn_q.weight")
+        .unwrap_or(2);
+    let q_v = gpu_model
+        .metadata
+        .get_tensor_type("blk.0.attn_v.weight")
+        .unwrap_or(2);
+    let q_attn_out = gpu_model
+        .metadata
+        .get_tensor_type("blk.0.attn_output.weight")
+        .unwrap_or(2);
+    let q_ffn_down = gpu_model
+        .metadata
+        .get_tensor_type("blk.0.ffn_down.weight")
+        .unwrap_or(2);
+    let q_ffn_gate = gpu_model
+        .metadata
+        .get_tensor_type("blk.0.ffn_gate.weight")
+        .unwrap_or(2);
+    let q_ffn_up = gpu_model
+        .metadata
+        .get_tensor_type("blk.0.ffn_up.weight")
+        .unwrap_or(2);
     let layer_params = LayerParams {
         dim: spec.n_embd as u32,
         head_count: spec.n_head as u32,
@@ -393,30 +417,18 @@ async fn async_main() -> Result<()> {
         rms_eps: spec.rms_eps,
         ffn_dim: spec.ff_dim as u32,
         temp_stride: spec.temp_buffer_size as u32,
-        quant_qk: gpu_model
-            .metadata
-            .get_tensor_type("blk.0.attn_q.weight")
-            .unwrap_or(2),
-        quant_v: gpu_model
-            .metadata
-            .get_tensor_type("blk.0.attn_v.weight")
-            .unwrap_or(2),
-        quant_attn_out: gpu_model
-            .metadata
-            .get_tensor_type("blk.0.attn_output.weight")
-            .unwrap_or(2),
-        quant_ffn_down: gpu_model
-            .metadata
-            .get_tensor_type("blk.0.ffn_down.weight")
-            .unwrap_or(2),
-        quant_ffn_gate: gpu_model
-            .metadata
-            .get_tensor_type("blk.0.ffn_gate.weight")
-            .unwrap_or(2),
-        quant_ffn_up: gpu_model
-            .metadata
-            .get_tensor_type("blk.0.ffn_up.weight")
-            .unwrap_or(2),
+        quant_qk: q_qk,
+        quant_v: q_v,
+        quant_attn_out: q_attn_out,
+        quant_ffn_down: q_ffn_down,
+        quant_ffn_gate: q_ffn_gate,
+        quant_ffn_up: q_ffn_up,
+        formula_qk: formula_index_for_ggml(q_qk),
+        formula_v: formula_index_for_ggml(q_v),
+        formula_attn_out: formula_index_for_ggml(q_attn_out),
+        formula_ffn_down: formula_index_for_ggml(q_ffn_down),
+        formula_ffn_gate: formula_index_for_ggml(q_ffn_gate),
+        formula_ffn_up: formula_index_for_ggml(q_ffn_up),
         attn_logit_softcap: 0.0,
         post_norm_enabled: 0,
         qk_norm_enabled: 0,

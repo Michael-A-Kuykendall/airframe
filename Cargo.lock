@@ -25,6 +25,7 @@ dependencies = [
  "lazy_static",
  "libfse",
  "memmap2",
+ "naga",
  "pollster",
  "schoolmarm",
  "serde",

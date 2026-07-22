@@ -18,7 +18,7 @@
 struct DequantAnyParams {
     offset_bytes: u32,  // Absolute byte offset of tensor in gguf_blob
     count: u32,         // Number of f32 elements to produce
-    quant_type: u32,    // GGML type (see above)
+    formula_index: u32, // B1 registry slot (0..7) — shader switches on this, not raw GGML type
     pad: u32,
 };
 
@@ -216,31 +216,31 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
     if (i >= params.count) { return; }
 
-    let qt  = params.quant_type;
+    let slot = params.formula_index;
     let off = params.offset_bytes;
     var val: f32;
 
-    if (qt == 14u) { // Q6_K — 256-elem superblocks, 210 bytes
+    if (slot == 7u) { // Q6_K — 256-elem superblocks, 210 bytes
         let b = i / 256u;
         let e = i % 256u;
         val = dequant_q6k_elem(off + b * 210u, e);
-    } else if (qt == 13u) { // Q5_K — 256-elem superblocks, 176 bytes
+    } else if (slot == 6u) { // Q5_K — 256-elem superblocks, 176 bytes
         let b = i / 256u;
         let e = i % 256u;
         val = dequant_q5k_elem(off + b * 176u, e);
-    } else if (qt == 12u) { // Q4_K — 256-elem superblocks, 144 bytes
+    } else if (slot == 5u) { // Q4_K — 256-elem superblocks, 144 bytes
         let b = i / 256u;
         let e = i % 256u;
         val = dequant_q4k_elem(off + b * 144u, e);
-    } else if (qt == 8u) { // Q8_0 — 32-elem blocks, 34 bytes
+    } else if (slot == 4u) { // Q8_0 — 32-elem blocks, 34 bytes
         let b = i / 32u;
         let e = i % 32u;
         val = dequant_q8_0_elem(off + b * 34u, e);
-    } else if (qt == 1u) { // F16 — 2 bytes per element
+    } else if (slot == 1u) { // F16 — 2 bytes per element
         val = dequant_f16_at(off + i * 2u);
-    } else if (qt == 0u) { // F32 — 4 bytes per element
+    } else if (slot == 0u) { // F32 — 4 bytes per element
         val = bitcast<f32>(read_blob((off / 4u) + i));
-    } else { // Q4_0 (qt == 2) and fallback — 32-elem blocks, 18 bytes
+    } else { // Q4_0 (slot == 2) and fallback — 32-elem blocks, 18 bytes
         let b = i / 32u;
         let e = i % 32u;
         val = dequant_q4_0_elem(off + b * 18u, e);

@@ -34,7 +34,9 @@ struct HeadBlobParams {
     vocab_size: u32,   // number of output tokens (rows of output.weight)
     dim:        u32,   // hidden dim (columns of output.weight = n_embd)
     weight_off: u32,   // word offset (byte_offset / 4) of output.weight inside the GGUF blob
-    quant_type: u32,   // GGML quant type: 0=F32 1=F16 2=Q4_0 8=Q8_0 12=Q4_K 13=Q5_K 14=Q6_K
+    // B3b: formula_index slot (0..7) the shader switches on — dispatch decision
+    // lives in Rust B1 registry (Golden Rule 3). Formerly `quant_type` (GGML type).
+    formula_index: u32,
     softcap:    f32,   // final_logit_softcap (0.0 = disabled, Gemma-2 uses 30.0)
     base_row:   u32,   // output row offset for dispatch splitting (TDR tiles)
     _pad:       u32,
@@ -228,24 +230,27 @@ fn dequant_q4_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
-// Quant block metadata — indexed by GGML quant type code.
+// Quant block metadata — indexed by B1 formula slot (0..7):
+//   0=F32, 1=F16, 2=Q4_0, 3=Q5_0, 4=Q8_0, 5=Q4_K, 6=Q5_K, 7=Q6_K.
 // ---------------------------------------------------------------------------
-const QUANT_ELEMS: array<u32, 16> = array<u32, 16>(
-    0, 0, 32, 0, 0, 0, 32, 0, 32, 0, 0, 0, 256, 256, 256, 0);
-const QUANT_BYTES: array<u32, 16> = array<u32, 16>(
-    0, 0, 18, 0, 0, 0, 22, 0, 34, 0, 0, 0, 144, 176, 210, 0);
+const QUANT_ELEMS: array<u32, 8> = array<u32, 8>(
+    0, 0, 32, 32, 32, 256, 256, 256);
+const QUANT_BYTES: array<u32, 8> = array<u32, 8>(
+    0, 0, 18, 22, 34, 144, 176, 210);
 
 // ---------------------------------------------------------------------------
-// Unified dequant dispatch — all quant type branches in one function.
+// B3b: formula-index dispatch — replaces the if/then ladder.
 // ---------------------------------------------------------------------------
-fn dequant_dispatch(qt: u32, block_base_byte: u32, elem_in_block: u32) -> f32 {
-    if (qt == 14u) { return dequant_q6k_elem(block_base_byte, elem_in_block); }
-    else if (qt == 13u) { return dequant_q5k_elem(block_base_byte, elem_in_block); }
-    else if (qt == 12u) { return dequant_q4k_elem(block_base_byte, elem_in_block); }
-    else if (qt == 6u)  { return dequant_q5_0_elem(block_base_byte, elem_in_block); }
-    else if (qt == 8u)  { return dequant_q8_0_elem(block_base_byte, elem_in_block); }
-    else if (qt == 2u)  { return dequant_q4_0_elem(block_base_byte, elem_in_block); }
-    else { return 0.0; }
+fn dequant_by_formula(slot: u32, block_base_byte: u32, elem_in_block: u32) -> f32 {
+    switch (slot) {
+        case 2u: { return dequant_q4_0_elem(block_base_byte, elem_in_block); }
+        case 3u: { return dequant_q5_0_elem(block_base_byte, elem_in_block); }
+        case 4u: { return dequant_q8_0_elem(block_base_byte, elem_in_block); }
+        case 5u: { return dequant_q4k_elem(block_base_byte, elem_in_block); }
+        case 6u: { return dequant_q5k_elem(block_base_byte, elem_in_block); }
+        case 7u: { return dequant_q6k_elem(block_base_byte, elem_in_block); }
+        default: { return 0.0; }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -259,26 +264,27 @@ fn main_lm_head(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let dim = params.dim;
     var dot = 0.0f;
 
-    if (params.quant_type == 1u) { // F16
+    let slot = params.formula_index;
+
+    if (slot == 1u) { // F16
         for (var col = 0u; col < dim; col++) {
             let w_byte = (idx * dim + col) * 2u;
             dot += act_in[col] * dequant_f16_at(w_byte);
         }
-    } else if (params.quant_type == 0u) { // F32
+    } else if (slot == 0u) { // F32
         for (var col = 0u; col < dim; col++) {
             dot += act_in[col] * bitcast<f32>(read_wt_blob(idx * dim + col));
         }
     } else { // Block quant types via unified dispatch
-        let qt = params.quant_type;
-        let epb = QUANT_ELEMS[qt];
-        let bpb = QUANT_BYTES[qt];
+        let epb = QUANT_ELEMS[slot];
+        let bpb = QUANT_BYTES[slot];
         if (epb > 0u) {
             let total_blocks = dim / epb;
             let row_start = idx * total_blocks * bpb;
             for (var b = 0u; b < total_blocks; b++) {
                 let bb = row_start + b * bpb;
                 for (var e = 0u; e < epb; e++) {
-                    dot += act_in[b * epb + e] * dequant_dispatch(qt, bb, e);
+                    dot += act_in[b * epb + e] * dequant_by_formula(slot, bb, e);
                 }
             }
         }

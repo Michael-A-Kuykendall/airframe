@@ -1254,6 +1254,6 @@ pub fn fse_control_from_patterns(
 }
 
 /// Create a trace callback (stub — trace not yet wired).
-pub fn trace_callback(trace_path: &str) -> Option<Box<dyn FnMut(usize, &[f32], f64) + Send>> {
+pub fn trace_callback(_trace_path: &str) -> Option<Box<dyn FnMut(usize, &[f32], f64) + Send>> {
     None
 }

@@ -4,7 +4,7 @@
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::metadata::BindlessMetadata;
-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams};
+use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, formula_index_for_ggml};
 use serde::Serialize;
 use shimmytok::Tokenizer;
 use std::fs::File;
@@ -195,6 +195,12 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         quant_ffn_down: 0,
         quant_ffn_gate: 0,
         quant_ffn_up: 0,
+        formula_qk: 0,
+        formula_v: 0,
+        formula_attn_out: 0,
+        formula_ffn_down: 0,
+        formula_ffn_gate: 0,
+        formula_ffn_up: 0,
         attn_logit_softcap: spec.attn_logit_softcap,
         post_norm_enabled: spec.post_norm_enabled as u32,
         qk_norm_enabled: spec.has_qk_norm as u32,
@@ -266,6 +272,12 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             quant_ffn_down: compiled.quant_ffn_down,
             quant_ffn_gate: compiled.quant_ffn_gate,
             quant_ffn_up: compiled.quant_ffn_up,
+            formula_qk: formula_index_for_ggml(compiled.quant_qk),
+            formula_v: formula_index_for_ggml(compiled.quant_v),
+            formula_attn_out: formula_index_for_ggml(compiled.quant_attn_out),
+            formula_ffn_down: formula_index_for_ggml(compiled.quant_ffn_down),
+            formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
+            formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
             ..layer_params_base
         };
 

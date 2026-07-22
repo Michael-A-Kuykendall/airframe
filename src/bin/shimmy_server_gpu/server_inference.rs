@@ -6,7 +6,7 @@
 use super::*;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
-use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams};
+use airframe::backend::bindless::pipeline::{BindlessPipeline, LayerParams, RMSNormParams, formula_index_for_ggml};
 use airframe::control::{ControlDecision, InferenceControl, InferenceEvent};
 use airframe::core::routing::ModelRoutePlan;
 use airframe::core::spec::ModelSpec;
@@ -647,6 +647,12 @@ fn run_inference_completion(
         quant_ffn_down: (packed_quant_type >> 16) & 0xFF,
         quant_ffn_gate: (packed_quant_type >> 24) & 0xFF,
         quant_ffn_up: (packed_quant_type >> 24) & 0xFF,
+        formula_qk: formula_index_for_ggml(packed_quant_type & 0xFF),
+        formula_v: formula_index_for_ggml((packed_quant_type >> 8) & 0xFF),
+        formula_attn_out: formula_index_for_ggml((packed_quant_type >> 24) & 0xFF),
+        formula_ffn_down: formula_index_for_ggml((packed_quant_type >> 16) & 0xFF),
+        formula_ffn_gate: formula_index_for_ggml((packed_quant_type >> 24) & 0xFF),
+        formula_ffn_up: formula_index_for_ggml((packed_quant_type >> 24) & 0xFF),
         attn_logit_softcap: spec.attn_logit_softcap,
         post_norm_enabled: spec.post_norm_enabled as u32,
         qk_norm_enabled: spec.has_qk_norm as u32,

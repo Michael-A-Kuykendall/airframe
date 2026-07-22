@@ -288,7 +288,7 @@ impl BindlessPipeline {
         let params = DequantAnyParams {
             offset_bytes,
             count,
-            quant_type,
+            formula_index: formula_index_for_ggml(quant_type),
             pad: 0,
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -384,7 +384,7 @@ impl BindlessPipeline {
         let params = DequantAnyParams {
             offset_bytes,
             count,
-            quant_type,
+            formula_index: formula_index_for_ggml(quant_type),
             pad: 0,
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

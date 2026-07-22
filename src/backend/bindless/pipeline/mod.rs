@@ -23,7 +23,7 @@ pub struct DequantParams {
 pub struct DequantAnyParams {
     pub offset_bytes: u32,
     pub count: u32,
-    pub quant_type: u32,
+    pub formula_index: u32, // B3b registry slot (0..7); dispatch decision made in Rust B1 registry
     pub pad: u32,
 }
 
@@ -104,6 +104,46 @@ pub struct LayerParams {
     pub q_weight_k: u32,
     /// Stored K for attn_k.weight (packed case)
     pub k_weight_k: u32,
+    /// Registry-derived dispatch slot for attn_q / attn_k (B1 formula index).
+    /// The shader switches on this instead of re-deriving quant→formula.
+    pub formula_qk: u32,
+    /// Registry-derived dispatch slot for attn_v.
+    pub formula_v: u32,
+    /// Registry-derived dispatch slot for attn_output.
+    pub formula_attn_out: u32,
+    /// Registry-derived dispatch slot for ffn_down.
+    pub formula_ffn_down: u32,
+    /// Registry-derived dispatch slot for ffn_gate.
+    pub formula_ffn_gate: u32,
+    /// Registry-derived dispatch slot for ffn_up.
+    pub formula_ffn_up: u32,
+}
+
+/// Map a raw GGML quant type id to the B1 formula-index slot the shaders
+/// consume. Under `isf` this is the canonical `airframe_observe::quant_formula`
+/// registry (single source of truth); otherwise a thin mirror of the same 8
+/// values so the always-built bindless pipeline stays consistent.
+///
+/// Slot assignment (must match `airframe_observe::quant_formula::FormulaSlot`):
+/// F32=0 F16=1 Q4_0=2 Q5_0=3 Q8_0=4 Q4_K=5 Q5_K=6 Q6_K=7.
+#[cfg(feature = "isf")]
+pub fn formula_index_for_ggml(type_id: u32) -> u32 {
+    airframe_observe::quant_formula::slot_for_type(type_id).map_or(0, |s| s.as_u32())
+}
+
+#[cfg(not(feature = "isf"))]
+pub fn formula_index_for_ggml(type_id: u32) -> u32 {
+    match type_id {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        6 => 3,
+        8 => 4,
+        12 => 5,
+        13 => 6,
+        14 => 7,
+        _ => 0,
+    }
 }
 
 /// Uniform params for the quantize_kv.wgsl dispatch (TurboQuant).
@@ -135,7 +175,7 @@ pub struct HeadBlobParams {
     pub vocab_size: u32, // rows of output.weight (= n_vocab)
     pub dim: u32,        // cols of output.weight (= n_embd)
     pub weight_off: u32, // word offset (byte_offset / 4) of output.weight inside the GGUF blob
-    pub quant_type: u32, // GGML type: 0=F32 1=F16 2=Q4_0 8=Q8_0 12=Q4_K 13=Q5_K 14=Q6_K
+    pub formula_index: u32, // B3b registry slot (0..7); dispatch decision made in Rust B1 registry (Golden Rule 3)
     pub softcap: f32,    // final_logit_softcap (0.0 = disabled)
     pub base_row: u32,   // output row offset for dispatch splitting (TDR tiles)
     pub _pad: u32,
