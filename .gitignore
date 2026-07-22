@@ -95,3 +95,6 @@ target/release/[a-z0-9]*all_sessions_export.json
 # opencode session logs (not part of hotfix release changes)
 session.json
 session_ses_*.json
+
+# candle_probe build output — never commit (large .rlib files exceed GitHub 100MB limit)
+crates/candle_probe/target/
