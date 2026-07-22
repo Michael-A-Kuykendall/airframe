@@ -58,6 +58,9 @@ pub mod plan;
 pub mod quant_formula;
 pub mod session;
 
+// Vault loading: reads JSON seed files from vault/seeds/
+pub mod vault;
+
 // Private experimentation / tuning surface (Saturation Fabric, TDR, beads integration).
 // Not re-exported publicly. Use only from within airframe crate.
 mod internal;

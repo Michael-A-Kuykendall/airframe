@@ -230,6 +230,36 @@ pub enum InferenceFact {
         formula_index: u32,
         offset: u64,
     },
+
+    // ── Tier 1: Vault reference facts (V1) ─────────────────────────────────
+    /// Reference oracle from the golden vault for a given model/layer/position.
+    /// Loaded from vault.duckdb on startup. Certification rules compare live
+    /// LayerOutput facts against these VaultOracle facts.
+    VaultOracle {
+        model_id: u32,
+        layer_idx: i32,
+        position: u32,
+        expected_rms_bits: u32,
+        checksum: i64,
+    },
+
+    // ── Tier 2: Certification results (V2) ─────────────────────────────────
+    /// Layer output matches vault reference within tolerance.
+    CertificationPass {
+        layer_idx: u32,
+        position: u32,
+        rms_delta_bits: u32,
+    },
+
+    /// Layer output diverges from vault reference — RMS delta exceeds threshold.
+    CertificationFail {
+        layer_idx: u32,
+        position: u32,
+        rms_delta_bits: u32,
+        observed_rms_bits: u32,
+        expected_rms_bits: u32,
+        checksum_match: bool,
+    },
 }
 
 /// Discriminant constants for alpha indexing.
@@ -248,6 +278,12 @@ pub const KEY_TDR_RISK_HIGH: u64 = 11;
 pub const KEY_TENSOR_FACT: u64 = 20;
 pub const KEY_DISPATCH_FACT: u64 = 21;
 pub const KEY_DISPATCH_COMPLETED: u64 = 18;
+
+// Vault reference facts (V1)
+pub const KEY_VAULT_ORACLE: u64 = 22;
+// Certification results (V2)
+pub const KEY_CERT_PASS: u64 = 23;
+pub const KEY_CERT_FAIL: u64 = 24;
 // ISF: Inference Saturation Fabric keys
 pub const KEY_PROMPT_TOKEN: u64 = 12;
 pub const KEY_EMBEDDING_READY: u64 = 13;
@@ -291,6 +327,11 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::TriggerCandleCompare { .. } => None,
         InferenceFact::YieldNow { .. } => None,
         InferenceFact::GenerationHalt { .. } => None,
+        // Vault reference facts
+        InferenceFact::VaultOracle { .. } => Some(AlphaKey(KEY_VAULT_ORACLE)),
+        // Tier 2 certification results
+        InferenceFact::CertificationPass { .. } => Some(AlphaKey(KEY_CERT_PASS)),
+        InferenceFact::CertificationFail { .. } => Some(AlphaKey(KEY_CERT_FAIL)),
     }
 }
 
