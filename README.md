@@ -4,6 +4,7 @@
   ### Pure-Rust WebGPU Inference Engine for GGUF Models
 
   [![Crates.io](https://img.shields.io/crates/v/airframe.svg)](https://crates.io/crates/airframe)
+  [![CI](https://github.com/Michael-A-Kuykendall/airframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Michael-A-Kuykendall/airframe/actions/workflows/ci.yml)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
   [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://rustup.rs/)
   [![GitHub Stars](https://img.shields.io/github/stars/Michael-A-Kuykendall/airframe?style=social)](https://github.com/Michael-A-Kuykendall/airframe/stargazers)
