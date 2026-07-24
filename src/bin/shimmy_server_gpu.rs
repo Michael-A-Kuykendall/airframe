@@ -5,12 +5,14 @@ use aho_corasick::AhoCorasick;
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::BindlessPipeline;
+use airframe::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use airframe::core::dequant::{
     dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0,
 };
 use airframe::core::model::GgufTensorInfo;
 use airframe::core::routing::ModelRoutePlan;
 use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
+use airframe::runtime::gpu::{GpuRuntime, SamplingParams};
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
@@ -932,6 +934,51 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("[ROUTE_CHECK_FAIL] {}", err);
         return Err(err.into());
     }
+
+    // ── Construct a unified GpuRuntime from the manually-loaded pieces ──
+    // This replaces the hand-rolled 1770-line decode loop with
+    // GpuRuntime::generate() — the same ISF fabric path shimmy uses.
+    let shift_pipeline = RopeShiftPipeline::new(&device);
+    let output_head_f32 = GpuRuntime::load_output_head_f32(
+        &model_path, &gpu_model, &device, &spec,
+    ).map_err(|e| format!("output_head: {}", e))?;
+    let embd_weight_offset = gpu_model
+        .metadata
+        .get_tensor_offset("token_embd.weight")
+        .unwrap_or(0);
+    let embd_quant_type = gpu_model
+        .metadata
+        .get_tensor_type("token_embd.weight")
+        .unwrap_or(0);
+    let row_bytes: u64 = match embd_quant_type {
+        0 | 1 => spec.n_embd as u64 * 4 / if embd_quant_type == 1 { 2 } else { 1 },
+        2 | 3 | 7 => spec.n_embd as u64 / 2,
+        6 => (spec.n_embd as u64 * 5 + 7) / 8,
+        8 | 9 => spec.n_embd as u64,
+        _ => spec.n_embd as u64 * 4,
+    };
+    let eos_token = tokenizer.eos_token();
+    let im_end_token: Option<u32> = tokenizer
+        .encode("<|im_end|>", false)
+        .ok()
+        .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None });
+    let generate_rt = Arc::new(GpuRuntime::from_parts(
+        device,
+        queue,
+        gpu_model,
+        pipeline,
+        shift_pipeline,
+        Arc::new(tokenizer),
+        spec,
+        output_head_f32,
+        Arc::clone(&kv_cache),
+        embd_weight_offset,
+        row_bytes,
+        embd_quant_type,
+        eos_token,
+        im_end_token,
+    ));
+
     let models_for_http = Arc::clone(&discovered_models);
     let kv_quant_int4_for_http = kv_quant_int4;
     tokio::spawn(async move {
@@ -995,7 +1042,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let task_type = job.req.task.clone().unwrap_or_else(|| "story".to_string());
-        let result = if task_type == "wikitext2" || task_type == "lambada" {
+        let result: Result<InferenceResponse, String> = if task_type == "wikitext2" || task_type == "lambada" {
             eprintln!("[GPU Worker] Running eval task: {}", task_type);
             let _target_bin = "shimmy_eval";
             let cmd = format!("source ~/.cargo/env && cargo run -p shimmy_eval --bin shimmy_eval --release -- --model /opt/repro-arena/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -t {} --limit 3000", task_type);
@@ -1034,28 +1081,41 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => Err(format!("Failed to run eval: {}", e).into()),
             }
         } else {
-            let mut inference_req = job.req;
-            // Only substitute the story seed when no prompt was provided AND
-            // this is not a chat-completion job (which always sets a prompt).
-            if inference_req.prompt.is_none() && inference_req.task.as_deref() != Some("chat") {
-                inference_req.prompt = Some("Once upon a time".to_string());
+            let inference_req = job.req;
+
+            let params = SamplingParams {
+                temperature: inference_req.temperature.unwrap_or(0.8),
+                top_p: inference_req.top_p.unwrap_or(0.95),
+                repetition_penalty: inference_req.repetition_penalty.unwrap_or(1.1),
+                max_tokens: inference_req.max_tokens.unwrap_or(64),
+                seed: inference_req.seed.unwrap_or(42),
+                extra_stop_tokens: vec![],
+            };
+
+            match generate_rt.generate(
+                inference_req.prompt.as_deref().unwrap_or("Hello"),
+                &params,
+                None,
+                None,
+                None,
+                None,
+            ) {
+                Ok(text) => Ok(InferenceResponse {
+                    text,
+                    stop_reason: "eos".to_string(),
+                    tokens_generated: params.max_tokens,
+                    metrics_violation: None,
+                    final_ppl: None,
+                    accuracy: None,
+                    policy_status: None,
+                    policy_reason: None,
+                    candidate_text: None,
+                    debug_raw_text: None,
+                    debug_sanitizer_reason: None,
+                    debug_trace_path: None,
+                }),
+                Err(e) => Err(format!("generate failed: {}", e).into()),
             }
-            server_inference::process_inference_job(
-                job_id_clone.clone(),
-                job_states.clone(),
-                session_states_clone,
-                stream_tx,
-                inference_req,
-                &device,
-                &queue,
-                &gpu_model,
-                &pipeline,
-                &tokenizer,
-                &spec,
-                cache_clone,
-                &embd_table_cpu,
-            )
-            .await
         };
 
         let mut st = job_states.lock().unwrap();

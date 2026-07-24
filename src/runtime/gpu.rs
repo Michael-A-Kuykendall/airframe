@@ -805,7 +805,7 @@ impl GpuRuntime {
         )
     }
 
-    fn load_output_head_f32(
+    pub fn load_output_head_f32(
         model_path: &str,
         gpu_model: &BindlessModel,
         device: &wgpu::Device,
