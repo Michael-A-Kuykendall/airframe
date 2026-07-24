@@ -65,11 +65,6 @@ path = "src/bin/layer_dump_gpu.rs"
 required-features = ["isf"]
 
 [[bin]]
-name = "vault_seed"
-path = "src/bin/vault_seed.rs"
-required-features = ["isf"]
-
-[[bin]]
 name = "invariant_probe"
 path = "src/bin/invariant_probe.rs"
 required-features = ["isf"]
