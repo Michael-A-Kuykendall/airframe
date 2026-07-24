@@ -395,6 +395,10 @@ impl InferenceSaturationFabric {
                     let logits_nans = logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
                     eprintln!("[ISF-RULE] GPU prefill done in {:.2}s — hidden_rms={:.4} logits_max={:.3} logits_nans={}/{}", 
                         elapsed_ms as f32 / 1000.0, hidden_rms, logits_max, logits_nans, logits.len());
+                    // G2 observability: compute RMS/checksum while the buffers still live.
+                    let hidden_checksum = crate::facts::checksum(&hidden);
+                    let logits_rms = crate::facts::rms(&logits);
+                    let logits_checksum = crate::facts::checksum(&logits);
                     // Increment KV cache once per prompt token
                     for _ in 0..*token_count {
                         kv_inc();
@@ -406,11 +410,22 @@ impl InferenceSaturationFabric {
                         let mut s = state_ref.lock().unwrap();
                         s.logits = logits;
                     }
-                    // Emit DispatchCompleted fact for TDR accounting (Rule 6 picks it up)
+                    // Emit completion facts + G2 observability (LayerOutput + FinalLogits).
                     vec![
                         InferenceFact::PrefillComplete { position: *token_count },
+                        InferenceFact::LayerOutput {
+                            layer_idx: 0, // final hidden state after all layers
+                            position: *token_count,
+                            rms_bits: crate::facts::f32_to_bits(hidden_rms),
+                            checksum: hidden_checksum,
+                        },
+                        InferenceFact::FinalLogits {
+                            position: *token_count,
+                            rms_bits: crate::facts::f32_to_bits(logits_rms),
+                            checksum: logits_checksum,
+                        },
                         InferenceFact::DispatchCompleted {
-                            layer: 0, // prefill spans all layers — use 0 as sentinel
+                            layer: 0,
                             kernel: crate::facts::KernelKind::FullLayer,
                             elapsed_ms,
                         },
@@ -544,6 +559,9 @@ impl InferenceSaturationFabric {
                             }
                         }
                     }
+                    // G2 observability: snap post-mask logits RMS/checksum before sampling.
+                    let decode_logits_rms = crate::facts::rms(&logits);
+                    let decode_logits_checksum = crate::facts::checksum(&logits);
                     // Sample next token with repetition penalty from recent history
                     let mut next_token = {
                         let recent = {
@@ -622,8 +640,13 @@ impl InferenceSaturationFabric {
                             step: step + 1,
                             token_id: next_token,
                         },
+                        InferenceFact::FinalLogits {
+                            position: current_pos,
+                            rms_bits: crate::facts::f32_to_bits(decode_logits_rms),
+                            checksum: decode_logits_checksum,
+                        },
                         InferenceFact::DispatchCompleted {
-                            layer: current_pos, // decode position as layer proxy
+                            layer: current_pos,
                             kernel: crate::facts::KernelKind::FullLayer,
                             elapsed_ms,
                         },
