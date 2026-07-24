@@ -27,6 +27,32 @@ pub fn d0_run_budget() -> RunBudget {
     RunBudget::default()
 }
 
+/// Decision returned by an `IsfControlHook`.
+///
+/// Mirrors airframe's `ControlDecision` so the fabric (which must NOT depend on
+/// the airframe crate) can apply grammar/FSE/math-bypass gates without coupling.
+/// `airframe` translates its `InferenceControl::intervene` result into this enum
+/// at the `generate_isf` boundary.
+#[derive(Clone, Debug)]
+pub enum IsfControlDecision {
+    Allow,
+    ForceToken(usize),
+    EarlyExit,
+    Block(String),
+}
+
+/// Post-sample control hook. Airframe wraps its `InferenceControl` in a closure
+/// of this shape: `(candidate_token, accumulated_text, step, full_token_sequence,
+/// kv_len) -> IsfControlDecision`. Token sequences are `u32` (GGUF vocab ids).
+pub type IsfControlHook =
+    dyn Fn(usize, &str, usize, &[u32], usize) -> IsfControlDecision + Send + Sync;
+
+/// Pre-sample logits mask (e.g. grammar allowed-token masking).
+pub type IsfMaskHook = dyn Fn(&mut [f32]) + Send + Sync;
+
+/// Per-step trace callback: `(step, sampled_logits, elapsed_ms)`.
+pub type IsfTraceHook = dyn FnMut(usize, &[f32], f64) + Send;
+
 /// B3a dispatch rule: TensorFact → DispatchFact.
 ///
 /// Given a `TensorFact` (structural control-plane fact from the GGUF header,
@@ -93,6 +119,19 @@ pub struct ISFState {
     pub on_token: Option<Box<dyn FnMut(&str) + Send>>,
     /// Recent tokens for repetition penalty (last 64 tokens generated)
     pub recent_tokens: Vec<u32>,
+    /// Pre-sample logits mask hook (grammar allowed-token masking). Applied to
+    /// logits just before `sample_fn`. None = no masking.
+    pub mask: Option<Arc<IsfMaskHook>>,
+    /// Post-sample control hook (grammar/FSE/math-bypass). Applied after
+    /// `sample_fn`; may force/early-exit/block the candidate token. None = no gate.
+    pub control: Option<Arc<IsfControlHook>>,
+    /// Per-step trace callback (step, post-mask logits, elapsed_ms).
+    pub trace: Option<Arc<Mutex<Box<IsfTraceHook>>>>,
+    /// Set when a control hook returns `Block` — surfaced as an error by the caller.
+    pub block_reason: Option<String>,
+    /// Full token sequence (prompt + generated so far). Fed to control hooks as
+    /// the `tokens` argument. Seeded with prompt ids at generate() time.
+    pub all_token_ids: Vec<u32>,
     /// TDR budget state — accumulated GPU time since last yield (ms).
     /// Rules emit DispatchTiming facts; when accumulated >= budget, a yield is needed.
     /// The actual yield (wgpu submit+poll) happens in the closure that emits the fact.
@@ -151,6 +190,11 @@ impl ISFState {
             embedding_cache: std::collections::HashMap::new(),
             prompt_token_ids: Vec::new(),
             recent_tokens: Vec::new(),
+            mask: None,
+            control: None,
+            trace: None,
+            block_reason: None,
+            all_token_ids: Vec::new(),
         }
     }
 
@@ -384,20 +428,44 @@ impl InferenceSaturationFabric {
             let sample = sample_fn.clone();
             let decode = decode_fn.clone();
             program.register(AlphaKey(KEY_PREFILL_COMPLETE), move |_fact, _store| {
-                let (token_id, halt, logits_len, logits_max, logits_nans) = {
-                    let mut s = state_ref.lock().unwrap();
-                    let logits_len = s.logits.len();
-                    let logits_max = s.logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                    let logits_nans = s.logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
-                    let recent = s.recent_tokens.clone();
-                    let token_id = sample(&mut s.logits, &recent);
-                    // Track for repetition penalty
-                    s.recent_tokens.push(token_id);
-                    if s.recent_tokens.len() > 64 { s.recent_tokens.remove(0); }
-                    let halt = token_id == s.eos_token
-                        || s.extra_stop_ids.contains(&token_id);
-                    (token_id, halt, logits_len, logits_max, logits_nans)
-                };
+            let (token_id, halt, logits_len, logits_max, logits_nans) = {
+                let mut s = state_ref.lock().unwrap();
+                // Pre-sample mask (grammar allowed-token masking)
+                if let Some(m) = s.mask.clone() {
+                    (m)(&mut s.logits);
+                }
+                let logits_len = s.logits.len();
+                let logits_max = s.logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let logits_nans = s.logits.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
+                let recent = s.recent_tokens.clone();
+                let mut token_id = sample(&mut s.logits, &recent);
+                // Post-sample control decision (immutable read; may not mutate yet)
+                let decision = s.control.as_ref().map(|c| {
+                    c(token_id as usize, &s.generated_text, 0usize, &s.all_token_ids, s.prompt_len as usize)
+                });
+                if let Some(d) = decision {
+                    match d {
+                        IsfControlDecision::Allow => {}
+                        IsfControlDecision::ForceToken(t) => token_id = t as u32,
+                        IsfControlDecision::EarlyExit => {
+                            s.halt = Some(HaltReason::ControlHalt);
+                            return vec![InferenceFact::GenerationHalt { reason: HaltReason::ControlHalt }];
+                        }
+                        IsfControlDecision::Block(r) => {
+                            s.block_reason = Some(r);
+                            s.halt = Some(HaltReason::ControlHalt);
+                            return vec![InferenceFact::GenerationHalt { reason: HaltReason::ControlHalt }];
+                        }
+                    }
+                }
+                // Track for repetition penalty + full sequence
+                s.recent_tokens.push(token_id);
+                if s.recent_tokens.len() > 64 { s.recent_tokens.remove(0); }
+                s.all_token_ids.push(token_id);
+                let halt = token_id == s.eos_token
+                    || s.extra_stop_ids.contains(&token_id);
+                (token_id, halt, logits_len, logits_max, logits_nans)
+            };
 
                 eprintln!("[ISF-R4] PrefillComplete: logits_len={} max={:.3} nans={} first_token_id={} halt={}",
                     logits_len, logits_max, logits_nans, token_id, halt);
@@ -464,14 +532,51 @@ impl InferenceSaturationFabric {
                         return vec![InferenceFact::GenerationHalt { reason: HaltReason::MaxTokensReached }];
                     }
 
+                    // Pre-sample mask (grammar) + trace, then sample.
+                    {
+                        let s = state_ref.lock().unwrap();
+                        if let Some(m) = s.mask.clone() {
+                            (m)(&mut logits);
+                        }
+                        if let Some(trace) = &s.trace {
+                            if let Ok(mut t) = trace.lock() {
+                                t(*step as usize, &logits, elapsed_ms as f64);
+                            }
+                        }
+                    }
                     // Sample next token with repetition penalty from recent history
-                    let next_token = {
+                    let mut next_token = {
                         let recent = {
                             let s = state_ref.lock().unwrap();
                             s.recent_tokens.clone()
                         };
                         sample(&mut logits, &recent)
                     };
+
+                    // Post-sample control (grammar/FSE/math-bypass)
+                    let decision = {
+                        let s = state_ref.lock().unwrap();
+                        s.control.as_ref().map(|c| {
+                            c(next_token as usize, &s.generated_text, *step as usize, &s.all_token_ids, (s.prompt_len + *step) as usize)
+                        })
+                    };
+                    if let Some(d) = decision {
+                        match d {
+                            IsfControlDecision::Allow => {}
+                            IsfControlDecision::ForceToken(t) => next_token = t as u32,
+                            IsfControlDecision::EarlyExit => {
+                                let mut s = state_ref.lock().unwrap();
+                                s.halt = Some(HaltReason::ControlHalt);
+                                return vec![InferenceFact::GenerationHalt { reason: HaltReason::ControlHalt }];
+                            }
+                            IsfControlDecision::Block(r) => {
+                                let mut s = state_ref.lock().unwrap();
+                                s.block_reason = Some(r);
+                                s.halt = Some(HaltReason::ControlHalt);
+                                return vec![InferenceFact::GenerationHalt { reason: HaltReason::ControlHalt }];
+                            }
+                        }
+                    }
 
                     // Check halt conditions
                     let (halt, halt_reason) = {
@@ -501,9 +606,10 @@ impl InferenceSaturationFabric {
                         let mut s = state_ref.lock().unwrap();
                         s.generated_text.push_str(&piece);
                         s.logits = logits;
-                        // Track recent tokens for repetition penalty
+                        // Track recent tokens for repetition penalty + full sequence
                         s.recent_tokens.push(next_token);
                         if s.recent_tokens.len() > 64 { s.recent_tokens.remove(0); }
+                        s.all_token_ids.push(next_token);
                         if let Some(cb) = s.on_token.as_mut() {
                             cb(&piece);
                         }
@@ -704,6 +810,197 @@ mod tests {
         assert!(
             tensor_fact_dispatch_rule(&tf_bad, &FactStore::new()).is_empty(),
             "unsupported quant type must emit no DispatchFact"
+        );
+    }
+
+    /// G1 regression gate: the fabric must actually run the pre-sample mask and
+    /// post-sample control hooks on the generate_isf path (the break was that
+    /// `generate()` dropped these args). Verified with stub fns — no GPU needed.
+    #[test]
+    fn isf_runs_mask_and_control_on_generate_path() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let mask_calls = Arc::new(AtomicUsize::new(0));
+        let control_calls = Arc::new(AtomicUsize::new(0));
+        let mask_calls2 = mask_calls.clone();
+        let control_calls2 = control_calls.clone();
+
+        let mask: Arc<IsfMaskHook> = Arc::new(move |logits: &mut [f32]| {
+            mask_calls2.fetch_add(1, Ordering::SeqCst);
+            // Zero out token 0 so greedy sampling can never pick it.
+            if !logits.is_empty() {
+                logits[0] = f32::NEG_INFINITY;
+            }
+        });
+        let control: Arc<IsfControlHook> = Arc::new(move |_cand, _text, _step, _tokens, _kv| {
+            control_calls2.fetch_add(1, Ordering::SeqCst);
+            IsfControlDecision::Allow
+        });
+
+        let dim = 4u32;
+        let n_vocab = 10u32;
+        let state = Arc::new(Mutex::new(ISFState::new(3, 4, 0, vec![], None)));
+        {
+            let mut s = state.lock().unwrap();
+            s.all_token_ids = vec![1, 2, 3];
+            s.prompt_token_ids = vec![1, 2, 3];
+            s.mask = Some(mask);
+            s.control = Some(control);
+        }
+
+        let dequant = Arc::new(move |_t: u32, _d: u32| vec![0.0f32; dim as usize]);
+        let prefill = Arc::new(move |_b: Vec<f32>, _n: u32| {
+            (vec![0.0f32; dim as usize], vec![1.0f32; n_vocab as usize])
+        });
+        let forward = Arc::new(move |_e: Vec<f32>, _p: u32| {
+            (vec![0.0f32; dim as usize], vec![1.0f32; n_vocab as usize])
+        });
+        let sample = Arc::new(|logits: &mut Vec<f32>, _recent: &[u32]| -> u32 {
+            let mut best = 0usize;
+            let mut bv = f32::NEG_INFINITY;
+            for (i, v) in logits.iter().enumerate() {
+                if *v > bv {
+                    bv = *v;
+                    best = i;
+                }
+            }
+            best as u32
+        });
+        let decode = Arc::new(|t: u32| t.to_string());
+        let kv = Arc::new(|| {});
+
+        let mut fabric = InferenceSaturationFabric::new(
+            state.clone(),
+            dequant,
+            prefill,
+            forward,
+            sample,
+            decode,
+            kv,
+            dim,
+        );
+        let out = fabric.generate(&[1, 2, 3]);
+
+        assert!(
+            mask_calls.load(Ordering::SeqCst) > 0,
+            "pre-sample mask MUST run on the fabric generate path"
+        );
+        assert!(
+            control_calls.load(Ordering::SeqCst) > 0,
+            "post-sample control MUST run on the fabric generate path"
+        );
+        assert!(!out.text.is_empty(), "should have generated tokens");
+
+        // And the mask must have taken effect: token 0 is masked to -inf, so it
+        // can never be the greedy choice. (Generated text is space-joined ids.)
+        assert!(
+            !out.text.contains('0'),
+            "masked token 0 must never be produced; got '{}'",
+            out.text
+        );
+    }
+
+    /// G1 regression gate: a control returning `ForceToken` overrides the sample,
+    /// and `Block` surfaces via `block_reason`. No GPU needed.
+    #[test]
+    fn isf_control_force_and_block() {
+        // Force token 7 on the first decision, then allow.
+        let control: Arc<IsfControlHook> = Arc::new(move |_cand, _text, step, _tokens, _kv| {
+            if step == 0 {
+                IsfControlDecision::ForceToken(7)
+            } else {
+                IsfControlDecision::Allow
+            }
+        });
+
+        let dim = 4u32;
+        let n_vocab = 10u32;
+        let state = Arc::new(Mutex::new(ISFState::new(3, 4, 0, vec![], None)));
+        {
+            let mut s = state.lock().unwrap();
+            s.all_token_ids = vec![1, 2, 3];
+            s.prompt_token_ids = vec![1, 2, 3];
+            s.control = Some(control);
+        }
+
+        let dequant = Arc::new(move |_t: u32, _d: u32| vec![0.0f32; dim as usize]);
+        let prefill = Arc::new(move |_b: Vec<f32>, _n: u32| {
+            (vec![0.0f32; dim as usize], vec![1.0f32; n_vocab as usize])
+        });
+        let forward = Arc::new(move |_e: Vec<f32>, _p: u32| {
+            (vec![0.0f32; dim as usize], vec![1.0f32; n_vocab as usize])
+        });
+        let sample = Arc::new(|logits: &mut Vec<f32>, _recent: &[u32]| -> u32 {
+            let mut best = 0usize;
+            let mut bv = f32::NEG_INFINITY;
+            for (i, v) in logits.iter().enumerate() {
+                if *v > bv {
+                    bv = *v;
+                    best = i;
+                }
+            }
+            best as u32
+        });
+        let decode = Arc::new(|t: u32| t.to_string());
+        let kv = Arc::new(|| {});
+
+        let mut fabric = InferenceSaturationFabric::new(
+            state.clone(),
+            dequant,
+            prefill,
+            forward,
+            sample,
+            decode,
+            kv,
+            dim,
+        );
+        let out = fabric.generate(&[1, 2, 3]);
+        // First produced token must be the forced 7.
+        assert!(
+            out.text.starts_with('7'),
+            "ForceToken(7) must override the sampled token; got '{}'",
+            out.text
+        );
+
+        // Now Block on first decision.
+        let block: Arc<IsfControlHook> = Arc::new(move |_cand, _text, _step, _tokens, _kv| {
+            IsfControlDecision::Block("nope".into())
+        });
+        let state2 = Arc::new(Mutex::new(ISFState::new(3, 4, 0, vec![], None)));
+        {
+            let mut s = state2.lock().unwrap();
+            s.all_token_ids = vec![1, 2, 3];
+            s.prompt_token_ids = vec![1, 2, 3];
+            s.control = Some(block);
+        }
+        let mut fabric2 = InferenceSaturationFabric::new(
+            state2.clone(),
+            Arc::new(move |_t: u32, _d: u32| vec![0.0f32; dim as usize]),
+            Arc::new(move |_b: Vec<f32>, _n: u32| {
+                (vec![0.0f32; dim as usize], vec![1.0f32; n_vocab as usize])
+            }),
+            Arc::new(move |_e: Vec<f32>, _p: u32| {
+                (vec![0.0f32; dim as usize], vec![1.0f32; n_vocab as usize])
+            }),
+            Arc::new(|logits: &mut Vec<f32>, _recent: &[u32]| -> u32 {
+                let mut best = 0usize;
+                let mut bv = f32::NEG_INFINITY;
+                for (i, v) in logits.iter().enumerate() {
+                    if *v > bv {
+                        bv = *v;
+                        best = i;
+                    }
+                }
+                best as u32
+            }),
+            Arc::new(|t: u32| t.to_string()),
+            Arc::new(|| {}),
+            dim,
+        );
+        let _ = fabric2.generate(&[1, 2, 3]);
+        assert!(
+            state2.lock().unwrap().block_reason.is_some(),
+            "Block decision must set block_reason"
         );
     }
 }

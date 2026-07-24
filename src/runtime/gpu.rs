@@ -9,7 +9,8 @@ use crate::backend::bindless::loader::BindlessModel;
 use crate::backend::bindless::metadata::BindlessMetadata;
 use crate::backend::bindless::pipeline::BindlessPipeline;
 use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
-use crate::control::InferenceControl;
+use crate::control::{ControlDecision, InferenceControl, InferenceEvent};
+use crate::runtime::kvcache::KvSnapshot;
 use crate::core::dequant::{
     dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,
 };
@@ -325,6 +326,9 @@ impl GpuRuntime {
         prompt: &str,
         params: &SamplingParams,
         on_token: Option<Box<dyn FnMut(&str) + Send>>,
+        control: Option<Box<dyn InferenceControl + Send + Sync>>,
+        modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
+        trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         use airframe_observe::facts::InferenceFact;
         use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
@@ -382,6 +386,44 @@ impl GpuRuntime {
             extra_stop_ids,
             on_token,
         )));
+
+        // Wire control / mask / trace hooks into the fabric. This is the fix for
+        // the break where generate() dropped these args: the grammar pre-sample
+        // mask and the post-sample InferenceControl gate now actually run on the
+        // production ISF path. `airframe_observe` stays decoupled — it receives
+        // plain `Arc<dyn Fn>` hooks, and we translate InferenceControl here.
+        {
+            let mut s = state.lock().unwrap();
+            s.all_token_ids = prompt_tokens.clone();
+            s.mask = modify_logits.map(|b| std::sync::Arc::from(b));
+            s.control = control.map(|c| {
+                let hook: std::sync::Arc<airframe_observe::isf::IsfControlHook> =
+                    std::sync::Arc::new(move |candidate: usize, text: &str, step: usize, tokens: &[u32], kv_len: usize| {
+                        let tokens_usize: Vec<usize> = tokens.iter().map(|t| *t as usize).collect();
+                        let event = InferenceEvent {
+                            tokens: &tokens_usize,
+                            candidate_token: candidate,
+                            step,
+                            kv: KvSnapshot { len: kv_len, version: kv_len },
+                            text,
+                        };
+                        match c.intervene(&event) {
+                            ControlDecision::Allow => airframe_observe::isf::IsfControlDecision::Allow,
+                            ControlDecision::ForceToken(t) => {
+                                airframe_observe::isf::IsfControlDecision::ForceToken(t)
+                            }
+                            ControlDecision::EarlyExit => {
+                                airframe_observe::isf::IsfControlDecision::EarlyExit
+                            }
+                            ControlDecision::BlockAndTerminate(r) => {
+                                airframe_observe::isf::IsfControlDecision::Block(r)
+                            }
+                        }
+                    });
+                hook
+            });
+            s.trace = trace_cb.map(|b| std::sync::Arc::new(std::sync::Mutex::new(b)));
+        }
 
         let embd_offset = self.embd_weight_offset;
         let row_bytes_val = self.row_bytes;
@@ -631,26 +673,31 @@ impl GpuRuntime {
                 let _ = f.write_all(b"---\n");
             }
         }
+        // A control hook returning Block aborts generation — surface as an error.
+        if let Some(reason) = &s.block_reason {
+            return Err(format!("Blocked by control hook: {reason}").into());
+        }
         Ok(s.generated_text.clone())
     }
 
     /// Generate text via the Inference Saturation Fabric (ISF) dispatch path.
     ///
     /// This is the single production entry point. `on_token` is called for each
-    /// generated token (for streaming). The control/logits/trace arguments are
-    /// accepted for API stability with callers pinned to the airframe 0.2.x
-    /// signature but are unused on the fabric path.
+    /// generated token (for streaming). `control`, `modify_logits`, and `trace_cb`
+    /// are forwarded into the fabric and applied on every decode step: the mask
+    /// runs pre-sample (grammar) and the control runs post-sample (grammar/FSE/
+    /// math-bypass). A control returning `Block` aborts generation with an error.
     #[cfg(feature = "isf")]
     pub fn generate(
         &self,
         prompt: &str,
         params: &SamplingParams,
         on_token: Option<Box<dyn FnMut(&str) + Send>>,
-        _control: Option<Box<dyn InferenceControl + Send + Sync>>,
-        _modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
-        _trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
+        control: Option<Box<dyn InferenceControl + Send + Sync>>,
+        modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
+        trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.generate_isf(prompt, params, on_token)
+        self.generate_isf(prompt, params, on_token, control, modify_logits, trace_cb)
     }
 
     /// Reset the KV cache (for a new conversation).

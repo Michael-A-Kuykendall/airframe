@@ -15,6 +15,8 @@ pub enum HaltReason {
     EosToken,
     MaxTokensReached,
     ExtraStopToken,
+    /// Generation halted by an `InferenceControl` decision (EarlyExit or Block).
+    ControlHalt,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]

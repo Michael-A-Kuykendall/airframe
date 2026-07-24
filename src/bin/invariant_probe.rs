@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Runs the golden forward; forward_fn appends FinalLogits, the layer loop
     // appends a LayerOutput per layer into `sink`.
-    let _text = rt.generate_isf(prompt, &params, None)?;
+    let _text = rt.generate_isf(prompt, &params, None, None, None, None)?;
 
     clear_invariant_capture_sink();
     clear_invariant_ptensor_capture_sink();
