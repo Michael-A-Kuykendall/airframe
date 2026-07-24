@@ -9,7 +9,10 @@ use crate::backend::bindless::loader::BindlessModel;
 use crate::backend::bindless::metadata::BindlessMetadata;
 use crate::backend::bindless::pipeline::BindlessPipeline;
 use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
-use crate::control::{ControlDecision, InferenceControl, InferenceEvent};
+use crate::control::InferenceControl;
+#[cfg(feature = "isf")]
+use crate::control::{ControlDecision, InferenceEvent};
+#[cfg(feature = "isf")]
 use crate::runtime::kvcache::KvSnapshot;
 use crate::core::dequant::{
     dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,

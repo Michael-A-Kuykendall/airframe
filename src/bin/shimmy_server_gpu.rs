@@ -6,14 +6,9 @@ use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::pipeline::BindlessPipeline;
 use airframe::backend::bindless::pipeline_shift::RopeShiftPipeline;
-use airframe::core::dequant::{
-    dequantize_q4_0, dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0,
-};
-use airframe::core::model::GgufTensorInfo;
 use airframe::core::routing::ModelRoutePlan;
 use airframe::core::spec::{GgufValue, ModelArch, ModelSpec};
 use airframe::runtime::gpu::{GpuRuntime, SamplingParams};
-use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
 use std::io::Write;
@@ -568,6 +563,7 @@ impl ChatCompletionRequest {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Deserialize)]
 pub struct InferenceRequest {
     pub task: Option<String>,
@@ -1684,97 +1680,7 @@ fn log_arch_tensor_registry(
 }
 
 /// Dequantize `token_embd.weight` to a CPU Vec<f32> for embedding lookup.
-/// Handles all quantization types including Q6_K (common in Q4_K_M models).
-fn load_token_embd_cpu(
-    model_path: &str,
-    gpu_model: &BindlessModel,
-    spec: &ModelSpec,
-) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-    let tensor_name = "token_embd.weight";
-    let ggml_type = gpu_model
-        .metadata
-        .get_tensor_type(tensor_name)
-        .ok_or("token_embd.weight not found in metadata")?;
-    let abs_offset = gpu_model.metadata.get_tensor_offset(tensor_name).unwrap();
-    let data_start = gpu_model.metadata.data_start_offset;
-    let relative_offset = abs_offset - data_start;
 
-    let dimensions = gpu_model
-        .metadata
-        .tensor_dims
-        .get(tensor_name)
-        .map(|d| d.iter().map(|&x| x as usize).collect::<Vec<_>>())
-        .unwrap_or_else(|| vec![spec.n_vocab, spec.n_embd]);
-
-    eprintln!(
-        "[GPU Server] Loading token_embd for CPU table: type={}, dims={:?}",
-        ggml_type, dimensions
-    );
-
-    let tensor_info = GgufTensorInfo {
-        name: tensor_name.to_string(),
-        dimensions,
-        ggml_type,
-        offset: relative_offset,
-    };
-
-    let file = std::fs::File::open(model_path)?;
-    let mmap = unsafe { Mmap::map(&file)? };
-
-    let tensor_f32 = match ggml_type {
-        0 => {
-            let start = (data_start + relative_offset) as usize;
-            let n = tensor_info.dimensions.iter().product::<usize>();
-            let bytes = &mmap[start..start + n * 4];
-            let data: Vec<f32> = bytes
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                .collect();
-            airframe::core::tensor::Tensor::new(data, tensor_info.dimensions.clone())?
-        }
-        2 => dequantize_q4_0(&tensor_info, &mmap, data_start)?,
-        6 => dequantize_q5_0(&tensor_info, &mmap, data_start)?,
-        8 => dequantize_q8_0(&tensor_info, &mmap, data_start)?,
-        12 => dequantize_q4_k(&tensor_info, &mmap, data_start)?,
-        14 => dequantize_q6_k(&tensor_info, &mmap, data_start)?,
-        other => {
-            return Err(format!("Unsupported token_embd quant type: {}", other).into());
-        }
-    };
-
-    eprintln!(
-        "[GPU Server] Token embd CPU table: {} elements ({} MB)",
-        tensor_f32.data.len(),
-        (tensor_f32.data.len() * 4) as f32 / 1024.0 / 1024.0
-    );
-    Ok(tensor_f32.data)
-}
-
-fn build_templated_prompt(
-    prompt_mode: &str,
-    user_prompt: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    match prompt_mode {
-        "raw" => Ok(user_prompt.to_string()),
-        "developer" => Ok(format!(
-            "<|im_start|>system\nYou are a Rust code output machine. Output only valid Rust source code, no prose, no markdown fences.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n// BEGIN_RUST_FILE\n",
-            user_prompt
-        )),
-        "creative" => Ok(format!(
-            "<|system|>\nYou are a talented creative writer.</s>\n<|user|>\n{}</s>\n<|assistant|>\n",
-            user_prompt
-        )),
-        "creative-chatml" => Ok(format!(
-            "<|im_start|>system\nYou are a talented creative writer.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-            user_prompt
-        )),
-        other => Err(format!(
-            "Unknown prompt_mode: {} (expected raw|developer|creative|creative-chatml)",
-            other
-        )
-        .into()),
-    }
-}
 
 // TODO: promote send_error to async + TcpStream once streaming error path is wired.
 // HTTP error helper — reserved for future streaming error path; not yet called from active code.
@@ -1828,16 +1734,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_templated_prompt_raw_passthrough() {
-        let result = build_templated_prompt("raw", "hello world").expect("raw mode must not fail");
-        assert_eq!(result, "hello world");
-    }
-
-    #[test]
-    fn build_templated_prompt_unknown_mode_errors() {
-        assert!(build_templated_prompt("bogus_mode", "hello").is_err());
-    }
 
     #[test]
     fn parse_content_length_from_header() {
