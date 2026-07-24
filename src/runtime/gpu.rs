@@ -83,6 +83,45 @@ pub struct GpuRuntime {
 }
 
 impl GpuRuntime {
+    /// Construct a runtime from pre-loaded parts.
+    ///
+    /// For callers that load device/queue/model/pipeline/etc. independently
+    /// (e.g. the dev server) — avoids duplicating the full [`load`] pipeline.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        model: BindlessModel,
+        pipeline: BindlessPipeline,
+        shift_pipeline: RopeShiftPipeline,
+        tokenizer: Arc<Tokenizer>,
+        spec: ModelSpec,
+        output_head_f32: wgpu::Buffer,
+        kv_cache: Arc<Mutex<KVCache>>,
+        embd_weight_offset: u64,
+        row_bytes: u64,
+        embd_quant_type: u32,
+        eos_token: u32,
+        im_end_token: Option<u32>,
+    ) -> Self {
+        Self {
+            device,
+            queue,
+            model,
+            pipeline,
+            shift_pipeline,
+            tokenizer,
+            spec,
+            output_head_f32,
+            kv_cache,
+            embd_weight_offset,
+            row_bytes,
+            embd_quant_type,
+            eos_token,
+            im_end_token,
+        }
+    }
+
     /// Initialize the GPU runtime from a GGUF model path.
     ///
     /// This performs all expensive one-time setup:
