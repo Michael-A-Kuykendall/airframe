@@ -321,7 +321,7 @@ impl GpuRuntime {
     /// Pending patent by Michael A. Kuykendall. All rights reserved.
     #[cfg(feature = "isf")]
     #[allow(clippy::type_complexity)]
-    pub fn generate_isf(
+    pub fn generate(
         &self,
         prompt: &str,
         params: &SamplingParams,
@@ -351,7 +351,7 @@ impl GpuRuntime {
             }
         };
 
-        append_log(&format!("generate_isf called, prompt_len={}", prompt.len()));
+        append_log(&format!("generate called, prompt_len={}", prompt.len()));
         let prompt_tokens = self.tokenizer.encode(prompt, true)?;
         append_log(&format!("tokenized: {} tokens", prompt_tokens.len()));
         let dim = self.spec.n_embd as u32;
@@ -439,7 +439,7 @@ impl GpuRuntime {
 
         // Safety: all closures are called synchronously within this function's
         // lifetime. The references to self.device, self.queue, self.model,
-        // self.pipeline, self.tokenizer are valid for the duration of generate_isf().
+        // self.pipeline, self.tokenizer are valid for the duration of generate().
         // We extend lifetimes here only because Arc<dyn Fn> requires 'static,
         // but these closures never escape this stack frame.
         let device_ref: &'static wgpu::Device = unsafe { &*(&self.device as *const _) };
@@ -687,19 +687,6 @@ impl GpuRuntime {
     /// are forwarded into the fabric and applied on every decode step: the mask
     /// runs pre-sample (grammar) and the control runs post-sample (grammar/FSE/
     /// math-bypass). A control returning `Block` aborts generation with an error.
-    #[cfg(feature = "isf")]
-    pub fn generate(
-        &self,
-        prompt: &str,
-        params: &SamplingParams,
-        on_token: Option<Box<dyn FnMut(&str) + Send>>,
-        control: Option<Box<dyn InferenceControl + Send + Sync>>,
-        modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
-        trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.generate_isf(prompt, params, on_token, control, modify_logits, trace_cb)
-    }
-
     /// Reset the KV cache (for a new conversation).
     pub fn reset(&self) {
         let mut cache = self.kv_cache.lock().unwrap();

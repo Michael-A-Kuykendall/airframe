@@ -1,7 +1,7 @@
 //! invariant_probe — PPT Invariant Cage capture probe.
 //!
 //! Loads a GGUF model on the GPU, runs the golden fixture `[BOS, Hello]` through
-//! the production forward path (`GpuRuntime::generate_isf`), and emits the
+//! the production forward path (`GpuRuntime::generate`), and emits the
 //! per-layer `LayerOutput` + `FinalLogits` activations as JSON on stdout.
 //!
 //! This is the CAPTURE side of the PPT invariant cage. The CERTIFY side
@@ -95,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     set_invariant_capture_sink(&mut sink);
     // Per-tensor sink (q/k/v/post/ffn/output). Populated when the forward uses
     // the debug layer path (run_layer_with_cache_debug); the production
-    // generate_isf path does not emit per-tensor, so this stays empty unless a
+    // generate path does not emit per-tensor, so this stays empty unless a
     // --per-tensor forward is enabled (follow-up).
     let mut pt_sink: Vec<CapturedPerTensor> = Vec::new();
     set_invariant_ptensor_capture_sink(&mut pt_sink);
@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Runs the golden forward; forward_fn appends FinalLogits, the layer loop
     // appends a LayerOutput per layer into `sink`.
-    let _text = rt.generate_isf(prompt, &params, None, None, None, None)?;
+    let _text = rt.generate(prompt, &params, None, None, None, None)?;
 
     clear_invariant_capture_sink();
     clear_invariant_ptensor_capture_sink();
