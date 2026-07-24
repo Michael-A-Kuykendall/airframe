@@ -1,6 +1,6 @@
 [package]
 name = "airframe-observe"
-version = "0.1.0"
+version = "0.1.1"
 publish = true
 edition = "2021"
 description = "FSE-based inference observation layer for Airframe. Selector-first, single-pass capture of layer outputs, logits, and text during inference."
