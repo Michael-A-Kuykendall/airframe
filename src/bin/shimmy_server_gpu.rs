@@ -16,7 +16,6 @@ use airframe::runtime::gpu::{GpuRuntime, SamplingParams};
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
-use std::fs;
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -44,17 +43,10 @@ struct RouteCheckReport {
     warnings: Vec<String>,
 }
 
-/// Xorshift64* PRNG — fast, deterministic, no external dep
-#[path = "shimmy_server_gpu/server_inference.rs"]
-mod server_inference;
 fn env_flag(name: &str) -> bool {
     std::env::var(name)
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
-}
-
-fn env_usize(name: &str) -> Option<usize> {
-    std::env::var(name).ok()?.parse().ok()
 }
 
 #[derive(Clone, Deserialize)]
@@ -818,12 +810,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("GPU device lost during initial flush");
 
     // === Token Embedding CPU Table ===
-    // The dequant pipeline uses a hardcoded Q4_0 shader, which is wrong for
-    // Q4_K_M models where token_embd.weight is Q6_K (type 14).  Pre-compute
-    // the full embedding table on CPU so the generation loop can do direct
-    // indexed lookups regardless of quantization type.
-    let embd_table_cpu = Arc::new(load_token_embd_cpu(&model_path, &gpu_model, &spec)?);
-
     // === Initialize KV Cache (Phase 4D) ===
     // SHIMMY_KV_QUANT=int4 enables TurboQuant INT4 KV compression (feat/turboquant-wgsl).
     let kv_quant_int4 = std::env::var("SHIMMY_KV_QUANT")
@@ -1033,13 +1019,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let cache_clone = Arc::clone(&kv_cache);
-        let session_states_clone = Arc::clone(&session_states);
         let job_id_clone = job.job_id.clone();
-        let stream_tx = {
-            let st = stream_channels.lock().unwrap();
-            st.get(&job_id_clone).cloned()
-        };
 
         let task_type = job.req.task.clone().unwrap_or_else(|| "story".to_string());
         let result: Result<InferenceResponse, String> = if task_type == "wikitext2" || task_type == "lambada" {
