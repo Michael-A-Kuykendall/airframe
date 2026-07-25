@@ -128,8 +128,11 @@ impl ModelSpec {
         if self.head_dim == 0 {
             self.head_dim = self.n_embd / self.n_head;
         }
-        // RoPE must not exceed head_dim — cap it (handles Gemma-2: key_length=256, rope_dim may default to n_embd/n_head=288)
-        if self.rope_dim > self.head_dim {
+        // RoPE must use at least head_dim (handles Qwen3: n_embd/n_head=64 but actual head_dim=128 from Q weight)
+        // and must not exceed head_dim (handles Gemma-2: n_embd/n_head=288 but actual head_dim=256)
+        if self.rope_dim < self.head_dim {
+            self.rope_dim = self.head_dim;
+        } else if self.rope_dim > self.head_dim {
             self.rope_dim = self.head_dim;
         }
         self.gqa_ratio = self.n_head / self.n_head_kv;
