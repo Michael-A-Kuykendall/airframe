@@ -158,10 +158,16 @@ impl PreflightResources {
         // Block size = dim * 4 bytes
         let block_size = dim * 4;
 
-        // Layout:
-        // Layers: [AttnNorm, FfnNorm, PostAttnNorm, PostFfwNorm] interleaved (4 slots/layer)
+        // Qwen3 uses per-head Q and K RMSNorm before RoPE — needs extra slots.
+        let has_qk = spec.has_qk_norm;
+        let slots_per_layer: usize = if has_qk { 6 } else { 4 };
+
+        // Layout (has_qk=false):
+        //   [AttnNorm, FfnNorm, PostAttnNorm, PostFfwNorm] (4 slots/layer)
+        // Layout (has_qk=true, Qwen3):
+        //   [AttnNorm, QNorm, KNorm, FfnNorm, PostAttnNorm, PostFfwNorm] (6 slots/layer)
         // End: [OutputNorm]
-        let total_size = (n_layers * 4 + 1) * block_size;
+        let total_size = (n_layers * slots_per_layer + 1) * block_size;
 
         let mut bank = vec![0u8; total_size];
 
@@ -201,20 +207,26 @@ impl PreflightResources {
             let post_attn_name = format!("blk.{}.post_attention_norm.weight", i);
             let post_ffw_name = format!("blk.{}.post_ffw_norm.weight", i);
 
-            let layer_base = i * 4 * block_size;
+            let layer_base = i * slots_per_layer * block_size;
             copy_tensor_inner(&attn_name, layer_base, true);
-            if is_phi_arch && metadata.get_tensor_offset(&ffn_name).is_none() {
-                // Phi-family checkpoints may omit a distinct FFN norm tensor.
-                copy_tensor_inner(&attn_name, layer_base + block_size, false);
-            } else {
-                copy_tensor_inner(&ffn_name, layer_base + block_size, true);
+            // QK-norm slots (Qwen3 only; zero-filled for other arches)
+            let q_offset = layer_base + block_size;
+            let k_offset = layer_base + 2 * block_size;
+            if has_qk {
+                copy_tensor_inner(&format!("blk.{}.attn_q_norm.weight", i), q_offset, true);
+                copy_tensor_inner(&format!("blk.{}.attn_k_norm.weight", i), k_offset, true);
             }
-            copy_tensor_inner(&post_attn_name, layer_base + 2 * block_size, has_post_norms);
-            copy_tensor_inner(&post_ffw_name, layer_base + 3 * block_size, has_post_norms);
+            if is_phi_arch && metadata.get_tensor_offset(&ffn_name).is_none() {
+                copy_tensor_inner(&attn_name, layer_base + 3 * block_size, false);
+            } else {
+                copy_tensor_inner(&ffn_name, layer_base + 3 * block_size, true);
+            }
+            copy_tensor_inner(&post_attn_name, layer_base + 4 * block_size, has_post_norms);
+            copy_tensor_inner(&post_ffw_name, layer_base + 5 * block_size, has_post_norms);
         }
 
         // Final Norm
-        let final_base = n_layers * 4 * block_size;
+        let final_base = n_layers * slots_per_layer * block_size;
         copy_tensor_inner("output_norm.weight", final_base, true);
 
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
