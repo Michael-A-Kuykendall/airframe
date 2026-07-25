@@ -543,6 +543,23 @@ impl GpuRuntime {
                 )
             });
 
+        // For models with large untied output vocabularies (e.g. Gemma2 256K),
+        // the dequanted F32 output head can exceed the 2GB storage buffer binding
+        // limit. When that happens, pass None — the pipeline reads the quantized
+        // output.weight directly from the already-loaded blobs (line 920 of
+        // inference.rs: "blob-based quantized head").
+        let output_f32_bytes = spec_isf.n_embd as u64 * spec_isf.n_vocab as u64 * 4;
+        let max_binding = 2_147_483_647u64; // 2GB wgpu binding limit
+        let head_override: Option<&wgpu::Buffer> = if output_f32_bytes <= max_binding {
+            Some(output_head_ref)
+        } else {
+            eprintln!(
+                "[GpuRuntime] output head F32 ({:.1} MB) exceeds 2GB binding limit — using blob-based quantized head",
+                output_f32_bytes as f64 / 1_048_576.0
+            );
+            None
+        };
+
         // ── Closure: GPU prefill dispatch ─────────────────────────────────
         let kv_for_prefill = kv_cache_isf.clone();
         let spec_for_prefill = spec_isf.clone();
@@ -555,7 +572,7 @@ impl GpuRuntime {
                 queue_ref,
                 model_ref,
                 &batched,
-                Some(output_head_ref),
+                head_override,
                 0,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 &spec_for_prefill,
@@ -617,7 +634,7 @@ impl GpuRuntime {
                 queue_ref,
                 model_ref,
                 &token_embd,
-                Some(output_head_ref),
+                head_override,
                 current_pos,
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 &spec_for_forward,
