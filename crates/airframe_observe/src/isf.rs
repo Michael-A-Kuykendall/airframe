@@ -16,8 +16,8 @@
 
 use crate::facts::{
     alpha_key_of, HaltReason, InferenceFact, KEY_DECODE_STEP, KEY_DISPATCH_COMPLETED,
-    KEY_EMBEDDING_READY, KEY_EMBEDDING_REQUEST, KEY_PREFILL_BATCH_READY, KEY_PREFILL_COMPLETE,
-    KEY_PROMPT_TOKEN, KEY_TDR_RISK_HIGH, KEY_TENSOR_FACT,
+    KEY_EMBEDDING_READY, KEY_EMBEDDING_REQUEST, KEY_KV_ADVANCE, KEY_PREFILL_BATCH_READY,
+    KEY_PREFILL_COMPLETE, KEY_PROMPT_TOKEN, KEY_TDR_RISK_HIGH, KEY_TENSOR_FACT,
 };
 use dzero::{AlphaKey, ClosureProgram, FactStore, RunBudget, SaturationFabric};
 use std::sync::{Arc, Mutex};
@@ -107,8 +107,6 @@ pub struct ISFState {
     pub logits: Vec<f32>,
     /// Halt flag — set by rules when EOS or max_tokens reached
     pub halt: Option<HaltReason>,
-    /// Step counter for decode
-    pub decode_step: u32,
     /// Max tokens allowed
     pub max_tokens: u32,
     /// EOS token ID
@@ -164,7 +162,6 @@ impl ISFState {
             generated_text: String::new(),
             logits: Vec::new(),
             halt: None,
-            decode_step: 0,
             max_tokens,
             eos_token,
             extra_stop_ids,
@@ -377,7 +374,6 @@ impl InferenceSaturationFabric {
         {
             let state_ref = state.clone();
             let prefill = prefill_fn.clone();
-            let kv_inc = kv_increment_fn.clone();
             program.register(AlphaKey(KEY_PREFILL_BATCH_READY), move |fact, _store| {
                 if let InferenceFact::PrefillBatchReady { token_count } = fact {
                     let batched = {
@@ -399,37 +395,38 @@ impl InferenceSaturationFabric {
                     let hidden_checksum = crate::facts::checksum(&hidden);
                     let logits_rms = crate::facts::rms(&logits);
                     let logits_checksum = crate::facts::checksum(&logits);
-                    // Increment KV cache once per prompt token
-                    for _ in 0..*token_count {
-                        kv_inc();
-                    }
-                    if std::env::var("AIRFRAME_LOG_TDR_POLLS").is_ok() {
-                        eprintln!("[DIAG] after prefill kv_inc called {} times", token_count);
-                    }
-                    {
-                        let mut s = state_ref.lock().unwrap();
-                        s.logits = logits;
-                    }
-                    // Emit completion facts + G2 observability (LayerOutput + FinalLogits).
-                    vec![
-                        InferenceFact::PrefillComplete { position: *token_count },
-                        InferenceFact::LayerOutput {
-                            layer_idx: 0, // final hidden state after all layers
-                            position: *token_count,
-                            rms_bits: crate::facts::f32_to_bits(hidden_rms),
-                            checksum: hidden_checksum,
-                        },
-                        InferenceFact::FinalLogits {
-                            position: *token_count,
-                            rms_bits: crate::facts::f32_to_bits(logits_rms),
-                            checksum: logits_checksum,
-                        },
-                        InferenceFact::DispatchCompleted {
-                            layer: 0,
-                            kernel: crate::facts::KernelKind::FullLayer,
-                            elapsed_ms,
-                        },
-                    ]
+                     // Store logits for downstream rules (mask, sample, halt)
+                     {
+                         let mut s = state_ref.lock().unwrap();
+                         s.logits = logits;
+                     }
+                     // Emit KV advance facts — the fabric serializes these
+                     // and the KvAdvance rule calls kv_inc() for each one,
+                     // advancing seq_len from 0 to token_count.
+                     let mut facts = Vec::with_capacity(4 + *token_count as usize);
+                     for pos in 0..*token_count {
+                         facts.push(InferenceFact::KvAdvance { position: pos });
+                     }
+                     facts.extend([
+                         InferenceFact::PrefillComplete { position: *token_count },
+                         InferenceFact::LayerOutput {
+                             layer_idx: 0,
+                             position: *token_count,
+                             rms_bits: crate::facts::f32_to_bits(hidden_rms),
+                             checksum: hidden_checksum,
+                         },
+                         InferenceFact::FinalLogits {
+                             position: *token_count,
+                             rms_bits: crate::facts::f32_to_bits(logits_rms),
+                             checksum: logits_checksum,
+                         },
+                         InferenceFact::DispatchCompleted {
+                             layer: 0,
+                             kernel: crate::facts::KernelKind::FullLayer,
+                             elapsed_ms,
+                         },
+                     ]);
+                     facts
                 } else {
                     vec![]
                 }
@@ -492,45 +489,58 @@ impl InferenceSaturationFabric {
                     }];
                 }
 
-                let piece = decode(token_id);
-                eprintln!("[ISF-R4] first token piece={:?} (len={})", piece, piece.len());
-                {
-                    let mut s = state_ref.lock().unwrap();
-                    s.generated_text.push_str(&piece);
-                    if let Some(cb) = s.on_token.as_mut() {
-                        cb(&piece);
-                    }
-                    s.decode_step = 1;
-                }
+                 let piece = decode(token_id);
+                 eprintln!("[ISF-R4] first token piece={:?} (len={})", piece, piece.len());
+                 let prompt_len = {
+                     let s = state_ref.lock().unwrap();
+                     s.prompt_len
+                 };
+                 {
+                     let mut s = state_ref.lock().unwrap();
+                     s.generated_text.push_str(&piece);
+                     if let Some(cb) = s.on_token.as_mut() {
+                         cb(&piece);
+                     }
+                 }
 
-                vec![InferenceFact::DecodeStep {
-                    step: 0,
-                    token_id,
-                }]
+                 vec![InferenceFact::DecodeStep {
+                     step: 0,
+                     token_id,
+                     position: prompt_len,
+                 }]
+            });
+        }
+
+        // ── Rule TBD: KvAdvance → KvWritten ─────────────────
+        // The fabric serializes KvAdvance before the next DecodeStep.
+        // This rule fires the actual KV cache increment, removing
+        // the imperative kv_inc() side-effect from Rule 5.
+        {
+            let kv_inc = kv_increment_fn.clone();
+            program.register(AlphaKey(KEY_KV_ADVANCE), move |fact, _store| {
+                if let InferenceFact::KvAdvance { position: _ } = fact {
+                    kv_inc();
+                    vec![InferenceFact::KvWritten]
+                } else {
+                    vec![]
+                }
             });
         }
 
         // ── Rule 5: DecodeStep → next DecodeStep (or Halt) ───────────────
-        // The reactive inversion: each decode token self-asserts the next step.
-        // step field guarantees uniqueness → FactStore dedup won't block it.
+        // Position is carried in the DecodeStep fact — no arithmetic.
+        // KV increment is driven by KvAdvance → KvWritten facts.
         {
             let state_ref = state.clone();
             let forward = forward_fn.clone();
             let sample = sample_fn.clone();
             let decode = decode_fn.clone();
-            let kv_inc = kv_increment_fn.clone();
             program.register(AlphaKey(KEY_DECODE_STEP), move |fact, _store| {
-                if let InferenceFact::DecodeStep { step, token_id } = fact {
+                if let InferenceFact::DecodeStep { step, token_id, position } = fact {
                     let t_decode = std::time::Instant::now();
-                    // Get current KV position
-                    let current_pos = {
-                        let s = state_ref.lock().unwrap();
-                        s.prompt_len + *step
-                    };
 
                     // Dequant embedding for this token — forward pass
-                    let (_hidden, mut logits) = forward(vec![*token_id as f32], current_pos);
-                    kv_inc();
+                    let (_hidden, mut logits) = forward(vec![*token_id as f32], *position);
                     let elapsed_ms = t_decode.elapsed().as_millis() as u32;
 
                     let logits_max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -631,22 +641,25 @@ impl InferenceSaturationFabric {
                         if let Some(cb) = s.on_token.as_mut() {
                             cb(&piece);
                         }
-                        s.decode_step = *step + 2;
                     }
 
                     // Self-assert next decode step — the D0 reactive inversion
                     vec![
+                        InferenceFact::KvAdvance {
+                            position: *position,
+                        },
                         InferenceFact::DecodeStep {
                             step: step + 1,
                             token_id: next_token,
+                            position: *position + 1,
                         },
                         InferenceFact::FinalLogits {
-                            position: current_pos,
+                            position: *position,
                             rms_bits: crate::facts::f32_to_bits(decode_logits_rms),
                             checksum: decode_logits_checksum,
                         },
                         InferenceFact::DispatchCompleted {
-                            layer: current_pos,
+                            layer: *position,
                             kernel: crate::facts::KernelKind::FullLayer,
                             elapsed_ms,
                         },
@@ -762,7 +775,10 @@ impl InferenceSaturationFabric {
         // Extract results
         let state = self.state.lock().unwrap();
         let halt_reason = state.halt.clone().unwrap_or(HaltReason::MaxTokensReached);
-        let tokens_generated = state.decode_step as usize;
+        let tokens_generated = state
+            .all_token_ids
+            .len()
+            .saturating_sub(state.prompt_len as usize);
 
         GenerateOutput {
             text: state.generated_text.clone(),

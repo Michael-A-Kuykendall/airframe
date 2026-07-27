@@ -170,15 +170,32 @@ pub enum InferenceFact {
 
     // Tier 1: One decode step — self-asserted by the fabric after each token
     /// Unique per step (step field ensures dedup doesn't block re-assertion).
+    /// Carries `position` so rules don't need to compute it as
+    /// `prompt_len + step` — eliminating the off-by-one class of bugs
+    /// where the decode position drifts from the KV cache position.
     DecodeStep {
         step: u32,
         token_id: u32,
+        position: u32,
     },
 
     // Tier 3: Decode step produced logits — sample and emit
     DecodeLogitsReady {
         step: u32,
     },
+
+    // Tier 3 Consequent (fact-driven KV lifecycle)
+    /// Signals the KV cache should advance by one slot at `position`.
+    /// Emitted by the decode rule before the next DecodeStep fires.
+    /// The fabric serializes this through the alpha index so the KV
+    /// increment always completes before the next decode position is used.
+    KvAdvance {
+        position: u32,
+    },
+
+    /// Confirms the KV cache slot at `position` has been written.
+    /// Fired by the KvAdvance rule after calling `kv_inc()`.
+    KvWritten,
 
     // Tier 3: Halt the generation loop (EOS hit or max_tokens reached)
     GenerationHalt {
@@ -280,6 +297,8 @@ pub const KEY_TDR_RISK_HIGH: u64 = 11;
 pub const KEY_TENSOR_FACT: u64 = 20;
 pub const KEY_DISPATCH_FACT: u64 = 21;
 pub const KEY_DISPATCH_COMPLETED: u64 = 18;
+pub const KEY_KV_ADVANCE: u64 = 25;
+pub const KEY_KV_WRITTEN: u64 = 26;
 
 // Vault reference facts (V1)
 pub const KEY_VAULT_ORACLE: u64 = 22;
@@ -324,6 +343,8 @@ pub fn alpha_key_of(fact: &InferenceFact) -> Option<AlphaKey> {
         InferenceFact::PrefillComplete { .. } => Some(AlphaKey(KEY_PREFILL_COMPLETE)),
         InferenceFact::DecodeStep { .. } => Some(AlphaKey(KEY_DECODE_STEP)),
         InferenceFact::DecodeLogitsReady { .. } => Some(AlphaKey(KEY_DECODE_LOGITS_READY)),
+        InferenceFact::KvAdvance { .. } => Some(AlphaKey(KEY_KV_ADVANCE)),
+        InferenceFact::KvWritten => None,
         // Tier 3 consequents — don't trigger further rules
         InferenceFact::WriteOracleRow { .. } => None,
         InferenceFact::TriggerCandleCompare { .. } => None,

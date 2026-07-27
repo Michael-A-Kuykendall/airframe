@@ -744,12 +744,14 @@ impl GpuRuntime {
             t_fixpoint.elapsed().as_secs_f32()
         ));
 
-        let s = state.lock().unwrap();
-        append_log(&format!(
-            "complete, {} chars, {} steps",
-            s.generated_text.len(),
-            s.decode_step
-        ));
+         let s = state.lock().unwrap();
+         append_log(&format!(
+             "complete, {} chars, {} steps",
+             s.generated_text.len(),
+             s.all_token_ids
+                 .len()
+                 .saturating_sub(s.prompt_len as usize)
+         ));
         // Flush log
         {
             use std::io::Write;
