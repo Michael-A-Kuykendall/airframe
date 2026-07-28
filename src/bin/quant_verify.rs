@@ -98,32 +98,40 @@ fn main() {
     let mut any_fail = false;
 
     for &(qt, qt_name) in quant_types {
-        // Find any tensor with this type.
-        let tensor_name = meta
+        // Prefer lowest file offset of this type (stable; exercises early blob first).
+        // HashMap::find is unordered and was sampling late-file tensors only.
+        let mut candidates: Vec<(String, u64)> = meta
             .tensor_types
             .iter()
-            .find(|(_, &t)| t == qt)
-            .map(|(n, _)| n.clone());
+            .filter(|(_, &t)| t == qt)
+            .filter_map(|(n, _)| {
+                meta.tensor_offsets
+                    .get(n)
+                    .map(|&off| (n.clone(), off))
+            })
+            .collect();
+        candidates.sort_by_key(|(_, off)| *off);
 
-        let Some(name) = tensor_name else {
+        let Some((name, offset_abs)) = candidates.into_iter().next() else {
             println!("[quant_verify] {qt_name:5} (type {qt:2}) — not present in model, skipping");
             continue;
         };
 
-        let offset_abs = *meta.tensor_offsets.get(&name).unwrap();
         let dims = meta.tensor_dims.get(&name).unwrap().clone();
         let total_elements: u64 = dims.iter().product();
 
         let elems = TEST_ELEMS.min(total_elements as u32);
 
         println!(
-            "[quant_verify] {qt_name:5} (type {qt:2}) — tensor={name}  total_elems={total_elements}  testing={elems}"
+            "[quant_verify] {qt_name:5} (type {qt:2}) — tensor={name}  offset={offset_abs}  total_elems={total_elements}  testing={elems}"
         );
 
-        // --- CPU reference ---
+        // --- CPU reference: only first `elems` (avoid full multi-GB dequant) ---
+        // Shrink dimensions so K-quant paths only walk needed superblocks.
+        let cpu_dims = vec![elems as usize];
         let tensor_info = GgufTensorInfo {
             name: name.clone(),
-            dimensions: dims.iter().map(|&d| d as usize).collect(),
+            dimensions: cpu_dims,
             ggml_type: qt,
             offset: offset_abs - meta.data_start_offset,
         };
