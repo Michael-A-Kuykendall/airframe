@@ -1,0 +1,77 @@
+{
+  "schema": "airframe.stack.v1",
+  "engine": "fixture",
+  "engine_detail": "OBS-0 minimal valid fixture (not a live capture)",
+  "model_path": "fixture://qwen3-4b-minimal",
+  "prompt": "The capital of France is",
+  "captured_at": "2026-07-28T00:00:00Z",
+  "config": {
+    "arch": "qwen3",
+    "n_layer": 36,
+    "n_embd": 2560,
+    "n_head": 32,
+    "n_kv_head": 8,
+    "head_dim": 128,
+    "rope_base": 1000000.0,
+    "rope_dim": 128,
+    "rms_eps": 1e-6,
+    "qk_norm": true,
+    "n_ctx_capped": 8192
+  },
+  "tokens": {
+    "ids": [785, 6722, 315, 9625, 374],
+    "pieces": ["The", " capital", " of", " France", " is"],
+    "add_bos": false
+  },
+  "embedding": {
+    "position": 4,
+    "rms": 0.0169,
+    "first8": [-0.01, -0.003, 0.005, -0.058, -0.034, 0.025, 0.001, -0.02],
+    "nan_count": 0
+  },
+  "layers": [
+    {
+      "layer_idx": 0,
+      "position": 4,
+      "residual": {
+        "rms": 0.22,
+        "first8": [3.67, -1.02, 0.578, 0.132, -0.165, 0.244, -0.437, -0.166],
+        "nan_count": 0
+      },
+      "stages": {
+        "attn_norm": {
+          "rms": 0.05,
+          "first8": [-0.03, -0.007, 0.019, -0.1, -0.09, 0.0, 0.0, 0.0],
+          "nan_count": 0,
+          "sampled": "temp_last"
+        }
+      },
+      "tensors": {
+        "status": "unsupported",
+        "reason": "fixture_minimal",
+        "q": null
+      }
+    }
+  ],
+  "final": {
+    "post_norm_rms": 15.44,
+    "logits": {
+      "len": 151936,
+      "rms": null,
+      "max": 12.336,
+      "nan_count": 0,
+      "argmax": { "id": 93367, "piece": " Trom", "logit": 12.336 },
+      "top_k": [
+        { "id": 93367, "piece": " Trom", "logit": 12.336 },
+        { "id": 15779, "piece": " Paris", "logit": -3.2 }
+      ]
+    }
+  },
+  "decode": {
+    "status": "skipped",
+    "reason": "prefill_top1_fail"
+  },
+  "notes": [
+    "OBS-0 fixture only — replace with live airframe_product dump in OBS-1"
+  ]
+}

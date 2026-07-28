@@ -130,7 +130,26 @@ fn read_blob(word_idx: u32) -> u32 {
 @group(0) @binding(2) var<storage, read_write> temp_state: array<f32>;    // Scratchpad
 @group(0) @binding(3) var<uniform> offsets: LayerOffsets;
 @group(0) @binding(4) var<uniform> params: LayerParams;
-@group(0) @binding(5) var<storage, read> norm_bank: array<f32>;           // [n_layer * dim * 4 + dim]
+@group(0) @binding(5) var<storage, read> norm_bank: array<f32>;           // [n_layer * slots * dim + dim]
+// Norm-bank layout must match preflight.rs:
+//   qk_norm_enabled=0 (4 slots): Attn=0, Ffn=1, PostAttn=2, PostFfw=3
+//   qk_norm_enabled=1 (6 slots): Attn=0, Q=1, K=2, Ffn=3, PostAttn=4, PostFfw=5
+// Q1 fix: after expanding to 6 slots for Qwen3, FFN still used *4+1 (=Q slot garbage).
+fn norm_slots_per_layer() -> u32 {
+    return select(4u, 6u, params.qk_norm_enabled != 0u);
+}
+fn norm_bank_base(slot: u32) -> u32 {
+    return (offsets.layer_idx * norm_slots_per_layer() + slot) * params.dim;
+}
+fn ffn_norm_slot() -> u32 {
+    return select(1u, 3u, params.qk_norm_enabled != 0u);
+}
+fn post_attn_norm_slot() -> u32 {
+    return select(2u, 4u, params.qk_norm_enabled != 0u);
+}
+fn post_ffw_norm_slot() -> u32 {
+    return select(3u, 5u, params.qk_norm_enabled != 0u);
+}
 @group(0) @binding(6) var<storage, read> rope_table: array<f32>;           // [2048 × head_dim/2 × 2] pre-computed (cos, sin)
 @group(0) @binding(7) var<storage, read_write> kv_cache_k: array<f32>;    // K cache [max_seq * n_head_kv * head_dim]
 @group(0) @binding(8) var<storage, read_write> kv_cache_v: array<f32>;    // V cache [max_seq * n_head_kv * head_dim]
@@ -443,7 +462,7 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
         inv_std = inverseSqrt(var_sum / f32(params.dim) + params.rms_eps);
     }
 
-    let norm_offset_base = offsets.layer_idx * 4u * params.dim;
+    let norm_offset_base = norm_bank_base(0u); // AttnNorm
     let norm_w = norm_bank[norm_offset_base + idx];
     let norm_b = select(0.0, bitcast<f32>(read_blob(offsets.attn_norm_bias / 4u + idx)), offsets.attn_norm_bias != 0u);
     let centered = select(activation_in[act_base + idx], activation_in[act_base + idx] - mean, params.layer_norm_enabled != 0u);
@@ -560,11 +579,13 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         temp_state[temp_base + params.dim + row_idx] = dot;
     } else if (target_stage == 1u) {
         // K -> K cache
-        // row_idx = head * head_dim + dim_in_head (0..255 for 4 heads * 64 dims)
+        // row_idx = head * head_dim + dim_in_head
         let head = row_idx / params.head_dim;
         let dim_in_head = row_idx % params.head_dim;
-        // batch_offset positions this chunk correctly within the prefill sequence.
-        let cache_idx = ((cache_params.current_pos + params.batch_offset + token_idx) * params.head_count_kv * params.head_dim)
+        // token_idx already includes batch_offset (absolute in-batch index).
+        // Do NOT add batch_offset again — that double-counted and wrote K/V to
+        // 2*t for chunked multi-token prefill (SHIMMY_PREFILL_CHUNK default 1).
+        let cache_idx = ((cache_params.current_pos + token_idx) * params.head_count_kv * params.head_dim)
                       + (head * params.head_dim)
                       + dim_in_head;
         kv_cache_k[cache_idx] = dot; 
@@ -572,7 +593,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // V -> V cache
         let head = row_idx / params.head_dim;
         let dim_in_head = row_idx % params.head_dim;
-        let cache_idx = ((cache_params.current_pos + params.batch_offset + token_idx) * params.head_count_kv * params.head_dim)
+        let cache_idx = ((cache_params.current_pos + token_idx) * params.head_count_kv * params.head_dim)
                       + (head * params.head_dim)
                       + dim_in_head;
         kv_cache_v[cache_idx] = dot;
@@ -839,8 +860,8 @@ fn main_post_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
 
-    // Apply post-attn norm weight (slot 2 per layer: layer_idx * 4 + 2)
-    let norm_offset_base = (offsets.layer_idx * 4u + 2u) * params.dim;
+    // Apply post-attn norm weight (4-slot:2 / 6-slot:4)
+    let norm_offset_base = norm_bank_base(post_attn_norm_slot());
     let norm_w = norm_bank[norm_offset_base + idx];
     let dot = temp_state[temp_base + attn_stash_base + idx];
     let normed_dot = dot * rms * norm_w;
@@ -874,8 +895,8 @@ fn main_post_ffw_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
 
-    // Apply post-ffw norm weight (slot 3 per layer: layer_idx * 4 + 3)
-    let norm_offset_base = (offsets.layer_idx * 4u + 3u) * params.dim;
+    // Apply post-ffw norm weight (4-slot:3 / 6-slot:5)
+    let norm_offset_base = norm_bank_base(post_ffw_norm_slot());
     let norm_w = norm_bank[norm_offset_base + idx];
     let dot = temp_state[temp_base + params.ffn_dim * 2u + idx];
     let normed_dot = dot * rms * norm_w;
@@ -971,7 +992,7 @@ fn main_ffn_norm(
     }
 
     // ── 3. Write normalized + norm-weight-scaled activations ────────────────
-    let norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
+    let norm_offset_base = norm_bank_base(ffn_norm_slot());
     for (var j = lx; j < params.dim; j += 256u) {
         let norm_w = norm_bank[norm_offset_base + j];
         let norm_b = select(0.0, bitcast<f32>(read_blob(offsets.ffn_norm_bias / 4u + j)), offsets.ffn_norm_bias != 0u);
@@ -1013,7 +1034,7 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
             sum_sq += val * val;
         }
         rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
-        norm_offset_base = (offsets.layer_idx * 4u + 1u) * params.dim;
+        norm_offset_base = norm_bank_base(ffn_norm_slot());
     }
 
     // Select Matrix and formula slot

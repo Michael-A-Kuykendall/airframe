@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airframe.local/schemas/stack.schema.v1.json",
+  "title": "airframe.stack.v1",
+  "description": "Unified inference stack dump for Airframe / llama / candle columns. Frozen by OBS-0 (airframe-ate.1).",
+  "type": "object",
+  "required": ["schema", "engine", "prompt", "config", "tokens", "layers", "final", "decode"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "const": "airframe.stack.v1"
+    },
+    "engine": {
+      "type": "string",
+      "description": "e.g. airframe_product, airframe_sequential, llama, candle"
+    },
+    "engine_detail": {
+      "type": "string"
+    },
+    "model_path": {
+      "type": "string"
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captured_at": {
+      "type": "string"
+    },
+    "config": {
+      "type": "object",
+      "required": ["arch", "n_layer", "n_embd", "n_head", "n_kv_head", "head_dim"],
+      "additionalProperties": true,
+      "properties": {
+        "arch": { "type": "string" },
+        "n_layer": { "type": "integer", "minimum": 0 },
+        "n_embd": { "type": "integer", "minimum": 1 },
+        "n_head": { "type": "integer", "minimum": 1 },
+        "n_kv_head": { "type": "integer", "minimum": 1 },
+        "head_dim": { "type": "integer", "minimum": 1 },
+        "rope_base": { "type": "number" },
+        "rope_dim": { "type": "integer" },
+        "rms_eps": { "type": "number" },
+        "qk_norm": { "type": "boolean" },
+        "n_ctx_capped": { "type": "integer" }
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "required": ["ids"],
+      "additionalProperties": true,
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 1
+        },
+        "pieces": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "add_bos": { "type": "boolean" }
+      }
+    },
+    "embedding": {
+      "oneOf": [
+        { "$ref": "#/$defs/tensorStats" },
+        { "$ref": "#/$defs/levelStatus" }
+      ]
+    },
+    "layers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/layer" }
+    },
+    "final": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "post_norm_rms": { "type": ["number", "null"] },
+        "logits": { "$ref": "#/$defs/logits" },
+        "status": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "decode": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "skipped", "unsupported", "error"]
+        },
+        "reason": { "type": "string" },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/decodeStep" }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "product_shell": {
+      "type": "object",
+      "description": "Level 8 — template source, rendered length, stop tokens, temperature",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "levelStatus": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["unsupported", "skipped", "error"]
+        },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "tensorStats": {
+      "type": "object",
+      "required": ["rms", "nan_count"],
+      "additionalProperties": true,
+      "properties": {
+        "position": { "type": "integer", "minimum": 0 },
+        "rms": { "type": "number" },
+        "first8": {
+          "type": "array",
+          "items": { "type": "number" },
+          "maxItems": 8
+        },
+        "nan_count": { "type": "integer", "minimum": 0 },
+        "sampled": {
+          "type": "string",
+          "description": "Honesty tag for L4 stages: real|proxy|unavailable|temp_last|activation_last|wrong_buffer",
+          "enum": [
+            "real",
+            "proxy",
+            "unavailable",
+            "temp_last",
+            "activation_last",
+            "wrong_buffer",
+            "proxy_residual"
+          ]
+        }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "required": ["layer_idx", "position", "residual"],
+      "additionalProperties": true,
+      "properties": {
+        "layer_idx": { "type": "integer", "minimum": 0 },
+        "position": { "type": "integer", "minimum": 0 },
+        "residual": { "$ref": "#/$defs/tensorStats" },
+        "stages": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "$ref": "#/$defs/tensorStats" },
+              { "$ref": "#/$defs/levelStatus" }
+            ]
+          }
+        },
+        "tensors": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "status": { "type": "string" },
+            "reason": { "type": "string" },
+            "q": { "oneOf": [{ "$ref": "#/$defs/tensorStats" }, { "type": "null" }] },
+            "k": { "oneOf": [{ "$ref": "#/$defs/tensorStats" }, { "type": "null" }] },
+            "v": { "oneOf": [{ "$ref": "#/$defs/tensorStats" }, { "type": "null" }] },
+            "post": { "oneOf": [{ "$ref": "#/$defs/tensorStats" }, { "type": "null" }] },
+            "ffn": { "oneOf": [{ "$ref": "#/$defs/tensorStats" }, { "type": "null" }] },
+            "output": { "oneOf": [{ "$ref": "#/$defs/tensorStats" }, { "type": "null" }] }
+          }
+        }
+      }
+    },
+    "logits": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "len": { "type": "integer", "minimum": 0 },
+        "rms": { "type": ["number", "null"] },
+        "max": { "type": ["number", "null"] },
+        "nan_count": { "type": "integer", "minimum": 0 },
+        "argmax": { "$ref": "#/$defs/tokenScore" },
+        "top_k": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/tokenScore" }
+        }
+      }
+    },
+    "tokenScore": {
+      "type": "object",
+      "required": ["id", "logit"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "integer" },
+        "piece": { "type": "string" },
+        "logit": { "type": "number" }
+      }
+    },
+    "decodeStep": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "step": { "type": "integer", "minimum": 0 },
+        "in_token": { "type": "integer" },
+        "residual_rms": { "type": ["number", "null"] },
+        "top1": { "$ref": "#/$defs/tokenScore" },
+        "logits_max": { "type": ["number", "null"] },
+        "nan_count": { "type": "integer" }
+      }
+    }
+  }
+}

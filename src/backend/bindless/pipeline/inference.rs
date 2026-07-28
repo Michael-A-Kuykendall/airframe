@@ -56,6 +56,57 @@ pub fn invariant_capture_sink_mut(
     unsafe { INVARIANT_CAPTURE.map(|p| &mut *p) }
 }
 
+// ── Stack dump capture (OBS-1 / PEEL): residual + per-stage intercepts ────────
+// Enabled when a stack sink is installed (stack_dump_gpu / AIRFRAME_STACK_DUMP).
+// Shares the same GPU readback as invariant capture when both are active.
+// Stage snaps follow airframe/docs/PEEL_STRUCTURE.md (correct buffer+offset+count).
+#[cfg(feature = "isf")]
+#[derive(Clone, Debug)]
+pub struct StageSnap {
+    pub name: String,
+    pub rms: f32,
+    pub first8: Vec<f32>,
+    pub nan_count: u32,
+    pub count: u32,
+    pub buffer: String,
+    pub offset_elems: u32,
+    pub sampled: String,
+}
+
+#[cfg(feature = "isf")]
+#[derive(Clone, Debug)]
+pub struct StackLayerSnap {
+    pub layer_idx: u32,
+    pub position: u32,
+    pub rms: f32,
+    pub first8: Vec<f32>,
+    pub nan_count: u32,
+    pub residual_in: Option<StageSnap>,
+    pub stages: Vec<StageSnap>,
+}
+
+#[cfg(feature = "isf")]
+pub static mut STACK_LAYER_CAPTURE: Option<*mut Vec<StackLayerSnap>> = None;
+
+#[cfg(feature = "isf")]
+pub fn set_stack_layer_capture_sink(sink: &mut Vec<StackLayerSnap>) {
+    unsafe {
+        STACK_LAYER_CAPTURE = Some(sink as *mut Vec<StackLayerSnap>);
+    }
+}
+
+#[cfg(feature = "isf")]
+pub fn clear_stack_layer_capture_sink() {
+    unsafe {
+        STACK_LAYER_CAPTURE = None;
+    }
+}
+
+#[cfg(feature = "isf")]
+pub fn stack_layer_capture_sink_mut() -> Option<&'static mut Vec<StackLayerSnap>> {
+    unsafe { STACK_LAYER_CAPTURE.map(|p| &mut *p) }
+}
+
 // ── PPT Invariant Per-Tensor Capture Hook ───────────────────────────────────
 // Mirrors the layer sink but carries the per-kernel activation stats
 // (q/k/v/post-attn/ffn/output RMS+checksum) for one transformer layer. This is
@@ -104,9 +155,147 @@ pub fn invariant_ptensor_capture_sink_mut() -> Option<&'static mut Vec<CapturedP
     unsafe { INVARIANT_PTENSOR_CAPTURE.map(|p| &mut *p) }
 }
 
+/// Factory bead P1: mid-layer stage TRACE.
+/// Enabled when `AIRFRAME_TRACE_STAGES=1`, or when multi-token prefill runs with
+/// `AIRFRAME_TRACE_PREFILL_LAYERS=1` (so certify_family packages get stages).
+fn stage_trace_enabled(batch_size: u32) -> bool {
+    if std::env::var("AIRFRAME_TRACE_STAGES")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    batch_size > 1
+        && std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+}
+
+/// Force-yield pending GPU work, copy `n_f32` floats from `src`@`offset` into
+/// `readback`, return stats. `readback` must be ≥ n_f32 * 4 bytes.
+#[allow(clippy::too_many_arguments)]
+fn peel_stage_readback(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tdr: &mut TdrScheduler<'_>,
+    src: &wgpu::Buffer,
+    offset: u64,
+    n_f32: u32,
+    readback: &wgpu::Buffer,
+    layer: usize,
+    stage: &str,
+    buffer_name: &str,
+    offset_elems: u32,
+    first_nan_stage: &mut Option<String>,
+    log_trace: bool,
+) -> Result<StageSnapHost, String> {
+    let n_f32 = n_f32.max(1);
+    let byte_len = (n_f32 as u64) * 4;
+    let label = format!("peel-L{}-{}", layer, stage);
+    tdr.force_yield(&label)?;
+
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&label),
+    });
+    enc.copy_buffer_to_buffer(src, offset, readback, 0, byte_len);
+    queue.submit(Some(enc.finish()));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|_| format!("GPU lost during stage peel ({})", label))?;
+    tdr.reset_accumulator();
+
+    let slice = readback.slice(..byte_len);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |res| {
+        let _ = tx.send(res);
+    });
+    loop {
+        device
+            .poll(wgpu::PollType::Poll)
+            .map_err(|_| format!("GPU lost during stage peel poll ({})", label))?;
+        if let Ok(res) = rx.try_recv() {
+            res.map_err(|_| format!("stage peel map failed ({})", label))?;
+            break;
+        }
+    }
+    let mapped = slice.get_mapped_range();
+    let vals: &[f32] = bytemuck::cast_slice(&mapped);
+    let nan_count = vals.iter().filter(|&&x| x.is_nan()).count() as u32;
+    let first8: Vec<f32> = vals.iter().take(8).copied().collect();
+    let sum_sq: f32 = vals.iter().map(|x| x * x).sum();
+    let rms = if vals.is_empty() {
+        0.0
+    } else {
+        (sum_sq / vals.len() as f32).sqrt()
+    };
+    if log_trace {
+        let first5: Vec<f32> = vals.iter().take(5).copied().collect();
+        eprintln!(
+            "[STAGE-TRACE] layer={} stage={} nan={}/{} rms={:.6} first5={:?} buf={} off={} count={}",
+            layer,
+            stage,
+            nan_count,
+            vals.len(),
+            rms,
+            first5,
+            buffer_name,
+            offset_elems,
+            n_f32
+        );
+    }
+    if nan_count > 0 && first_nan_stage.is_none() {
+        let tag = format!("layer{}/{}", layer, stage);
+        eprintln!("[STAGE-TRACE] FIRST_NAN_STAGE={}", tag);
+        *first_nan_stage = Some(tag);
+    }
+    let snap = StageSnapHost {
+        name: stage.to_string(),
+        rms,
+        first8,
+        nan_count,
+        count: n_f32,
+        buffer: buffer_name.to_string(),
+        offset_elems,
+        sampled: "real".to_string(),
+    };
+    drop(mapped);
+    readback.unmap();
+    Ok(snap)
+}
+
+/// Host-side stage snap (always available; converted to `StageSnap` under `isf`).
+#[derive(Clone, Debug)]
+struct StageSnapHost {
+    name: String,
+    rms: f32,
+    first8: Vec<f32>,
+    nan_count: u32,
+    count: u32,
+    buffer: String,
+    offset_elems: u32,
+    sampled: String,
+}
+
+#[cfg(feature = "isf")]
+impl StageSnapHost {
+    fn into_stage_snap(self) -> StageSnap {
+        StageSnap {
+            name: self.name,
+            rms: self.rms,
+            first8: self.first8,
+            nan_count: self.nan_count,
+            count: self.count,
+            buffer: self.buffer,
+            offset_elems: self.offset_elems,
+            sampled: self.sampled,
+        }
+    }
+}
+
 /// Read back the post-layer activation and append a `CapturedLayer` to the sink.
 /// Mirrors the existing `trace_prefill_layers` readback (copy → submit → poll →
 /// map → read → unmap) but routes the values into the probe's capture sink.
+/// `stages` / `residual_in` are PEEL intercepts already read during the layer loop.
 #[cfg(feature = "isf")]
 #[allow(clippy::too_many_arguments)]
 fn emit_layer_capture(
@@ -118,17 +307,21 @@ fn emit_layer_capture(
     readback_buffer: &wgpu::Buffer,
     offset: u64,
     byte_len: u64,
+    residual_in: Option<StageSnap>,
+    stages: Vec<StageSnap>,
 ) {
-    if !std::env::var("AIRFRAME_CAPTURE_INVARIANT")
+    let inv_on = std::env::var("AIRFRAME_CAPTURE_INVARIANT")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
+        .unwrap_or(false);
+    let inv_sink = if inv_on {
+        invariant_capture_sink_mut()
+    } else {
+        None
+    };
+    let stack_sink = stack_layer_capture_sink_mut();
+    if inv_sink.is_none() && stack_sink.is_none() {
         return;
     }
-    let sink = match invariant_capture_sink_mut() {
-        Some(s) => s,
-        None => return,
-    };
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some(&format!("Invariant Capture Layer {}", layer_idx)),
     });
@@ -137,7 +330,7 @@ fn emit_layer_capture(
     device
         .poll(wgpu::PollType::wait_indefinitely())
         .expect("GPU device lost during invariant capture");
-    let slice = readback_buffer.slice(..);
+    let slice = readback_buffer.slice(..byte_len);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| {
         let _ = tx.send(res);
@@ -155,15 +348,30 @@ fn emit_layer_capture(
     let vals: &[f32] = bytemuck::cast_slice(&mapped);
     let rms = airframe_observe::facts::rms(vals);
     let checksum = airframe_observe::facts::checksum(vals);
+    let nan_count = vals.iter().filter(|x| x.is_nan()).count() as u32;
+    let first8: Vec<f32> = vals.iter().take(8).copied().collect();
+    if let Some(sink) = inv_sink {
+        sink.push(airframe_observe::facts::CapturedLayer {
+            layer_idx,
+            position,
+            rms,
+            checksum,
+            is_final_logits: false,
+        });
+    }
+    if let Some(sink) = stack_sink {
+        sink.push(StackLayerSnap {
+            layer_idx,
+            position,
+            rms,
+            first8,
+            nan_count,
+            residual_in,
+            stages,
+        });
+    }
     drop(mapped);
     readback_buffer.unmap();
-    sink.push(airframe_observe::facts::CapturedLayer {
-        layer_idx,
-        position,
-        rms,
-        checksum,
-        is_final_logits: false,
-    });
 }
 
 /// Push a layer's per-kernel activation stats into the per-tensor capture sink.
@@ -525,9 +733,25 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
 
+        // PEEL stage readback: must fit largest intercept (Q, attn_ctx, 2*ffn).
+        let dim_q = (spec.n_head * spec.head_dim) as u32;
+        let dim_kv = (spec.n_head_kv * spec.head_dim) as u32;
+        let peel_max_elems = dim
+            .max(dim_q)
+            .max(dim_kv)
+            .max(ffn_dim.saturating_mul(2))
+            .max(1);
+        let stage_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("PEEL Stage Readback"),
+            size: (peel_max_elems as u64) * 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // E. KV Cache
         // Shader cache indexing is layer-local: [pos, kv_head, head_dim] with no layer axis.
         // Therefore full-model loop must bind a distinct K/V buffer per layer.
+        // COPY_SRC required for PEEL K/V intercepts.
         let kv_size_per_buffer = spec.kv_cache_size_per_layer as u64;
         let local_kv_storage_per_layer = if kv_state.is_none() {
             let mut bufs = Vec::with_capacity(layer_count);
@@ -535,14 +759,14 @@ impl BindlessPipeline {
                 let kv_buffer_k = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(&format!("KV Cache K L{}", i)),
                     size: kv_size_per_buffer,
-                    usage: wgpu::BufferUsages::STORAGE,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 });
 
                 let kv_buffer_v = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(&format!("KV Cache V L{}", i)),
                     size: kv_size_per_buffer,
-                    usage: wgpu::BufferUsages::STORAGE,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 });
 
@@ -1047,15 +1271,67 @@ impl BindlessPipeline {
         // QKV Dispatch Calculation
         let q_len = params_base.head_count * params_base.head_dim;
         let kv_len = params_base.head_count_kv * params_base.head_dim;
+        let attn_dim = q_len; // n_head * head_dim (Qwen3: 4096 ≠ dim 2560)
         let total_qkv = q_len + kv_len * 2;
         let wg_qkv = total_qkv.div_ceil(256);
         let wg_qknorm = (q_len + kv_len).div_ceil(256); // must cover all Q+K elements, not just head_dim
+        // CRITICAL: attn_out writes [0..attn_dim), not [0..dim). Under-dispatch left
+        // elements dim..attn_dim-1 unwritten → garbage O-proj for Qwen3.
+        let wg_attn = attn_dim.div_ceil(256);
         let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
         let disable_output_norm = std::env::var("SHIMMY_DISABLE_OUTPUT_NORM")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+        // P1: stage TRACE (layer 0 multi-token). Also on when prefill TRACE + batch>1.
+        let do_stage_trace = stage_trace_enabled(batch_size);
+        // PEEL: full stage intercepts when stack sink installed (all layers) or TRACE (L0).
+        #[cfg(feature = "isf")]
+        let stack_peel_all = stack_layer_capture_sink_mut().is_some();
+        #[cfg(not(feature = "isf"))]
+        let stack_peel_all = false;
+        let do_peel = do_stage_trace || stack_peel_all;
+        let mut first_nan_stage: Option<String> = None;
+        let temp_last_offset = (batch_size as u64 - 1) * (temp_stride as u64) * 4;
+        // Q lives at temp_base + dim; last-token Q byte offset
+        let temp_q_offset = temp_last_offset + (dim as u64) * 4;
+        // Last-token KV cache position (absolute)
+        let last_kv_pos = current_pos + batch_size.saturating_sub(1);
+        let kv_last_offset = (last_kv_pos as u64) * (kv_len as u64) * 4;
+        let qk_norm_on = params_base.qk_norm_enabled != 0;
+
+        if do_peel {
+            eprintln!(
+                "[PEEL] enabled batch_size={} current_pos={} seq_len={} dim={} dim_q={} dim_kv={} ffn_dim={} attn_dim={} stack_all={} trace={}",
+                batch_size,
+                current_pos,
+                seq_len,
+                dim,
+                q_len,
+                kv_len,
+                ffn_dim,
+                attn_dim,
+                stack_peel_all,
+                do_stage_trace
+            );
+            // Residual input (embeddings) for last token — before any layer
+            let _ = peel_stage_readback(
+                device,
+                queue,
+                &mut tdr,
+                &activation_buffer,
+                last_token_offset,
+                dim,
+                &stage_readback_buffer,
+                0,
+                "input",
+                "activation",
+                0,
+                &mut first_nan_stage,
+                do_stage_trace,
+            )?;
+        }
 
         // Loop Layers
         for (i, bg) in layer_bind_groups.iter().enumerate() {
@@ -1066,6 +1342,11 @@ impl BindlessPipeline {
                     i, batch_size, current_pos, seq_len
                 );
             }
+            // TRACE logs layer 0; stack peel captures every layer when sink installed.
+            let peel_this_layer = (do_stage_trace && i == 0) || stack_peel_all;
+            let log_trace = do_stage_trace && i == 0;
+            let mut residual_in_snap: Option<StageSnapHost> = None;
+            let mut stages_host: Vec<StageSnapHost> = Vec::new();
             // All models use V1 pipelines. V1 handles all quant types (Q4_0, Q4_K, Q5_K,
             // Q6_K, F16, F32) via per-kernel quant_type branch checks and proven-correct
             // dequant helpers. The Q4K-specific shader family has been removed.
@@ -1093,6 +1374,25 @@ impl BindlessPipeline {
                 &self.layer_pipeline_post_ffw_norm,
             );
 
+            // L.S0 residual_in (activation before AttnNorm)
+            if peel_this_layer {
+                residual_in_snap = Some(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &activation_buffer,
+                    last_token_offset,
+                    dim,
+                    &stage_readback_buffer,
+                    i,
+                    "residual_in",
+                    "activation",
+                    0,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+            }
+
             {
                 let mut cpass = tdr
                     .encoder
@@ -1103,6 +1403,24 @@ impl BindlessPipeline {
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_attn_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+            }
+            if peel_this_layer {
+                // L.S1: temp[temp_base .. +dim]
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &temp_buffer,
+                    temp_last_offset,
+                    dim,
+                    &stage_readback_buffer,
+                    i,
+                    "attn_norm",
+                    "temp",
+                    0,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
             }
             // QKV: micro-batched to avoid TDR on large batch prefill.
             // Step 5: uses pre-built per-chunk bind groups — no write_buffer, no forced yields.
@@ -1143,6 +1461,64 @@ impl BindlessPipeline {
                     chunk_idx += 1;
                 }
             }
+            if peel_this_layer {
+                // L.S2a Q: temp[temp_base + dim .. + dim_q]
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &temp_buffer,
+                    temp_q_offset,
+                    q_len,
+                    &stage_readback_buffer,
+                    i,
+                    "q",
+                    "temp",
+                    dim,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+                // L.S2b/S2c K/V at last token position in per-layer KV buffers
+                let (kv_k_ref, kv_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
+                    if let Some((kv_k_layers, kv_v_layers)) = kv_state {
+                        (&kv_k_layers[i], &kv_v_layers[i])
+                    } else {
+                        let (local_k, local_v) = &local_kv_storage_per_layer
+                            .as_ref()
+                            .expect("local KV storage missing")[i];
+                        (local_k, local_v)
+                    };
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    kv_k_ref,
+                    kv_last_offset,
+                    kv_len,
+                    &stage_readback_buffer,
+                    i,
+                    "k",
+                    "kv_k",
+                    last_kv_pos * kv_len,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    kv_v_ref,
+                    kv_last_offset,
+                    kv_len,
+                    &stage_readback_buffer,
+                    i,
+                    "v",
+                    "kv_v",
+                    last_kv_pos * kv_len,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+            }
             {
                 let mut cpass = tdr
                     .encoder
@@ -1154,6 +1530,48 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_qk_norm);
                 cpass.dispatch_workgroups(wg_qknorm, batch_size, 1);
             }
+            if peel_this_layer && qk_norm_on {
+                // L.S3a/S3b after in-place QK-norm
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &temp_buffer,
+                    temp_q_offset,
+                    q_len,
+                    &stage_readback_buffer,
+                    i,
+                    "q_norm",
+                    "temp",
+                    dim,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+                let (kv_k_ref, _): (&wgpu::Buffer, &wgpu::Buffer) =
+                    if let Some((kv_k_layers, kv_v_layers)) = kv_state {
+                        (&kv_k_layers[i], &kv_v_layers[i])
+                    } else {
+                        let (local_k, local_v) = &local_kv_storage_per_layer
+                            .as_ref()
+                            .expect("local KV storage missing")[i];
+                        (local_k, local_v)
+                    };
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    kv_k_ref,
+                    kv_last_offset,
+                    kv_len,
+                    &stage_readback_buffer,
+                    i,
+                    "k_norm",
+                    "kv_k",
+                    last_kv_pos * kv_len,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+            }
             {
                 let mut cpass = tdr
                     .encoder
@@ -1163,7 +1581,25 @@ impl BindlessPipeline {
                     });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_attn_out);
-                cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+                cpass.dispatch_workgroups(wg_attn, batch_size, 1);
+            }
+            if peel_this_layer {
+                // L.S4 attn_ctx: temp[0..attn_dim]
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &temp_buffer,
+                    temp_last_offset,
+                    attn_dim,
+                    &stage_readback_buffer,
+                    i,
+                    "attn_ctx",
+                    "temp",
+                    0,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
             }
             // TDR: yield after attn_out only if accumulated budget exceeded.
             // For large batch prefill: force yield after attn_out to prevent TDR.
@@ -1185,6 +1621,24 @@ impl BindlessPipeline {
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_attn_proj);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+            }
+            if peel_this_layer {
+                // L.S5b residual after attn residual-add
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &activation_buffer,
+                    last_token_offset,
+                    dim,
+                    &stage_readback_buffer,
+                    i,
+                    "attn_residual",
+                    "activation",
+                    0,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
             }
             {
                 // Post-attention norm correction (Gemma-2 only; no-op for post_norm_enabled==0)
@@ -1210,6 +1664,24 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_ffn_norm);
                 cpass.dispatch_workgroups(1, batch_size, 1);
             }
+            if peel_this_layer {
+                // L.S7 ffn_norm output in temp[0..dim] (V1 path)
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &temp_buffer,
+                    temp_last_offset,
+                    dim,
+                    &stage_readback_buffer,
+                    i,
+                    "ffn_norm",
+                    "temp",
+                    0,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+            }
             {
                 let mut cpass = tdr
                     .encoder
@@ -1221,6 +1693,39 @@ impl BindlessPipeline {
                 cpass.set_pipeline(pipe_ffn_proj);
                 cpass.dispatch_workgroups(wg_ffn, batch_size, 1);
             }
+            if peel_this_layer {
+                // L.S8a/S8b gate + up
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &temp_buffer,
+                    temp_last_offset,
+                    ffn_dim,
+                    &stage_readback_buffer,
+                    i,
+                    "ffn_gate",
+                    "temp",
+                    0,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &temp_buffer,
+                    temp_last_offset + (ffn_dim as u64) * 4,
+                    ffn_dim,
+                    &stage_readback_buffer,
+                    i,
+                    "ffn_up",
+                    "temp",
+                    ffn_dim,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
+            }
             {
                 let mut cpass = tdr
                     .encoder
@@ -1231,6 +1736,24 @@ impl BindlessPipeline {
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_ffn_down);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+            }
+            if peel_this_layer {
+                // L.S9b residual out
+                stages_host.push(peel_stage_readback(
+                    device,
+                    queue,
+                    &mut tdr,
+                    &activation_buffer,
+                    last_token_offset,
+                    dim,
+                    &stage_readback_buffer,
+                    i,
+                    "ffn_residual",
+                    "activation",
+                    0,
+                    &mut first_nan_stage,
+                    log_trace,
+                )?);
             }
             // TDR: yield after ffn_down only if accumulated budget exceeded.
             {
@@ -1272,19 +1795,31 @@ impl BindlessPipeline {
             // activation is the LAST token in the batch (the one we care about).
             // For the golden [BOS,Hello] prefill (current_pos=0) this is position 1.
             #[cfg(feature = "isf")]
-            emit_layer_capture(
-                i as u32,
-                current_pos + 1,
-                device,
-                queue,
-                &activation_buffer,
-                &pre_norm_buffer,
-                last_token_offset,
-                (dim as u64) * 4,
-            );
+            {
+                let residual_in = residual_in_snap.map(|s| s.into_stage_snap());
+                let stages: Vec<StageSnap> =
+                    stages_host.into_iter().map(|s| s.into_stage_snap()).collect();
+                emit_layer_capture(
+                    i as u32,
+                    current_pos + batch_size.saturating_sub(1),
+                    device,
+                    queue,
+                    &activation_buffer,
+                    &pre_norm_buffer,
+                    last_token_offset,
+                    (dim as u64) * 4,
+                    residual_in,
+                    stages,
+                );
+            }
 
             if trace_prefill_layers {
-                // Layer trace readback — uses its own encoder, separate from tdr.
+                // Must flush pending layer work first. For batch_size==1 the
+                // layer-boundary path only yield_if_needed — without this force,
+                // TRACE copy sees the *pre*-layer residual (embedding) for every
+                // layer → false "identity residual" (Q3 diagnostic phantom).
+                tdr.force_yield(&format!("layer-{}-pre-trace", i))?;
+                // Layer trace readback — uses its own encoder after TDR flush.
                 let mut trace_encoder =
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some(&format!("Layer {} Trace Readback", i)),
@@ -1333,6 +1868,13 @@ impl BindlessPipeline {
 
             if trace_prefill_layers {
                 eprintln!("[PREFILL-LAYER] complete layer={}", i);
+            }
+        }
+
+        if do_peel {
+            match &first_nan_stage {
+                Some(s) => eprintln!("[PEEL] SUMMARY FIRST_NAN_STAGE={}", s),
+                None => eprintln!("[PEEL] SUMMARY FIRST_NAN_STAGE=none"),
             }
         }
 

@@ -421,7 +421,7 @@ impl BindlessPipeline {
             });
             cpass.set_bind_group(0, &bind_group, &[]);
             cpass.set_pipeline(&self.layer_pipeline_attn_out);
-            cpass.dispatch_workgroups(wg_dim, 1, 1);
+            cpass.dispatch_workgroups(q_len.div_ceil(256), 1, 1);
         }
 
         // Kernel 4: Attention Projection
@@ -706,7 +706,7 @@ impl BindlessPipeline {
             });
             cpass.set_bind_group(0, &bind_group, &[]);
             cpass.set_pipeline(&self.layer_pipeline_attn_out);
-            cpass.dispatch_workgroups(wg_dim, 1, 1);
+            cpass.dispatch_workgroups(q_len.div_ceil(256), 1, 1);
         } // ← GPU waits for Attn to finish
 
         // Kernel 4: Attention output projection
@@ -1104,7 +1104,7 @@ impl BindlessPipeline {
                 });
                 cp.set_bind_group(0, &layer_bg_int4, &[]);
                 cp.set_pipeline(&self.layer_pipeline_attn_out_int4);
-                cp.dispatch_workgroups(wg_dim, 1, 1);
+                cp.dispatch_workgroups(q_len.div_ceil(256), 1, 1);
             }
             {
                 let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1477,7 +1477,7 @@ impl BindlessPipeline {
             });
             cpass.set_bind_group(0, &bind_group, &[]);
             cpass.set_pipeline(&self.layer_pipeline_attn_out);
-            cpass.dispatch_workgroups(wg_dim, 1, 1);
+            cpass.dispatch_workgroups(q_len.div_ceil(256), 1, 1);
         }
 
         {
