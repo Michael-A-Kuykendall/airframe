@@ -1,0 +1,42 @@
+{
+  "schema": "airframe.stack.v1",
+  "engine": "fixture",
+  "prompt": "The capital of France is",
+  "config": {
+    "arch": "qwen3",
+    "n_layer": 1,
+    "n_embd": 2560,
+    "n_head": 32,
+    "n_kv_head": 8,
+    "head_dim": 128,
+    "rope_base": 1000000.0,
+    "qk_norm": true,
+    "ffn_dim": 9728
+  },
+  "tokens": { "ids": [1, 2, 3] },
+  "layers": [
+    {
+      "layer_idx": 0,
+      "position": 2,
+      "residual": { "rms": 0.1, "first8": [], "nan_count": 0 },
+      "stages": {
+        "attn_norm": { "count": 2560, "nan_count": 0, "sampled": "real" },
+        "q": { "count": 2560, "nan_count": 0, "sampled": "real" },
+        "k": { "count": 1024, "nan_count": 0, "sampled": "real" },
+        "v": { "count": 1024, "nan_count": 0, "sampled": "real" },
+        "q_norm": { "count": 4096, "nan_count": 0, "sampled": "real" },
+        "k_norm": { "count": 1024, "nan_count": 0, "sampled": "real" },
+        "attn_ctx": { "count": 2560, "nan_count": 0, "sampled": "real" },
+        "attn_residual": { "count": 2560, "nan_count": 0, "sampled": "real" },
+        "ffn_norm": { "count": 2560, "nan_count": 0, "sampled": "real" },
+        "ffn_gate": { "count": 9728, "nan_count": 0, "sampled": "real" },
+        "ffn_up": { "count": 9728, "nan_count": 0, "sampled": "real" },
+        "ffn_residual": { "count": 2560, "nan_count": 0, "sampled": "real" }
+      }
+    }
+  ],
+  "final": {
+    "logits": { "len": 10, "nan_count": 0 }
+  },
+  "decode": { "status": "skipped" }
+}

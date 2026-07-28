@@ -1,0 +1,52 @@
+{
+  "schema": "airframe.stack.v1",
+  "engine": "fixture",
+  "prompt": "The capital of France is",
+  "config": {
+    "arch": "qwen3",
+    "n_layer": 1,
+    "n_embd": 2560,
+    "n_head": 32,
+    "n_kv_head": 8,
+    "head_dim": 128,
+    "rope_base": 1000000.0,
+    "rope_dim": 128,
+    "rms_eps": 1e-6,
+    "qk_norm": true,
+    "ffn_dim": 9728
+  },
+  "tokens": { "ids": [1, 2, 3, 4, 5] },
+  "layers": [
+    {
+      "layer_idx": 0,
+      "position": 4,
+      "residual_in": {
+        "rms": 0.01,
+        "first8": [0, 0, 0, 0, 0, 0, 0, 0],
+        "nan_count": 0,
+        "count": 2560,
+        "sampled": "real"
+      },
+      "residual": { "rms": 0.1, "first8": [], "nan_count": 0 },
+      "stages": {
+        "attn_norm": { "rms": 0.02, "first8": [], "nan_count": 0, "count": 2560, "sampled": "real" },
+        "q": { "rms": 0.1, "first8": [], "nan_count": 0, "count": 4096, "sampled": "real" },
+        "k": { "rms": 0.1, "first8": [], "nan_count": 0, "count": 1024, "sampled": "real" },
+        "v": { "rms": 0.1, "first8": [], "nan_count": 0, "count": 1024, "sampled": "real" },
+        "q_norm": { "rms": 1.0, "first8": [], "nan_count": 0, "count": 4096, "sampled": "real" },
+        "k_norm": { "rms": 1.0, "first8": [], "nan_count": 0, "count": 1024, "sampled": "real" },
+        "attn_ctx": { "rms": 0.02, "first8": [], "nan_count": 0, "count": 4096, "sampled": "real" },
+        "attn_residual": { "rms": 0.08, "first8": [], "nan_count": 0, "count": 2560, "sampled": "real" },
+        "ffn_norm": { "rms": 0.02, "first8": [], "nan_count": 0, "count": 2560, "sampled": "real" },
+        "ffn_gate": { "rms": 0.1, "first8": [], "nan_count": 0, "count": 9728, "sampled": "real" },
+        "ffn_up": { "rms": 0.2, "first8": [], "nan_count": 0, "count": 9728, "sampled": "real" },
+        "ffn_residual": { "rms": 0.14, "first8": [], "nan_count": 0, "count": 2560, "sampled": "real" }
+      }
+    }
+  ],
+  "final": {
+    "post_norm_rms": 1.0,
+    "logits": { "len": 100, "rms": 1.0, "nan_count": 0, "argmax": { "id": 1, "piece": "x", "logit": 1.0 } }
+  },
+  "decode": { "status": "skipped" }
+}
