@@ -65,7 +65,7 @@ impl From<&str> for ModelArch {
             "llama" => Self::Llama,
             "mistral" => Self::Mistral,
             "phi" | "phi2" | "phi3" => Self::Phi,
-            "gemma" | "gemma2" => Self::Gemma,
+            "gemma" | "gemma2" | "gemma4" | "gemma6" => Self::Gemma,
             "qwen2" => Self::Qwen2,
             "qwen3" => Self::Qwen3,
             other => Self::Other(other.to_string()),
