@@ -971,6 +971,15 @@ impl GpuRuntime {
             }
         };
 
+        let buf_size = (tensor_f32.data.len() as u64) * 4;
+        let max_buf = device.limits().max_buffer_size;
+        if buf_size > max_buf {
+            return Err(format!(
+                "Output head F32 buffer would be {} bytes, but device max_buffer_size={}",
+                buf_size, max_buf
+            )
+            .into());
+        }
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Output Head F32"),
             contents: bytemuck::cast_slice(&tensor_f32.data),
