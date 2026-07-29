@@ -1392,13 +1392,12 @@ checksum = "7231fcf252b84a01d8a739d19ad92dbc185ec41af8844e7ad7e62fba5a26ebd7"
 
 [[package]]
 name = "shimmytok"
-version = "0.7.1"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af96fc3bd2582df1625f82564b5559af2af0a89b9b03602cd25b8336e57f119c"
+checksum = "682d134c54b2229a1e46e6b1948958005c3320ee3e970760dcff2e04ef79157c"
 dependencies = [
  "fancy-regex",
  "rayon",
- "regex",
  "thiserror 2.0.18",
 ]
 
