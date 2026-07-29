@@ -339,7 +339,8 @@ impl BindlessPipeline {
         quant_type: u32,
     ) -> Vec<f32> {
         let params = DequantAnyParams {
-            offset_bytes,
+            // Shader uses packed offsets (byte/2); word = pack/2 — no pack*2 overflow.
+            offset_bytes: crate::backend::bindless::pipeline::pack_blob_offset(offset_bytes as u64),
             count,
             formula_index: formula_index_for_ggml(quant_type),
             pad: 0,
@@ -350,8 +351,7 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::UNIFORM,
         });
         // Place the blob bytes at byte 0 so word index 0 → blob[0..4].
-        // The shader reads at word `offset_bytes/4`, which is byte `offset_bytes`
-        // in this buffer → blob[offset_bytes] → correct absolute position.
+        // The shader reads at word gob(offset)/4 → byte offset in this buffer.
         let mut blob_full = blob.to_vec();
         // Pad to a multiple of 4 bytes so the last word is fully readable.
         while !blob_full.len().is_multiple_of(4) {
@@ -453,8 +453,9 @@ impl BindlessPipeline {
         count: u32,
         quant_type: u32,
     ) -> Vec<f32> {
+        // Match LayerOffsets packing (byte/2) so >4GiB tensors address correctly.
         let params = DequantAnyParams {
-            offset_bytes,
+            offset_bytes: crate::backend::bindless::pipeline::pack_blob_offset(offset_bytes as u64),
             count,
             formula_index: formula_index_for_ggml(quant_type),
             pad: 0,

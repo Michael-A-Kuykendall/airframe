@@ -129,11 +129,48 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut meta_file = File::open(model_path)?;
     let meta = BindlessMetadata::new(&mut meta_file);
     drop(meta_file);
-    let spec = meta.to_model_spec();
+    let mut spec = meta.to_model_spec();
+    // Cap KV VRAM like production (RTX 3060)
+    if let Ok(max_ctx) = std::env::var("SHIMMY_MAX_CTX") {
+        if let Ok(n) = max_ctx.parse::<usize>() {
+            spec.n_ctx = n;
+            spec = spec.compute_derived();
+        }
+    } else if spec.n_ctx > 8192 {
+        spec.n_ctx = 8192;
+        spec = spec.compute_derived();
+    }
 
-    eprintln!("[Layer Dump] Spec: n_embd={}, n_head={}, n_head_kv={}, head_dim={}, rope_dim={}, n_ctx={}, ffn_dim={}, rms_eps={}, has_qk_norm={}, attn_logit_softcap={}",
-        spec.n_embd, spec.n_head, spec.n_head_kv, spec.n_embd / spec.n_head, spec.rope_dim, spec.n_ctx, spec.ff_dim, spec.rms_eps,
-        spec.has_qk_norm, spec.attn_logit_softcap);
+    // MUST use spec.head_dim (Q-weight-inferred for Qwen3/Gemma), NEVER n_embd/n_head.
+    // Qwen3-4B: n_embd/n_head=80 but real head_dim=128 (attn_q [2560,4096]).
+    let head_dim = spec.head_dim as u32;
+    let rope_dim = if spec.rope_dim > 0 {
+        spec.rope_dim as u32
+    } else {
+        head_dim
+    };
+
+    eprintln!(
+        "[Layer Dump] Spec: n_embd={}, n_head={}, n_head_kv={}, head_dim={} (n_embd/n_head={}), rope_dim={}, n_ctx={}, ffn_dim={}, rms_eps={}, has_qk_norm={}, attn_logit_softcap={}",
+        spec.n_embd,
+        spec.n_head,
+        spec.n_head_kv,
+        head_dim,
+        spec.n_embd / spec.n_head.max(1),
+        rope_dim,
+        spec.n_ctx,
+        spec.ff_dim,
+        spec.rms_eps,
+        spec.has_qk_norm,
+        spec.attn_logit_softcap
+    );
+    if head_dim as usize != spec.n_embd / spec.n_head.max(1) {
+        eprintln!(
+            "[Layer Dump] NOTE: padded head_dim={} != n_embd/n_head={} (correct for Qwen3/Gemma)",
+            head_dim,
+            spec.n_embd / spec.n_head.max(1)
+        );
+    }
 
     let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(model_path), Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
@@ -144,13 +181,19 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         spec.model_name, n_layers
     );
 
-    // === Tokenize ===
+    // === Tokenize (MULTI-TOKEN — single-token hides cross-attention bugs) ===
     let prompt_tokens = tokenizer.encode(prompt, true)?;
     eprintln!(
         "[Layer Dump] Tokens: {:?} ({} tokens)",
         prompt_tokens,
         prompt_tokens.len()
     );
+    if prompt_tokens.len() < 2 {
+        eprintln!(
+            "[Layer Dump] WARNING: prompt tokenized to {} token(s). Use a multi-token prompt.",
+            prompt_tokens.len()
+        );
+    }
 
     // === Setup ===
     let dim = spec.n_embd as u32;
@@ -173,13 +216,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         13 => (dim / 256) * 176, // Q5_K
         14 => (dim / 256) * 210, // Q6_K
         _ => panic!("unsupported embedding quant type: {}", embd_quant_type),
-    };
-
-    let head_dim = (spec.n_embd / spec.n_head) as u32;
-    let rope_dim = if spec.rope_dim > 0 {
-        spec.rope_dim as u32
-    } else {
-        head_dim
     };
 
     let layer_params_base = LayerParams {
@@ -210,7 +246,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         ffn_kind_policy: 0,
         qkv_layout_policy: 0,
         batch_offset: 0,
-        batch_count: 0,
+        // QKV shader early-outs when global_id.y >= batch_count. Must be 1 for
+        // sequential single-token dumps or QKV is a complete no-op.
+        batch_count: 1,
         q_weight_k: 0,
         k_weight_k: 0,
     };
@@ -222,94 +260,127 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         head_dim,
         spec.n_ctx as u32,
     );
+    eprintln!(
+        "[Layer Dump] KVCache: head_dim={} n_head_kv={} n_ctx={}",
+        head_dim, spec.n_head_kv, spec.n_ctx
+    );
 
     let mut layers = Vec::new();
+    let mut first_nan_layer: Option<usize> = None;
 
-    // === Process First Token Only (for dump) ===
-    let token_id = prompt_tokens[0];
-    eprintln!("[Layer Dump] Processing token {} (id={})", 0, token_id);
+    // === Prefill ALL prompt tokens (multi-token path) ===
+    // Capture full per-layer hidden state on the LAST token only (cross-attn exercised).
+    let last_pos = prompt_tokens.len() - 1;
+    for (pos, &token_id) in prompt_tokens.iter().enumerate() {
+        eprintln!(
+            "[Layer Dump] Processing token pos={} id={}",
+            pos, token_id
+        );
 
-    // Get embedding (handles all quant types via dequant_any_hot)
-    let row_offset = embd_weight_offset + (token_id as u64 * embd_row_bytes as u64);
-    let mut layer_output = pipeline.run_dequant_any_hot(
-        &device,
-        &queue,
-        &gpu_model,
-        row_offset as u32,
-        dim,
-        embd_quant_type,
-    );
-
-    eprintln!(
-        "[Layer Dump] Embedding complete (min={:.6}, max={:.6}, mean={:.6})",
-        layer_output.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
-        layer_output
-            .iter()
-            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-        layer_output.iter().sum::<f32>() / layer_output.len() as f32
-    );
-
-    // Capture embedding layer (Layer 0 input)
-    layers.push(LayerOutput {
-        layer_idx: 0,
-        token_id,
-        position: 0,
-        stats: LayerStats::compute(&layer_output),
-        hidden_states: layer_output.clone(),
-    });
-
-    // === Run All Layers ===
-    for layer_idx in 0..n_layers {
-        let compiled = &gpu_model.metadata.compiled_layers[layer_idx];
-
-        let layer_offsets = gpu_model
-            .metadata
-            .get_layer_offsets(layer_idx, spec.arch_string())
-            .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
-
-        let layer_params = LayerParams {
-            quant_qk: compiled.quant_qk,
-            quant_v: compiled.quant_v,
-            quant_attn_out: compiled.quant_attn_out,
-            quant_ffn_down: compiled.quant_ffn_down,
-            quant_ffn_gate: compiled.quant_ffn_gate,
-            quant_ffn_up: compiled.quant_ffn_up,
-            formula_qk: formula_index_for_ggml(compiled.quant_qk),
-            formula_v: formula_index_for_ggml(compiled.quant_v),
-            formula_attn_out: formula_index_for_ggml(compiled.quant_attn_out),
-            formula_ffn_down: formula_index_for_ggml(compiled.quant_ffn_down),
-            formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
-            formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
-            ..layer_params_base
-        };
-
-        layer_output = pipeline.run_layer_with_cache(
+        let row_offset = embd_weight_offset + (token_id as u64 * embd_row_bytes as u64);
+        let mut layer_output = pipeline.run_dequant_any_hot(
             &device,
             &queue,
             &gpu_model,
-            &mut kv_cache,
-            layer_idx,
-            &layer_output,
-            layer_offsets,
-            layer_params,
+            row_offset as u32,
+            dim,
+            embd_quant_type,
         );
 
-        // Capture layer output
-        layers.push(LayerOutput {
-            layer_idx: layer_idx + 1, // +1 because embedding is layer 0
-            token_id,
-            position: 0,
-            stats: LayerStats::compute(&layer_output),
-            hidden_states: layer_output.clone(),
-        });
+        if pos == 0 {
+            let st = LayerStats::compute(&layer_output);
+            eprintln!(
+                "[Layer Dump] Embedding complete (min={:.6}, max={:.6}, mean={:.6})",
+                st.min, st.max, st.mean
+            );
+        }
 
+        // Capture embedding only for last position (keeps JSON size bounded)
+        if pos == last_pos {
+            layers.push(LayerOutput {
+                layer_idx: 0,
+                token_id,
+                position: pos,
+                stats: LayerStats::compute(&layer_output),
+                hidden_states: layer_output.clone(),
+            });
+        }
+
+        for layer_idx in 0..n_layers {
+            let compiled = &gpu_model.metadata.compiled_layers[layer_idx];
+
+            let layer_offsets = gpu_model
+                .metadata
+                .get_layer_offsets(layer_idx, spec.arch_string())
+                .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
+
+            let mut layer_params = LayerParams {
+                quant_qk: compiled.quant_qk,
+                quant_v: compiled.quant_v,
+                quant_attn_out: compiled.quant_attn_out,
+                quant_ffn_down: compiled.quant_ffn_down,
+                quant_ffn_gate: compiled.quant_ffn_gate,
+                quant_ffn_up: compiled.quant_ffn_up,
+                formula_qk: formula_index_for_ggml(compiled.quant_qk),
+                formula_v: formula_index_for_ggml(compiled.quant_v),
+                formula_attn_out: formula_index_for_ggml(compiled.quant_attn_out),
+                formula_ffn_down: formula_index_for_ggml(compiled.quant_ffn_down),
+                formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
+                formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
+                ..layer_params_base
+            };
+            // Match product path: Qwen3 packed K stride hint (2 * n_embd).
+            if spec.arch_string() == "qwen3" {
+                let packed_k = 2 * dim;
+                layer_params.q_weight_k = packed_k;
+                layer_params.k_weight_k = packed_k;
+            }
+
+            layer_output = pipeline.run_layer_with_cache(
+                &device,
+                &queue,
+                &gpu_model,
+                &mut kv_cache,
+                layer_idx,
+                &layer_output,
+                layer_offsets,
+                layer_params,
+            );
+
+            if pos == last_pos {
+                let st = LayerStats::compute(&layer_output);
+                if first_nan_layer.is_none()
+                    && (st.min.is_nan() || st.max.is_nan() || st.mean.is_nan())
+                {
+                    first_nan_layer = Some(layer_idx);
+                }
+                layers.push(LayerOutput {
+                    layer_idx: layer_idx + 1, // +1 because embedding is layer 0
+                    token_id,
+                    position: pos,
+                    stats: st,
+                    hidden_states: layer_output.clone(),
+                });
+                eprintln!(
+                    "[Layer Dump] Layer {} @pos{} complete (min={:.6}, max={:.6}, mean={:.6})",
+                    layer_idx + 1,
+                    pos,
+                    layers.last().unwrap().stats.min,
+                    layers.last().unwrap().stats.max,
+                    layers.last().unwrap().stats.mean
+                );
+            }
+        }
+        let _ = kv_cache.increment();
+    }
+
+    if let Some(l) = first_nan_layer {
         eprintln!(
-            "[Layer Dump] Layer {} complete (min={:.6}, max={:.6}, mean={:.6})",
-            layer_idx + 1,
-            layers.last().unwrap().stats.min,
-            layers.last().unwrap().stats.max,
-            layers.last().unwrap().stats.mean
+            "[Layer Dump] FIRST_NAN_LAYER={} (0-based transformer index) at last prompt position",
+            l
         );
+    } else {
+        eprintln!("[Layer Dump] No NaN in captured last-position layer outputs");
     }
 
     // === Save JSON ===

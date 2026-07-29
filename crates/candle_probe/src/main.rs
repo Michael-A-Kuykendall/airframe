@@ -33,8 +33,20 @@ struct ProbeOutput {
     tool: String,
     source_gguf: String,
     generated_at: String,
+    token_ids: Vec<u32>,
+    final_logits: FinalLogits,
     layers: Vec<LayerResult>,
     integrity: ProbeIntegrity,
+}
+
+#[derive(Serialize)]
+struct FinalLogits {
+    len: usize,
+    rms: f32,
+    max: f32,
+    argmax_id: usize,
+    nan_count: usize,
+    first20: Vec<f32>,
 }
 
 #[derive(Serialize)]
@@ -78,7 +90,8 @@ fn nan_inf(v: &[f32]) -> (usize, usize) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: candle_probe <gguf_path> [output_json]");
+        eprintln!("Usage: candle_probe <gguf_path> [output_json] [--token-ids id,id,...]");
+        eprintln!("  Default tokens: BOS(1) Hello(15043). Pass peel tokens.ids for numerical gate.");
         std::process::exit(1);
     }
 
@@ -88,15 +101,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    let output_path = if args.len() >= 3 {
-        PathBuf::from(&args[2])
-    } else {
+    let mut output_path = {
         let stem = gguf_path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown");
         PathBuf::from("vault/seeds/candle").join(format!("{}.json", stem))
     };
+    let mut token_ids: Vec<u32> = vec![1u32, 15043u32];
+    let mut i = 2usize;
+    while i < args.len() {
+        if args[i] == "--token-ids" {
+            i += 1;
+            if i >= args.len() {
+                eprintln!("ERROR: --token-ids needs a comma-separated list");
+                std::process::exit(1);
+            }
+            token_ids = args[i]
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim().parse::<u32>())
+                .collect::<Result<Vec<_>, _>>()?;
+        } else if !args[i].starts_with("--") {
+            output_path = PathBuf::from(&args[i]);
+        }
+        i += 1;
+    }
+    if token_ids.is_empty() {
+        eprintln!("ERROR: empty token list");
+        std::process::exit(1);
+    }
 
     eprintln!("=== candle_probe ===");
     eprintln!("  GGUF   : {}", gguf_path.display());
@@ -115,30 +149,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut model = ModelWeights::from_gguf(gguf_content, &mut file, &device)?;
     eprintln!("      Model loaded");
 
-    // ── Tokenize fixture ─────────────────────────────────────────────────────
-    // Fixed fixture: [1 (BOS), 15043 ("Hello")]
-    eprintln!("[2/4] Running fixed fixture: BOS(1) → Hello(15043) ...");
+    // ── Token sequence (multi-token prefill for numerical gate) ────────────
+    eprintln!(
+        "[2/4] Running {} tokens: {:?} ...",
+        token_ids.len(),
+        &token_ids[..token_ids.len().min(12)]
+    );
 
-    // BOS prefill at position 0
-    let bos = Tensor::new(&[1u32], &device)?.unsqueeze(0)?;
-    let _ = model.forward(&bos, 0)?;
-    eprintln!("      BOS prefill done");
+    // Sequential single-token forwards (candle quantized_llama API).
+    // Last forward's logits = next-token distribution after full prefix.
+    let mut logits_flat: Vec<f32> = Vec::new();
+    for (pos, &tid) in token_ids.iter().enumerate() {
+        let t = Tensor::new(&[tid], &device)?.unsqueeze(0)?;
+        let logits = model.forward(&t, pos)?;
+        logits_flat = logits.squeeze(0)?.squeeze(0)?.to_vec1::<f32>()?;
+    }
 
-    // Hello token at position 1 — capture per-layer outputs
-    // candle's quantized_llama exposes forward() returning logits
-    // We need layer-by-layer outputs — use the internal method if available
-    // For the spike: run forward and capture final hidden state
-    // Note: candle's public API returns logits, not hidden states per layer.
-    // We'll capture at the logit level for now and compare final layer RMS.
-    let hello = Tensor::new(&[15043u32], &device)?.unsqueeze(0)?;
-    let logits = model.forward(&hello, 1)?;
-
-    // Get the logit tensor as f32 — shape [1, 1, vocab_size]
-    let logits_flat = logits.squeeze(0)?.squeeze(0)?.to_vec1::<f32>()?;
+    // Argmax for compare vs peel final.logits.argmax.id
+    let mut argmax_id: usize = 0;
+    let mut argmax_v = f32::NEG_INFINITY;
+    for (i, &v) in logits_flat.iter().enumerate() {
+        if v.is_finite() && v > argmax_v {
+            argmax_v = v;
+            argmax_id = i;
+        }
+    }
 
     eprintln!(
-        "      Hello forward done — logits shape: [{}]",
-        logits_flat.len()
+        "      prefill done — logits[{}] argmax={} max={:.4}",
+        logits_flat.len(),
+        argmax_id,
+        argmax_v
     );
 
     // ── Compute stats ────────────────────────────────────────────────────────
@@ -154,7 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let layers = vec![LayerResult {
         layer_idx: -1_i32, // -1 = final logits (same convention as vault_seed)
         rms: r,
-        first20,
+        first20: first20.clone(),
         checksum: cs,
     }];
 
@@ -176,6 +217,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tool: "candle-0.10.2".to_string(),
         source_gguf: gguf_path.to_string_lossy().to_string(),
         generated_at: chrono::Utc::now().to_rfc3339(),
+        token_ids: token_ids.clone(),
+        final_logits: FinalLogits {
+            len: logits_flat.len(),
+            rms: r,
+            max: argmax_v,
+            argmax_id,
+            nan_count: nans,
+            first20,
+        },
         integrity: ProbeIntegrity {
             layer_count: layers.len(),
             nan_count: nans,

@@ -138,10 +138,12 @@ impl BindlessMetadata {
         );
         {
             let p = |offsets: &HashMap<String, u64>, layer: usize, s: &str| -> u32 {
-                offsets
-                    .get(&format!("blk.{}.{}", layer, s))
-                    .copied()
-                    .unwrap_or(0) as u32
+                super::pipeline::pack_blob_offset(
+                    offsets
+                        .get(&format!("blk.{}.{}", layer, s))
+                        .copied()
+                        .unwrap_or(0),
+                )
             };
             let t = |types: &HashMap<String, u32>, layer: usize, s: &str| -> u32 {
                 types
@@ -158,7 +160,7 @@ impl BindlessMetadata {
                            suffix: &str|
                  -> u32 {
                     let key = format!("blk.{}.{}", li, suffix);
-                    *offsets.get(&key).unwrap_or(&0) as u32
+                    super::pipeline::pack_blob_offset(*offsets.get(&key).unwrap_or(&0))
                 };
                 // Fused QKV support: phi-2, StarCoder2, GPT-2 and similar models store Q+K+V
                 // in a single weight matrix `attn_qkv.weight`. When separate attn_q/k/v tensors
@@ -212,9 +214,10 @@ impl BindlessMetadata {
                         14 => (dim_in / 256) * 210,
                         _ => (dim_in / 32) * 18,
                     };
-                    let q_off = fused_off as u32;
-                    let k_off = (fused_off + dim_q * bpr) as u32;
-                    let v_off = (fused_off + (dim_q + dim_k) * bpr) as u32;
+                    let q_off = super::pipeline::pack_blob_offset(fused_off);
+                    let k_off = super::pipeline::pack_blob_offset(fused_off + dim_q * bpr);
+                    let v_off =
+                        super::pipeline::pack_blob_offset(fused_off + (dim_q + dim_k) * bpr);
                     println!(
                         "[Metadata] Layer {}: fused QKV type={} dim_in={} dim_q={} dim_k={} bpr={} K@{} V@{}",
                         layer_idx, fused_type, dim_in, dim_q, dim_k, bpr, k_off, v_off
@@ -252,9 +255,12 @@ impl BindlessMetadata {
                                 .copied()
                                 .unwrap_or(dim_in);
                             let dim_k = total_out.saturating_sub(dim_q) / 2;
-                            let q_bias = fused_bias_off as u32;
-                            let k_bias = (fused_bias_off + dim_q * 4) as u32;
-                            let v_bias = (fused_bias_off + (dim_q + dim_k) * 4) as u32;
+                            let q_bias = super::pipeline::pack_blob_offset(fused_bias_off);
+                            let k_bias =
+                                super::pipeline::pack_blob_offset(fused_bias_off + dim_q * 4);
+                            let v_bias = super::pipeline::pack_blob_offset(
+                                fused_bias_off + (dim_q + dim_k) * 4,
+                            );
                             println!(
                                 "[Metadata] Layer {}: fused QKV bias split Q@{} K@{} V@{}",
                                 layer_idx, q_bias, k_bias, v_bias
@@ -391,10 +397,11 @@ impl BindlessMetadata {
     ) -> Option<super::pipeline::LayerOffsets> {
         // e.g., "blk.0.attn_norm.weight"
 
+        let pack = super::pipeline::pack_blob_offset;
         let p = |s: &str| -> u32 {
             let key = format!("blk.{}.{}", layer_idx, s);
             if let Some(&val) = self.tensor_offsets.get(&key) {
-                return val as u32;
+                return pack(val);
             }
             // Fused QKV fallback for Phi/GPT2/Other arch (GROUP C): use attn_qkv offset for q/k/v
             // so we don't panic on missing separate tensors. The fused layout is Q then K then V concatenated.
@@ -403,7 +410,7 @@ impl BindlessMetadata {
                     .tensor_offsets
                     .contains_key(&format!("blk.{}.attn_qkv.weight", layer_idx))
             {
-                return self.tensor_offsets[&format!("blk.{}.attn_qkv.weight", layer_idx)] as u32;
+                return pack(self.tensor_offsets[&format!("blk.{}.attn_qkv.weight", layer_idx)]);
             }
             // Fused FFN gate_up for StarCoder2 etc (GROUP C)
             if (s == "ffn_gate.weight" || s == "ffn_up.weight")
@@ -411,8 +418,7 @@ impl BindlessMetadata {
                     .tensor_offsets
                     .contains_key(&format!("blk.{}.ffn_gate_up.weight", layer_idx))
             {
-                return self.tensor_offsets[&format!("blk.{}.ffn_gate_up.weight", layer_idx)]
-                    as u32;
+                return pack(self.tensor_offsets[&format!("blk.{}.ffn_gate_up.weight", layer_idx)]);
             }
             // Critical failure: layer exists but sub-tensor is missing
             panic!(
@@ -427,54 +433,62 @@ impl BindlessMetadata {
 
         Some(super::pipeline::LayerOffsets {
             attn_norm: p("attn_norm.weight"),
-            attn_norm_bias: self
-                .tensor_offsets
-                .get(&format!("blk.{}.attn_norm.bias", layer_idx))
-                .copied()
-                .unwrap_or(0) as u32,
+            attn_norm_bias: pack(
+                self.tensor_offsets
+                    .get(&format!("blk.{}.attn_norm.bias", layer_idx))
+                    .copied()
+                    .unwrap_or(0),
+            ),
             attn_q: p("attn_q.weight"),
             attn_k: p("attn_k.weight"),
             attn_v: p("attn_v.weight"),
             attn_out: p("attn_output.weight"),
             ffn_norm: p("ffn_norm.weight"),
-            ffn_norm_bias: self
-                .tensor_offsets
-                .get(&format!("blk.{}.ffn_norm.bias", layer_idx))
-                .copied()
-                .unwrap_or(0) as u32,
-            ffn_gate: self
-                .tensor_offsets
-                .get(&format!("blk.{}.ffn_gate.weight", layer_idx))
-                .copied()
-                .unwrap_or(0) as u32,
+            ffn_norm_bias: pack(
+                self.tensor_offsets
+                    .get(&format!("blk.{}.ffn_norm.bias", layer_idx))
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            ffn_gate: pack(
+                self.tensor_offsets
+                    .get(&format!("blk.{}.ffn_gate.weight", layer_idx))
+                    .copied()
+                    .unwrap_or(0),
+            ),
             ffn_down: p("ffn_down.weight"),
             ffn_up: p("ffn_up.weight"),
             layer_idx: layer_idx as u32,
-            attn_q_norm: self
-                .tensor_offsets
-                .get(&format!("blk.{}.attn_q_norm.weight", layer_idx))
-                .copied()
-                .unwrap_or(0) as u32,
-            attn_k_norm: self
-                .tensor_offsets
-                .get(&format!("blk.{}.attn_k_norm.weight", layer_idx))
-                .copied()
-                .unwrap_or(0) as u32,
-            attn_q_bias: self
-                .tensor_offsets
-                .get(&format!("blk.{}.attn_q.bias", layer_idx))
-                .copied()
-                .unwrap_or(0) as u32,
-            attn_k_bias: self
-                .tensor_offsets
-                .get(&format!("blk.{}.attn_k.bias", layer_idx))
-                .copied()
-                .unwrap_or(0) as u32,
-            attn_v_bias: self
-                .tensor_offsets
-                .get(&format!("blk.{}.attn_v.bias", layer_idx))
-                .copied()
-                .unwrap_or(0) as u32,
+            attn_q_norm: pack(
+                self.tensor_offsets
+                    .get(&format!("blk.{}.attn_q_norm.weight", layer_idx))
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            attn_k_norm: pack(
+                self.tensor_offsets
+                    .get(&format!("blk.{}.attn_k_norm.weight", layer_idx))
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            attn_q_bias: pack(
+                self.tensor_offsets
+                    .get(&format!("blk.{}.attn_q.bias", layer_idx))
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            attn_k_bias: pack(
+                self.tensor_offsets
+                    .get(&format!("blk.{}.attn_k.bias", layer_idx))
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            attn_v_bias: pack(
+                self.tensor_offsets
+                    .get(&format!("blk.{}.attn_v.bias", layer_idx))
+                    .copied()
+                    .unwrap_or(0),
+            ),
             // For Q4_K_M mixed quantization: determine if V and ffn_down are Q4_K or Q6_K
             v_is_q4k: self
                 .tensor_types

@@ -47,27 +47,50 @@ pub struct RMSNormParams {
 }
 
 /// Offsets for a single Transformer Layer (TinyLlama/Llama 2).
-/// All offsets are in bytes, absolute from the start of the GGUF blob.
+/// GGUF blob offsets packed for WGSL `u32` (files up to 8 GiB).
+///
+/// Host stores `byte_offset / 2` (must be 2-byte aligned). Shaders convert with
+/// `gow(packed) = packed / 2` (word index) and `read_byte_rel` for odd-byte
+/// dequant — never `pack * 2` in u32 (overflow past 4 GiB / Qwen3-8B L30+).
+#[inline]
+pub fn pack_blob_offset(byte_offset: u64) -> u32 {
+    if byte_offset == 0 {
+        return 0;
+    }
+    assert!(
+        byte_offset % 2 == 0,
+        "GGUF offset {byte_offset} must be 2-byte aligned for pack_blob_offset"
+    );
+    let packed = byte_offset / 2;
+    assert!(
+        packed <= u32::MAX as u64,
+        "GGUF offset {byte_offset} exceeds 8GiB pack_blob_offset limit"
+    );
+    packed as u32
+}
+
+/// All offsets are **packed** absolute byte offsets from the GGUF blob start
+/// (`pack_blob_offset`). Zero means disabled / missing.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LayerOffsets {
     pub attn_norm: u32,
-    pub attn_norm_bias: u32, // byte offset of attn norm bias (F32); 0 = disabled
+    pub attn_norm_bias: u32, // packed byte offset of attn norm bias (F32); 0 = disabled
     pub attn_q: u32,
     pub attn_k: u32,
     pub attn_v: u32,
     pub attn_out: u32,
     pub ffn_norm: u32,
-    pub ffn_norm_bias: u32, // byte offset of ffn norm bias (F32); 0 = disabled
+    pub ffn_norm_bias: u32, // packed byte offset of ffn norm bias (F32); 0 = disabled
     pub ffn_gate: u32,
     pub ffn_down: u32,
     pub ffn_up: u32,
     pub layer_idx: u32,       // was padding[0] — layer index for norm_bank lookup
-    pub attn_q_norm: u32,     // byte offset of Q-norm weights in GGUF blob (0 = disabled)
-    pub attn_k_norm: u32,     // byte offset of K-norm weights in GGUF blob (0 = disabled)
-    pub attn_q_bias: u32,     // byte offset of Q bias (F32) in GGUF blob (0 = disabled; Qwen2)
-    pub attn_k_bias: u32,     // byte offset of K bias (F32) in GGUF blob (0 = disabled; Qwen2)
-    pub attn_v_bias: u32,     // byte offset of V bias (F32) in GGUF blob (0 = disabled; Qwen2)
+    pub attn_q_norm: u32,     // packed Q-norm weights (0 = disabled)
+    pub attn_k_norm: u32,     // packed K-norm weights (0 = disabled)
+    pub attn_q_bias: u32,     // packed Q bias (F32); 0 = disabled; Qwen2
+    pub attn_k_bias: u32,     // packed K bias (F32); 0 = disabled; Qwen2
+    pub attn_v_bias: u32,     // packed V bias (F32); 0 = disabled; Qwen2
     pub v_is_q4k: u32,        // 1 if attn_v uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
     pub ffn_down_is_q4k: u32, // 1 if ffn_down uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
 }

@@ -209,20 +209,33 @@ impl PreflightResources {
 
             let layer_base = i * slots_per_layer * block_size;
             copy_tensor_inner(&attn_name, layer_base, true);
-            // QK-norm slots (Qwen3 only; zero-filled for other arches)
+            // QK-norm slots (Qwen3 only). main_qk_norm reads weights from GGUF blob
+            // offsets; these slots keep layout alignment. FFN uses slot 3 (6-slot)
+            // or slot 1 (4-slot) — must match sh_layer_v1.wgsl norm_bank_base().
             let q_offset = layer_base + block_size;
             let k_offset = layer_base + 2 * block_size;
             if has_qk {
                 copy_tensor_inner(&format!("blk.{}.attn_q_norm.weight", i), q_offset, true);
                 copy_tensor_inner(&format!("blk.{}.attn_k_norm.weight", i), k_offset, true);
             }
+            let ffn_slot = if has_qk { 3 } else { 1 };
+            let post_attn_slot = if has_qk { 4 } else { 2 };
+            let post_ffw_slot = if has_qk { 5 } else { 3 };
             if is_phi_arch && metadata.get_tensor_offset(&ffn_name).is_none() {
-                copy_tensor_inner(&attn_name, layer_base + 3 * block_size, false);
+                copy_tensor_inner(&attn_name, layer_base + ffn_slot * block_size, false);
             } else {
-                copy_tensor_inner(&ffn_name, layer_base + 3 * block_size, true);
+                copy_tensor_inner(&ffn_name, layer_base + ffn_slot * block_size, true);
             }
-            copy_tensor_inner(&post_attn_name, layer_base + 4 * block_size, has_post_norms);
-            copy_tensor_inner(&post_ffw_name, layer_base + 5 * block_size, has_post_norms);
+            copy_tensor_inner(
+                &post_attn_name,
+                layer_base + post_attn_slot * block_size,
+                has_post_norms,
+            );
+            copy_tensor_inner(
+                &post_ffw_name,
+                layer_base + post_ffw_slot * block_size,
+                has_post_norms,
+            );
         }
 
         // Final Norm

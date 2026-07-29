@@ -65,6 +65,21 @@ path = "src/bin/layer_dump_gpu.rs"
 required-features = ["isf"]
 
 [[bin]]
+name = "stack_dump_gpu"
+path = "src/bin/stack_dump_gpu.rs"
+required-features = ["isf"]
+
+[[bin]]
 name = "invariant_probe"
 path = "src/bin/invariant_probe.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "decode_gate"
+path = "src/bin/decode_gate.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "kv_head_probe"
+path = "src/bin/kv_head_probe.rs"
 required-features = ["isf"]

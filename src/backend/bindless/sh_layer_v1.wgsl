@@ -126,6 +126,42 @@ fn read_blob(word_idx: u32) -> u32 {
         return blob_2[word_idx - BLOB_SPLIT_1];
     }
 }
+
+// -------------------------------------------------------------------------
+// Packed GGUF offsets (host pack_blob_offset = absolute_byte / 2).
+// Never expand pack*2 in u32 — that overflows past 4 GiB (Qwen3-8B L30+).
+//   word_index = pack / 2           (byte/4)
+//   add even bytes: pack + bytes/2
+//   byte at base+rel: read_byte_rel (handles odd rel without overflow)
+// -------------------------------------------------------------------------
+fn gow(pack: u32) -> u32 {
+    return pack / 2u;
+}
+fn add_pack(pack: u32, even_bytes: u32) -> u32 {
+    return pack + even_bytes / 2u;
+}
+// Read one absolute byte at (pack*2 + rel) without u32 overflow of pack*2.
+fn read_byte_rel(pack: u32, rel: u32) -> u32 {
+    let adj = 2u * (pack % 2u) + rel;
+    let word = pack / 2u + adj / 4u;
+    return extractBits(read_blob(word), (adj % 4u) * 8u, 8u);
+}
+// Read fp16 at (pack*2 + rel); rel must be even for 2-byte alignment of f16.
+fn read_f16_rel(pack: u32, rel: u32) -> f32 {
+    let adj = 2u * (pack % 2u) + rel;
+    let word = pack / 2u + adj / 4u;
+    let bits = extractBits(read_blob(word), (adj % 4u) * 8u, 16u);
+    return f16_to_f32(bits);
+}
+// Read unaligned u32 starting at (pack*2 + rel).
+fn read_u32_rel(pack: u32, rel: u32) -> u32 {
+    let b0 = read_byte_rel(pack, rel);
+    let b1 = read_byte_rel(pack, rel + 1u);
+    let b2 = read_byte_rel(pack, rel + 2u);
+    let b3 = read_byte_rel(pack, rel + 3u);
+    return b0 | (b1 << 8u) | (b2 << 16u) | (b3 << 24u);
+}
+
 @group(0) @binding(1) var<storage, read_write> activation_in: array<f32>; // The "Residual" stream
 @group(0) @binding(2) var<storage, read_write> temp_state: array<f32>;    // Scratchpad
 @group(0) @binding(3) var<uniform> offsets: LayerOffsets;
@@ -178,44 +214,31 @@ fn unpack_q4_0(block_val: u32, idx_in_block: u32) -> f32 {
 //   [2..3]   dmin  (fp16)
 //   [4..15]  scales (12 bytes, 6-bit packed sub-block scale/min factors)
 //   [16..143] qs   (128 bytes, 4-bit nibbles)
+// All block_pack args are packed absolute (host byte/2).
 // -------------------------------------------------------------------------
-fn read_byte_gguf(byte_idx: u32) -> u32 {
-    return extractBits(read_blob(byte_idx / 4u), (byte_idx % 4u) * 8u, 8u);
-}
-
 // Returns vec2(sc, m) — 6-bit unsigned scale and min for sub-block j.
-// Exact port of llama.cpp get_scale_min_k4.
-fn get_scale_min_k4(j: u32, scales_base_byte: u32) -> vec2<u32> {
+// Exact port of llama.cpp get_scale_min_k4. scales_rel = byte offset of scales
+// within block (usually 4).
+fn get_scale_min_k4(j: u32, block_pack: u32, scales_rel: u32) -> vec2<u32> {
     if (j < 4u) {
-        let sc = read_byte_gguf(scales_base_byte + j) & 63u;
-        let m  = read_byte_gguf(scales_base_byte + j + 4u) & 63u;
+        let sc = read_byte_rel(block_pack, scales_rel + j) & 63u;
+        let m  = read_byte_rel(block_pack, scales_rel + j + 4u) & 63u;
         return vec2<u32>(sc, m);
     } else {
-        let sc = (read_byte_gguf(scales_base_byte + j + 4u) & 0x0Fu)
-               | (((read_byte_gguf(scales_base_byte + j - 4u) >> 6u) & 3u) << 4u);
-        let m  = ((read_byte_gguf(scales_base_byte + j + 4u) >> 4u) & 0x0Fu)
-               | (((read_byte_gguf(scales_base_byte + j) >> 6u) & 3u) << 4u);
+        let sc = (read_byte_rel(block_pack, scales_rel + j + 4u) & 0x0Fu)
+               | (((read_byte_rel(block_pack, scales_rel + j - 4u) >> 6u) & 3u) << 4u);
+        let m  = ((read_byte_rel(block_pack, scales_rel + j + 4u) >> 4u) & 0x0Fu)
+               | (((read_byte_rel(block_pack, scales_rel + j) >> 6u) & 3u) << 4u);
         return vec2<u32>(sc, m);
     }
 }
 
 // Dequantize one element from a Q4_K superblock.
-// block_base_byte: byte offset of the 144-byte superblock in gguf_blob
+// block_pack: packed absolute offset of the 144-byte superblock
 // elem_in_block:   0..255
-fn dequant_q4k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
-    // Read d (fp16 at offset 0)
-    let d_packed = extractBits(read_blob(block_base_byte / 4u),
-                               (block_base_byte % 4u) * 8u, 16u);
-    let d = f16_to_f32(d_packed);
-
-    // Read dmin (fp16 at offset 2)
-    let dmin_byte = block_base_byte + 2u;
-    let dmin_packed = extractBits(read_blob(dmin_byte / 4u),
-                                  (dmin_byte % 4u) * 8u, 16u);
-    let dmin_val = f16_to_f32(dmin_packed);
-
-    let scales_base = block_base_byte + 4u;   // 12 scale bytes
-    let qs_base     = block_base_byte + 16u;  // 128 nibble bytes
+fn dequant_q4k_elem(block_pack: u32, elem_in_block: u32) -> f32 {
+    let d = read_f16_rel(block_pack, 0u);
+    let dmin_val = read_f16_rel(block_pack, 2u);
 
     let group        = elem_in_block / 64u;
     let elem_in_grp  = elem_in_block % 64u;
@@ -226,15 +249,15 @@ fn dequant_q4k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     var nibble: u32;
 
     if (elem_in_grp < 32u) {
-        let sm = get_scale_min_k4(is, scales_base);
+        let sm = get_scale_min_k4(is, block_pack, 4u);
         sc_val = d * f32(sm.x);
         m_val  = dmin_val * f32(sm.y);
-        nibble = read_byte_gguf(qs_base + group * 32u + elem_in_grp) & 0x0Fu;
+        nibble = read_byte_rel(block_pack, 16u + group * 32u + elem_in_grp) & 0x0Fu;
     } else {
-        let sm = get_scale_min_k4(is + 1u, scales_base);
+        let sm = get_scale_min_k4(is + 1u, block_pack, 4u);
         sc_val = d * f32(sm.x);
         m_val  = dmin_val * f32(sm.y);
-        nibble = read_byte_gguf(qs_base + group * 32u + (elem_in_grp - 32u)) >> 4u;
+        nibble = read_byte_rel(block_pack, 16u + group * 32u + (elem_in_grp - 32u)) >> 4u;
     }
 
     return sc_val * f32(nibble) - m_val;
@@ -249,35 +272,27 @@ fn dequant_q4k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 //   [208..209] d          - fp16 super-block scale
 // Exact port of llama.cpp dequantize_row_q6_K.
 // -------------------------------------------------------------------------
-fn dequant_q6k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
-    // Read d (fp16 at byte offset 208)
-    let d_byte = block_base_byte + 208u;
-    let d_packed = extractBits(read_blob(d_byte / 4u), (d_byte % 4u) * 8u, 16u);
-    let d = f16_to_f32(d_packed);
+fn dequant_q6k_elem(block_pack: u32, elem_in_block: u32) -> f32 {
+    let d = read_f16_rel(block_pack, 208u);
 
     let half    = elem_in_block / 128u;   // 0 or 1
     let half_e  = elem_in_block % 128u;   // 0..127
     let l       = half_e % 32u;           // position within quarter
     let quarter = half_e / 32u;           // 0..3
 
-    // ql index: quarters 0,2 use ql[half*64 + l], quarters 1,3 use ql[half*64 + l + 32]
     let ql_rel = select(half * 64u + l + 32u, half * 64u + l, quarter == 0u || quarter == 2u);
-    let ql_byte_val = read_byte_gguf(block_base_byte + ql_rel);
+    let ql_byte_val = read_byte_rel(block_pack, ql_rel);
 
-    // lower4: quarters 0,1 use low nibble; quarters 2,3 use high nibble
     let lower4 = select(ql_byte_val >> 4u, ql_byte_val & 0xFu, quarter < 2u);
 
-    // qh: one byte per l within a half (at block offset 128 + half*32 + l)
-    let qh_byte_val = read_byte_gguf(block_base_byte + 128u + half * 32u + l);
+    let qh_byte_val = read_byte_rel(block_pack, 128u + half * 32u + l);
     let upper2 = (qh_byte_val >> (quarter * 2u)) & 3u;
 
-    // 6-bit value, signed (range -32..31)
     let q6 = lower4 | (upper2 << 4u);
     let signed_q = i32(q6) - 32;
 
-    // int8 scale: block offset 192 + half*8 + (l/16) + quarter*2
     let sc_idx = 192u + half * 8u + (l / 16u) + quarter * 2u;
-    let sc_raw = read_byte_gguf(block_base_byte + sc_idx);
+    let sc_raw = read_byte_rel(block_pack, sc_idx);
     let sc_signed = select(i32(sc_raw), i32(sc_raw) - 256, sc_raw >= 128u);
 
     return d * f32(sc_signed) * f32(signed_q);
@@ -289,12 +304,9 @@ fn dequant_q6k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 //   [0..1]  d   (fp16 scale)
 //   [2..33] qs  (32 int8 values)
 // -------------------------------------------------------------------------
-fn dequant_q8_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
-    let scale_packed = extractBits(read_blob(block_base_byte / 4u),
-                                   (block_base_byte % 4u) * 8u, 16u);
-    let scale = f16_to_f32(scale_packed);
-    let qs_byte = block_base_byte + 2u + elem_in_block;
-    let raw = read_byte_gguf(qs_byte);
+fn dequant_q8_0_elem(block_pack: u32, elem_in_block: u32) -> f32 {
+    let scale = read_f16_rel(block_pack, 0u);
+    let raw = read_byte_rel(block_pack, 2u + elem_in_block);
     let signed_val = select(i32(raw), i32(raw) - 256, raw >= 128u);
     return scale * f32(signed_val);
 }
@@ -307,31 +319,21 @@ fn dequant_q8_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 //   [6..21]  qs     (16 nibble bytes: low nibble=elements 0..15, high nibble=elements 16..31)
 // dequant: val = (nibble | (high_bit<<4) - 16) * d
 // -------------------------------------------------------------------------
-fn dequant_q5_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
-    let d_packed = extractBits(read_blob(block_base_byte / 4u),
-                               (block_base_byte % 4u) * 8u, 16u);
-    let d = f16_to_f32(d_packed);
-
-    // qh: uint32 at byte offset 2
-    let qh_word = read_blob((block_base_byte + 2u) / 4u);
-    let qh_shift = (block_base_byte + 2u) % 4u;
-    let qh = extractBits(qh_word, qh_shift * 8u, 32u);
+fn dequant_q5_0_elem(block_pack: u32, elem_in_block: u32) -> f32 {
+    let d = read_f16_rel(block_pack, 0u);
+    let qh = read_u32_rel(block_pack, 2u);
     let high_bit = (qh >> elem_in_block) & 1u;
 
-    // qs: nibbles at byte offset 6, packed 2 per byte (low nibble = elem byte, high nibble = elem byte+16)
-    let qs_byte = block_base_byte + 6u + (elem_in_block % 16u);
-    let raw = read_byte_gguf(qs_byte);
+    let raw = read_byte_rel(block_pack, 6u + (elem_in_block % 16u));
     let low_nibble = select(raw >> 4u, raw & 0x0Fu, elem_in_block < 16u);
 
     let val_5bit = low_nibble | (high_bit << 4u);
     return (f32(val_5bit) - 16.0) * d;
 }
 
-// Read a single fp16 value from an arbitrary byte offset in gguf_blob.
-fn dequant_f16_at(byte_offset: u32) -> f32 {
-    let packed = extractBits(read_blob(byte_offset / 4u),
-                             (byte_offset % 4u) * 8u, 16u);
-    return f16_to_f32(packed);
+// Read a single fp16 at a packed absolute offset (host byte/2).
+fn dequant_f16_at(pack: u32) -> f32 {
+    return read_f16_rel(pack, 0u);
 }
 
 // -------------------------------------------------------------------------
@@ -345,19 +347,9 @@ fn dequant_f16_at(byte_offset: u32) -> f32 {
 // 5-bit value: q5 = nibble | (high_bit << 4) → range 0..31
 // dequant:     val = d * sc * q5 - dmin * m
 // -------------------------------------------------------------------------
-fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
-    // d and dmin (fp16)
-    let d_packed = extractBits(read_blob(block_base_byte / 4u),
-                               (block_base_byte % 4u) * 8u, 16u);
-    let d = f16_to_f32(d_packed);
-    let dmin_byte = block_base_byte + 2u;
-    let dmin_packed = extractBits(read_blob(dmin_byte / 4u),
-                                  (dmin_byte % 4u) * 8u, 16u);
-    let dmin_val = f16_to_f32(dmin_packed);
-
-    let scales_base = block_base_byte + 4u;
-    let qh_base     = block_base_byte + 16u;
-    let qs_base     = block_base_byte + 48u;  // NOTE: 48, not 16 like Q4_K
+fn dequant_q5k_elem(block_pack: u32, elem_in_block: u32) -> f32 {
+    let d = read_f16_rel(block_pack, 0u);
+    let dmin_val = read_f16_rel(block_pack, 2u);
 
     let group    = elem_in_block / 64u;
     let in_group = elem_in_block % 64u;
@@ -365,23 +357,19 @@ fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
     let l        = in_group % 32u;
 
     let is = group * 2u + sub;
-    let sm = get_scale_min_k4(is, scales_base);
+    let sm = get_scale_min_k4(is, block_pack, 4u);
     let sc_val = d * f32(sm.x);
     let m_val  = dmin_val * f32(sm.y);
 
-    // Low nibble: qs[group*32 + l]
-    let ql_byte = qs_base + group * 32u + l;
     var nibble: u32;
     if (sub == 0u) {
-        nibble = read_byte_gguf(ql_byte) & 0x0Fu;
+        nibble = read_byte_rel(block_pack, 48u + group * 32u + l) & 0x0Fu;
     } else {
-        nibble = read_byte_gguf(ql_byte) >> 4u;
+        nibble = read_byte_rel(block_pack, 48u + group * 32u + l) >> 4u;
     }
 
-    // High bit: qh[l] bit (elem_in_block/32)
-    // elem_in_block/32 = group*2 + sub, which cycles 0..7 over the 256 elements
     let bit_pos = elem_in_block / 32u;  // 0..7
-    let high_bit = (read_byte_gguf(qh_base + l) >> bit_pos) & 1u;
+    let high_bit = (read_byte_rel(block_pack, 16u + l) >> bit_pos) & 1u;
 
     let q5 = nibble | (high_bit << 4u);  // 0..31
     return sc_val * f32(q5) - m_val;
@@ -390,12 +378,9 @@ fn dequant_q5k_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
 // -------------------------------------------------------------------------
 // Q4_0 element dequant (18-byte blocks, 32 elements)
 // -------------------------------------------------------------------------
-fn dequant_q4_0_elem(block_base_byte: u32, elem_in_block: u32) -> f32 {
-    let scale_packed = extractBits(read_blob(block_base_byte / 4u),
-                                   (block_base_byte % 4u) * 8u, 16u);
-    let scale = f16_to_f32(scale_packed);
-    let qs_byte = block_base_byte + 2u + (elem_in_block % 16u);
-    let qs = read_byte_gguf(qs_byte);
+fn dequant_q4_0_elem(block_pack: u32, elem_in_block: u32) -> f32 {
+    let scale = read_f16_rel(block_pack, 0u);
+    let qs = read_byte_rel(block_pack, 2u + (elem_in_block % 16u));
     let nib = select(qs & 0x0Fu, qs >> 4u, elem_in_block >= 16u);
     return (f32(nib) - 8.0) * scale;
 }
@@ -464,7 +449,7 @@ fn main_attn_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let norm_offset_base = norm_bank_base(0u); // AttnNorm
     let norm_w = norm_bank[norm_offset_base + idx];
-    let norm_b = select(0.0, bitcast<f32>(read_blob(offsets.attn_norm_bias / 4u + idx)), offsets.attn_norm_bias != 0u);
+    let norm_b = select(0.0, bitcast<f32>(read_blob(gow(offsets.attn_norm_bias) + idx)), offsets.attn_norm_bias != 0u);
     let centered = select(activation_in[act_base + idx], activation_in[act_base + idx] - mean, params.layer_norm_enabled != 0u);
     let normed = centered * inv_std * norm_w + norm_b;
     temp_state[temp_base + idx] = normed;
@@ -515,7 +500,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    let weight_byte_offset = weight_off_roots[target_stage];
+    let weight_pack = weight_off_roots[target_stage];
     
     // 2. MatMul (Row `row_idx`) against the staged attention-normalized provider.
     var dot: f32 = 0.0;
@@ -524,12 +509,12 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (slot == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
-            let w_byte = weight_byte_offset + (row_idx * params.dim + col) * 2u;
-            dot += temp_state[temp_base + col] * dequant_f16_at(w_byte);
+            let w_pack = add_pack(weight_pack, (row_idx * params.dim + col) * 2u);
+            dot += temp_state[temp_base + col] * dequant_f16_at(w_pack);
         }
     } else if (slot == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
-            let w_idx = weight_byte_offset / 4u + row_idx * params.dim + col;
+            let w_idx = gow(weight_pack) + row_idx * params.dim + col;
             dot += temp_state[temp_base + col] * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Block quant types via unified dispatch
@@ -537,9 +522,9 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let bpb = QUANT_BYTES[slot];
         if (epb > 0u) {
             let total_blocks = params.dim / epb;
-            let row_start_byte = weight_byte_offset + row_idx * total_blocks * bpb;
+            let row_start_pack = add_pack(weight_pack, row_idx * total_blocks * bpb);
             for (var b = 0u; b < total_blocks; b++) {
-                let bb = row_start_byte + b * bpb;
+                let bb = add_pack(row_start_pack, b * bpb);
                 for (var e = 0u; e < epb; e++) {
                     let col = b * epb + e;
                     dot += temp_state[temp_base + col] * dequant_by_formula(slot, bb, e);
@@ -555,7 +540,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     else if (target_stage == 1u) { qkv_bias_off = offsets.attn_k_bias; }
     else { qkv_bias_off = offsets.attn_v_bias; }
     if (qkv_bias_off != 0u) {
-        dot += bitcast<f32>(read_blob(qkv_bias_off / 4u + row_idx));
+        dot += bitcast<f32>(read_blob(gow(qkv_bias_off) + row_idx));
     }
 
     // 5. RoPE - REMOVED (Relative RoPE Architecture)
@@ -657,7 +642,7 @@ fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rms = inverseSqrt(sum_sq / f32(params.head_dim) + params.rms_eps);
 
     // Read norm weight for this dimension from GGUF blob (F32)
-    let w = bitcast<f32>(read_blob(norm_off / 4u + dim_in_head));
+    let w = bitcast<f32>(read_blob(gow(norm_off) + dim_in_head));
 
     // Apply norm and write back
     if (!is_k) {
@@ -794,18 +779,18 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let attn_dim = params.head_count * params.head_dim;
     
     var dot = 0.0;
-    let weight_byte_offset = offsets.attn_out;
+    let weight_pack = offsets.attn_out;
 
     let wt = params.formula_attn_out;
 
     if (wt == 1u) { // F16
         for (var col = 0u; col < attn_dim; col++) {
-            let w_byte = weight_byte_offset + (idx * attn_dim + col) * 2u;
-            dot += temp_state[temp_base + col] * dequant_f16_at(w_byte);
+            let w_pack = add_pack(weight_pack, (idx * attn_dim + col) * 2u);
+            dot += temp_state[temp_base + col] * dequant_f16_at(w_pack);
         }
     } else if (wt == 0u) { // F32
         for (var col = 0u; col < attn_dim; col++) {
-            let w_idx = weight_byte_offset / 4u + idx * attn_dim + col;
+            let w_idx = gow(weight_pack) + idx * attn_dim + col;
             dot += temp_state[temp_base + col] * bitcast<f32>(read_blob(w_idx));
         }
     } else { // Block quant types via unified dispatch
@@ -813,9 +798,9 @@ fn main_attn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let bpb = QUANT_BYTES[wt];
         if (epb > 0u) {
             let total_blocks = attn_dim / epb;
-            let row_start_byte = weight_byte_offset + idx * total_blocks * bpb;
+            let row_start_pack = add_pack(weight_pack, idx * total_blocks * bpb);
             for (var b = 0u; b < total_blocks; b++) {
-                let bb = row_start_byte + b * bpb;
+                let bb = add_pack(row_start_pack, b * bpb);
                 for (var e = 0u; e < epb; e++) {
                     let col = b * epb + e;
                     dot += temp_state[temp_base + col] * dequant_by_formula(wt, bb, e);
@@ -995,7 +980,7 @@ fn main_ffn_norm(
     let norm_offset_base = norm_bank_base(ffn_norm_slot());
     for (var j = lx; j < params.dim; j += 256u) {
         let norm_w = norm_bank[norm_offset_base + j];
-        let norm_b = select(0.0, bitcast<f32>(read_blob(offsets.ffn_norm_bias / 4u + j)), offsets.ffn_norm_bias != 0u);
+        let norm_b = select(0.0, bitcast<f32>(read_blob(gow(offsets.ffn_norm_bias) + j)), offsets.ffn_norm_bias != 0u);
         let centered = select(activation_in[act_base + j], activation_in[act_base + j] - mean, params.layer_norm_enabled != 0u);
         temp_state[temp_base + params.ffn_dim * 2u + j] =
             centered * inv_std * norm_w + norm_b;
@@ -1057,15 +1042,15 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (slot == 1u) { // F16
         for (var col = 0u; col < params.dim; col++) {
-            let w_byte = weight_off + (row_idx * params.dim + col) * 2u;
+            let w_pack = add_pack(weight_off, (row_idx * params.dim + col) * 2u);
             let val_x = select(activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
                                temp_state[temp_base + params.ffn_dim * 2u + col],
                                non_gated);
-            dot += val_x * dequant_f16_at(w_byte);
+            dot += val_x * dequant_f16_at(w_pack);
         }
     } else if (slot == 0u) { // F32
         for (var col = 0u; col < params.dim; col++) {
-            let w_idx = weight_off / 4u + row_idx * params.dim + col;
+            let w_idx = gow(weight_off) + row_idx * params.dim + col;
             let val_x = select(activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
                                temp_state[temp_base + params.ffn_dim * 2u + col],
                                non_gated);
@@ -1076,9 +1061,9 @@ fn main_ffn_proj(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let bpb = QUANT_BYTES[slot];
         if (epb > 0u) {
             let total_blocks = params.dim / epb;
-            let row_start_byte = weight_off + row_idx * total_blocks * bpb;
+            let row_start_pack = add_pack(weight_off, row_idx * total_blocks * bpb);
             for (var b = 0u; b < total_blocks; b++) {
-                let bb = row_start_byte + b * bpb;
+                let bb = add_pack(row_start_pack, b * bpb);
                 for (var e = 0u; e < epb; e++) {
                     let col = b * epb + e;
                     let val_x = select(activation_in[act_base + col] * rms * norm_bank[norm_offset_base + col],
@@ -1130,14 +1115,14 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (slot_down == 1u) { // F16
         for (var col = 0u; col < ffn_dim; col++) {
-            let w_byte = weight_off + (idx * ffn_dim + col) * 2u;
+            let w_pack = add_pack(weight_off, (idx * ffn_dim + col) * 2u);
             let val_gate = temp_state[temp_base + col];
             let val_up   = temp_state[temp_base + ffn_dim + col];
-            dot += (val_gate * val_up) * dequant_f16_at(w_byte);
+            dot += (val_gate * val_up) * dequant_f16_at(w_pack);
         }
     } else if (slot_down == 0u) { // F32
         for (var col = 0u; col < ffn_dim; col++) {
-            let w_idx = weight_off / 4u + idx * ffn_dim + col;
+            let w_idx = gow(weight_off) + idx * ffn_dim + col;
             let val_gate = temp_state[temp_base + col];
             let val_up   = temp_state[temp_base + ffn_dim + col];
             dot += (val_gate * val_up) * bitcast<f32>(read_blob(w_idx));
@@ -1147,9 +1132,9 @@ fn main_ffn_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let bpb = QUANT_BYTES[slot_down];
         if (epb > 0u) {
             let total_blocks = ffn_dim / epb;
-            let row_start_byte = weight_off + idx * total_blocks * bpb;
+            let row_start_pack = add_pack(weight_off, idx * total_blocks * bpb);
             for (var b = 0u; b < total_blocks; b++) {
-                let bb = row_start_byte + b * bpb;
+                let bb = add_pack(row_start_pack, b * bpb);
                 for (var e = 0u; e < epb; e++) {
                     let col = b * epb + e;
                     let val_gate = temp_state[temp_base + col];
