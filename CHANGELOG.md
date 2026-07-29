@@ -1,112 +1,64 @@
 # Changelog
 
-All notable changes to Airframe will be documented in this file.
+## [0.3.0] — 2026-07-29 — Certification & Model Expansion Release
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [0.2.11]
+### Highlights
+- **21 models certified** across **10 model families** with full 5-gate verification
+- **Qwen3 full support** — QK-norm norm bank fix, RoPE head_dim correction, multi-token prefill resolved
+- **Gemma2 support** — architecture recognition and verification (2B and 9B)
+- **CPU reference stack removed** — 15K lines deleted, 6.5K added. Cleaner, smaller, faster
+- **New certification pipeline** — plan-vs-peel structural audit, quant_verify dequant gate, dual-peel numerical gate, decode≡prefill gate
 
-**Full Changelog**: https://github.com/Michael-A-Kuykendall/airframe/compare/v0.2.10...v0.2.11
+### Certified Models (Level 1 — 5 gates: deq+peel+num+dec+log)
 
+| Family | Models | Quants |
+|--------|--------|--------|
+| **llama** | tinyllama-1.1b, llama-3.2-1b, llama-3.2-3b | Q4_0, Q4_K_M, Q6_K |
+| **qwen3** | 0.6B, 1.7B, 4B, 8B, 4B-Thinking | Q4_K_M |
+| **qwen2** | 0.5B, 1.5B, 7B | Q4_K_M |
+| **phi3** | 3.5-mini | Q4_K_M |
+| **phi2** | 2.7B | Q4_K_M |
+| **starcoder2** | 3B | Q4_K_M |
+| **gemma2** | 2B, 9B | Q4_K_M |
+| **deepseek-r1** | 0528-Qwen3-8B | Q4_K_M |
+| **qwen3.5** | 9B | Q4_K_M |
+| **ministral** | 3-14B-Reasoning | Q4_K_M |
 
-## [0.2.10]
+### Bug Fixes
+- **Qwen3 prefill NaN resolved** — norm bank expanded from 4→6 slots/layer for QK-norm
+- **Qwen3 head_dim** — forced to 128 from Q weight shape (not `n_embd/n_head = 80`)
+- **Gemma2 support** — `gemma2` architecture recognized in model metadata
+- **>2GB output head crash fixed** — blob-based output head handles F32 weights >2GB file offset
+- **Decode gate crash fixed** — graceful buffer size check before `create_buffer_init`; BLOB mode still validates
+- **Quant_verify** — stable tensor pick for models with >4GiB offsets
+- **>4GiB offset packing** — GGUF tensors crossing 4GB boundaries handled correctly
 
-### Fixed
-- **GPU gibberish root cause** — `run_dequant_any_blob` front-padding bug fixed; GPU forward-pass output is now correct across all architectures
-- **f16→f32 dequant on RTX 3060** — correct half-to-float conversion; added the `Q5_0` quant slot
-- **Dispatch struct alignment** — retired the WGSL `if (quant_type == …)` shader dispatch ladder in favor of the fabric `TensorFact → DispatchFact` rule (B3a/B3b)
+### New Features
+- **Decode gate** — `decode_gate` binary verifies decode≡prefill equivalence (maxΔ ≤ 1e-2, argmax match)
+- **Stack dump GPU** — `stack_dump_gpu` per-layer residual/stage capture with JSON output and schema
+- **Dual-peel numerical gate** — self-consistency check: two independent `stack_dump_gpu` runs compared
+- **Certification ledger** — DuckDB-backed per-model run tracking with 5-gate pass/fail columns
+- **Inference canary** — golden-logits comparison for regression detection
 
-### Added
-- **Vault certification (V1/V2/V3)** — per-layer golden-vault oracle comparison (RMS/checksum) with a divergence localizer that reports the first failing layer; 10/10 models certify clean
-- **Algebraic quant audit (P2)** — canonical `quant_formula` registry; all 8 supported quant types verified bit-exact against hand-computed reference values
-- **Single fabric `generate` path (P3)** — legacy imperative `generate()` retired; one dispatch-driven code path
-
-### Changed
-- **Qwen3 GPU forward pass verified** — previously "in progress"; now certified layer-by-layer against the golden vault
-- **Quantization coverage** — `Q5_0` added to the supported list
-
-## [0.2.9] - 2026-07-20
-
-### Fixed
-- **batch_count: 0 -> batch_count: 1** in `server_inference.rs` — was killing all QKV threads
-- **Rust/WGSL struct layout mismatch** — per-field quant types aligned between Rust `LayerParams` and WGSL
-- **GPU adapter selection** — now prefers discrete GPU over integrated (multi-GPU laptops)
-
-### Added
-- **Grammar control hooks** — schoolmarm+grammar module for structured generation
-- **PPT invariant cage (B1-B3)** — golden-vault-based regression detection with per-layer RMS/checksum verification (12 models, CPU-only, single-thread)
-- **Shimmy API**: `tokenizer_arc()`, `eos_token()`, `im_end_token()`, `fse_control_from_patterns()`, `trace_callback()`
+### Refactoring
+- CPU reference stack removed (`llama.rs`, `ops/reference/`, `engine.rs`, `vault_seed.rs`) — 15K lines removed
+- Dead code cleanup: `server_inference.rs`, `image_preproc.rs`, legacy `pipeline.rs`
+- `generate_isf` → `generate` unified API
+- `GpuRuntime::from_parts` constructor for testability
 
 ### Infrastructure
-- 357 library tests pass
-- Releases backfilled for all versions back to v0.2.0
+- New binaries behind `--features isf`: `decode_gate`, `stack_dump_gpu`, `layer_dump_gpu`, `quant_verify`, `invariant_probe`, `kv_dump_probe`, `kv_head_probe`, `kv_chain_probe`
+- `scripts/cert/` — Python-based cert ledger, plan-vs-peel reds judge, regression tests
+- Workspace-level `cert/packages/` per-model directory with STATUS.md, MATH reports
+- `.beads/` — bead tracking system for certified models
 
-## [0.2.8] - 2026-07-18
+### Documentation
+- `MATH_REGIMEN.md` — certification regimen with 5-gate definitions and NUM=1/2/0 table
+- `CERT_REGIMEN.md` — plan vs peel structural audit specification
+- `INFERENCE_SANITY_CHECKS.md` — level-2 canary test suite design
+- `PEEL_STRUCTURE.md` — stage dump schema
+- `STACK_DUMP.md` — stack observability ops
+- `stack.schema.v1.json` — stack JSON schema
 
-### Fixed
-- ISF/TDR/duckdb hotfix release
-- DuckDB now optional (shimmy builds cleanly without it)
-
-## [0.2.7] - 2026-06-12
-
-### Added
-- Inference Saturation Fabric (ISF) refit
-- TDR (Timeout Detection and Recovery) transport
-- Encoder pools operational
-- DuckDB support
-
-### Fixed
-- 10/10 smoke tests pass across all architectures (llama/phi2/gemma2/qwen2/qwen3/starcoder2)
-- Qwen3 attention.scale tensor mapping
-
-## [0.2.6] - 2026-06-02
-
-### Added
-- LM head tile dispatch for large-vocab models (Gemma-2 256K, Qwen3, Llama-3.2-3B)
-
-## [0.2.5] - 2026-05-28
-
-### Fixed
-- 7 NaN/stall bugs for multi-arch models (Qwen3, Gemma-2, StarCoder2, Llama-3.2)
-- NaN in FFN gate/up projections — wrong quant type
-- Buffer alignment in bindless tests (354/354 passing)
-
-## [0.2.4] - 2026-05-24
-
-### Added
-- Vault-driven fixes infrastructure
-
-## [0.2.3] - 2026-05-20
-
-### Added
-- Complete vault with 48 commodity models
-
-## [0.2.1] - 2026-05-15
-
-### Added
-- **TurboShimmy INT4 KV Cache** — ~7× less KV VRAM with one env var
-- Quality validation: needle-in-a-haystack benchmarks show zero retrieval degradation vs F32 at ctx≤2048
-- `device.on_uncaptured_error` handler surfaces GPU validation errors as clean HTTP 500 responses
-
-## [0.2.0] - 2026-05-10
-
-Initial public release as the GPU inference core for Shimmy v2.0.
-
-### Supported Architectures
-- Llama (Llama 3.2, Llama 3, Llama 2, DeepSeek)
-- Mistral (Mistral 7B, Mixtral dense layers)
-- Phi (Phi-3.5, Phi-3, Phi-2)
-- Qwen2 (0.5B–7B)
-- Qwen3 (0.6B–8B)
-- Gemma (Gemma-2 2B, 9B)
-- StarCoder2 (3B)
-- GPT-2
-
-### Supported Quantization
-F32, F16, Q4_0, Q4_K_M, Q5_K_M, Q6_K, Q8_0
-
-### Features
-- Bindless WebGPU pipeline — all weight tensors uploaded once, addressed by index
-- YaRN RoPE scaling for extended context
-- Deterministic sampling — identical output across restarts and GPU vendors
-- GGUF-native model spec auto-derivation
+### Commits
+18 commits since v0.2.12 — see git log `v0.2.12..HEAD` for full list.

@@ -130,11 +130,7 @@ impl ModelSpec {
         }
         // RoPE must use at least head_dim (handles Qwen3: n_embd/n_head=64 but actual head_dim=128 from Q weight)
         // and must not exceed head_dim (handles Gemma-2: n_embd/n_head=288 but actual head_dim=256)
-        if self.rope_dim < self.head_dim {
-            self.rope_dim = self.head_dim;
-        } else if self.rope_dim > self.head_dim {
-            self.rope_dim = self.head_dim;
-        }
+        self.rope_dim = self.head_dim;
         self.gqa_ratio = self.n_head / self.n_head_kv;
         self.kv_dim = self.n_head_kv * self.head_dim;
         // Qwen3 uses per-head Q and K RMSNorm before RoPE

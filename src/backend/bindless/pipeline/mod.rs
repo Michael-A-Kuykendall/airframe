@@ -58,7 +58,7 @@ pub fn pack_blob_offset(byte_offset: u64) -> u32 {
         return 0;
     }
     assert!(
-        byte_offset % 2 == 0,
+        byte_offset.is_multiple_of(2),
         "GGUF offset {byte_offset} must be 2-byte aligned for pack_blob_offset"
     );
     let packed = byte_offset / 2;
