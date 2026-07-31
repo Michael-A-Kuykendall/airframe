@@ -1,0 +1,281 @@
+//! Audit CLI — Load any GGUF, run GPU forward pass, capture every tensor
+//! at every layer into DuckDB, run invariant checks, report first divergence.
+//!
+//! Usage:
+//!   cargo run --features audit --bin audit -- <model.gguf> [--db audit.duckdb] [--token "Hello"]
+use airframe::backend::bindless::kv_cache::KVCache;
+use airframe::backend::bindless::loader::BindlessModel;
+use airframe::backend::bindless::metadata::BindlessMetadata;
+use airframe::backend::bindless::pipeline::{formula_index_for_ggml, BindlessPipeline, LayerParams};
+use airframe::core::audit::{db, invariants};
+use std::path::PathBuf;
+use std::time::Instant;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        eprintln!("Usage: audit <model.gguf> [--db audit.duckdb] [--token \"Hello\"]");
+        std::process::exit(1);
+    }
+
+    let model_path = &args[1];
+    let mut db_path = "audit.duckdb".to_string();
+    let mut prompt = "Hello".to_string();
+
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--db" if i + 1 < args.len() => { db_path = args[i + 1].clone(); i += 2; }
+            "--token" if i + 1 < args.len() => { prompt = args[i + 1].clone(); i += 2; }
+            _ => { i += 1; }
+        }
+    }
+
+    eprintln!("[Audit] Model: {model_path}");
+    eprintln!("[Audit] DB: {db_path}");
+    eprintln!("[Audit] Prompt: {prompt}");
+
+    let start = Instant::now();
+
+    // ── GPU Init ──
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }).await.expect("No GPU adapter found");
+    let mut limits = wgpu::Limits::downlevel_defaults();
+    limits.max_storage_buffer_binding_size = adapter.limits().max_storage_buffer_binding_size;
+    limits.max_buffer_size = adapter.limits().max_storage_buffer_binding_size as u64;
+    limits.max_storage_buffers_per_shader_stage = adapter.limits().max_storage_buffers_per_shader_stage;
+    let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: limits,
+        memory_hints: wgpu::MemoryHints::Performance,
+        ..Default::default()
+    }).await.expect("Failed to create GPU device");
+    eprintln!("[Audit] GPU: {:?}", adapter.get_info().name);
+
+    // ── Load Model ──
+    let tokenizer = shimmytok::Tokenizer::from_gguf_file(model_path)?;
+    let mut meta_file = std::fs::File::open(model_path)?;
+    let meta = BindlessMetadata::new(&mut meta_file);
+    drop(meta_file);
+    let spec = meta.to_model_spec();
+    let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(model_path), Some(&spec));
+    let pipeline = BindlessPipeline::new(&device);
+    let n_layers = gpu_model.metadata.compiled_layers.len();
+
+    let head_dim = (spec.n_embd / spec.n_head) as u32;
+    let rope_dim = if spec.rope_dim > 0 { spec.rope_dim as u32 } else { head_dim };
+    let dim = spec.n_embd as u32;
+    let git_hash = option_env!("CARGO_PKG_VERSION").unwrap_or("unknown");
+
+    eprintln!("[Audit] {} ({} layers, n_embd={}, n_head={})", spec.model_name, n_layers, spec.n_embd, spec.n_head);
+
+    // ── DuckDB ──
+    let conn = db::open_or_create(&db_path)?;
+    let arch_name = spec.arch_string().to_string();
+    let file_type_val = spec.file_type as i32;
+    let model_id = db::insert_model(
+        &conn, &spec.model_name, &arch_name, model_path,
+        n_layers as i32, spec.n_embd as i32, spec.n_head as i32,
+        spec.n_head_kv as i32, head_dim as i32, spec.ff_dim as i32,
+        spec.rms_eps as f64, Some(spec.rope_base as f64),
+        Some(spec.rope_dim as i32), Some(file_type_val),
+        git_hash,
+    )?;
+
+    // Write per-tensor quant types
+    for (tname, qtype, shape_json) in enumerate_tensor_quants(&gpu_model) {
+        let _ = db::insert_tensor_quant(&conn, model_id, &tname, qtype as i32, &shape_json, None);
+    }
+
+    // Tokenize
+    let prompt_tokens = tokenizer.encode(&prompt, true)?;
+    eprintln!("[Audit] Tokens: {:?}", prompt_tokens);
+    let num_tokens = prompt_tokens.len() as i32;
+
+    // Start run
+    let run_id = db::start_run(&conn, model_id, Some(0), &prompt, num_tokens, n_layers as i32, git_hash)?;
+
+    // ── Forward Pass with Per-Tensor Capture ──
+    let token_id = prompt_tokens[0];
+    let embd_quant_type = gpu_model.metadata.get_tensor_type("token_embd.weight").unwrap_or(2);
+    let embd_weight_offset = gpu_model.metadata.get_tensor_offset("token_embd.weight")
+        .expect("token_embd.weight not found");
+    let embd_row_bytes = match embd_quant_type {
+        0 => dim * 4, 1 => dim * 2, 2 => (dim / 32) * 18,
+        6 => (dim / 32) * 22, 8 => (dim / 32) * 34,
+        12 => (dim / 256) * 144, 13 => (dim / 256) * 176,
+        14 => (dim / 256) * 210, _ => panic!("unsupported embd quant: {embd_quant_type}"),
+    };
+
+    let layer_params_base = LayerParams {
+        dim, head_count: spec.n_head as u32, head_count_kv: spec.n_head_kv as u32,
+        head_dim, rope_dim, rms_eps: spec.rms_eps, ffn_dim: spec.ff_dim as u32,
+        temp_stride: spec.temp_buffer_size as u32,
+        quant_qk: 0, quant_v: 0, quant_attn_out: 0, quant_ffn_down: 0,
+        quant_ffn_gate: 0, quant_ffn_up: 0,
+        formula_qk: 0, formula_v: 0, formula_attn_out: 0,
+        formula_ffn_down: 0, formula_ffn_gate: 0, formula_ffn_up: 0,
+        attn_logit_softcap: spec.attn_logit_softcap,
+        post_norm_enabled: spec.post_norm_enabled as u32,
+        qk_norm_enabled: spec.has_qk_norm as u32,
+        layer_norm_enabled: spec.uses_layer_norm() as u32,
+        ffn_kind_policy: 0, qkv_layout_policy: 0,
+        batch_offset: 0, batch_count: 1, q_weight_k: 0, k_weight_k: 0,
+    };
+
+    let mut kv_cache = KVCache::new(&device, n_layers, spec.n_head_kv as u32, head_dim, spec.n_ctx as u32);
+
+    // Embedding
+    let row_offset = embd_weight_offset + (token_id as u64 * embd_row_bytes as u64);
+    let mut layer_output = pipeline.run_dequant_any_hot(&device, &queue, &gpu_model, row_offset as u32, dim, embd_quant_type);
+
+    // Capture embedding as layer -1
+    db::insert_captured_tensor(&conn, model_id, run_id, -1, "embedding", 0, &layer_output, Some(0), git_hash)?;
+
+    // Run layers
+    let mut fail_info: Option<(i32, String)> = None;
+
+    for layer_idx in 0..n_layers {
+        let compiled = &gpu_model.metadata.compiled_layers[layer_idx];
+        let layer_offsets = gpu_model.metadata.get_layer_offsets(layer_idx, spec.arch_string())
+            .unwrap_or_else(|| panic!("Layer {layer_idx} offsets not found"));
+        if [2usize, 3].contains(&layer_idx) {
+            eprintln!(
+                "[offsets L{}] attn_q={} attn_out={} ffn_gate={} ffn_up={} ffn_down={}",
+                layer_idx,
+                layer_offsets.attn_q,
+                layer_offsets.attn_out,
+                layer_offsets.ffn_gate,
+                layer_offsets.ffn_up,
+                layer_offsets.ffn_down,
+            );
+            // CPU dequant of ONE ROW of attn_output.weight to check weight magnitude.
+            let wname = format!("blk.{}.attn_output.weight", layer_idx);
+            if let (Some(off), Some(qt)) = (
+                gpu_model.metadata.get_tensor_offset(&wname),
+                gpu_model.metadata.get_tensor_type(&wname),
+            ) {
+                let w = pipeline.run_dequant_any_hot(&device, &queue, &gpu_model, off as u32, dim, qt);
+                let w_rms = (w.iter().map(|x| x * x).sum::<f32>() / w.len() as f32).sqrt();
+                let w_max = w.iter().map(|x| x.abs()).fold(0.0f32, |a, b| a.max(b));
+                eprintln!(
+                    "[cpu-dequant L{}] {} off={} qt={} rms={:.4} max={:.4}",
+                    layer_idx, wname, off, qt, w_rms, w_max
+                );
+            }
+        }
+        let mut lp = LayerParams {
+            quant_qk: compiled.quant_qk, quant_v: compiled.quant_v,
+            quant_attn_out: compiled.quant_attn_out,
+            quant_ffn_down: compiled.quant_ffn_down,
+            quant_ffn_gate: compiled.quant_ffn_gate,
+            quant_ffn_up: compiled.quant_ffn_up,
+            formula_qk: formula_index_for_ggml(compiled.quant_qk),
+            formula_v: formula_index_for_ggml(compiled.quant_v),
+            formula_attn_out: formula_index_for_ggml(compiled.quant_attn_out),
+            formula_ffn_down: formula_index_for_ggml(compiled.quant_ffn_down),
+            formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
+            formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
+            ..layer_params_base
+        };
+        if spec.arch_string() == "qwen3" {
+            lp.q_weight_k = 2 * dim;
+            lp.k_weight_k = 2 * dim;
+        }
+
+        let (output, post, ffn_down, q, k, v) = pipeline.run_layer_with_cache_debug(
+            &device, &queue, &gpu_model, &mut kv_cache, layer_idx, &layer_output, layer_offsets, lp,
+        );
+
+        // Capture all 6 tensors
+        db::insert_captured_tensor(&conn, model_id, run_id, layer_idx as i32, "q", 0, &q, Some(0), git_hash)?;
+        db::insert_captured_tensor(&conn, model_id, run_id, layer_idx as i32, "k", 0, &k, Some(0), git_hash)?;
+        db::insert_captured_tensor(&conn, model_id, run_id, layer_idx as i32, "v", 0, &v, Some(0), git_hash)?;
+        db::insert_captured_tensor(&conn, model_id, run_id, layer_idx as i32, "attn_out", 0, &post, Some(0), git_hash)?;
+        db::insert_captured_tensor(&conn, model_id, run_id, layer_idx as i32, "ffn_down", 0, &ffn_down, Some(0), git_hash)?;
+        db::insert_captured_tensor(&conn, model_id, run_id, layer_idx as i32, "layer_output", 0, &output, Some(0), git_hash)?;
+
+        // Quick per-layer NaN check
+        if output.iter().any(|x| x.is_nan() || x.is_infinite()) {
+            eprintln!("[Audit] Layer {layer_idx}: NaN/Inf detected in layer_output!");
+            if fail_info.is_none() {
+                fail_info = Some((layer_idx as i32, "layer_output NaN".to_string()));
+            }
+        }
+
+        layer_output = output;
+        eprintln!("[Audit] Layer {layer_idx}/{n_layers} captured OK");
+    }
+
+    let duration_ms = start.elapsed().as_millis() as i64;
+
+    // ── Invariant Checks ──
+    eprintln!("\n[Audit] Running invariant checks...");
+    let (passed, failed, first_fail) = invariants::run_all(&conn, run_id, model_id, n_layers as i32);
+
+    // ── Report ──
+    if first_fail.is_some() && fail_info.is_none() {
+        fail_info = Some((0, first_fail.as_ref().unwrap().clone()));
+    }
+
+    if failed == 0 {
+        db::finish_run_ok(&conn, run_id, duration_ms)?;
+        println!("\n✅ AUDIT PASSED — {passed} checks, 0 failures ({duration_ms}ms)");
+        println!("   Model: {} ({} layers)", spec.model_name, n_layers);
+        println!("   DB:    {db_path}");
+    } else {
+        let ff_layer = fail_info.as_ref().map(|(l, _)| *l);
+        let ff_check = fail_info.as_ref().map(|(_, c)| c.as_str());
+        db::finish_run_fail(&conn, run_id, duration_ms, ff_layer, ff_check, failed)?;
+        println!("\n❌ AUDIT FAILED — {failed} failures, {passed} passed ({duration_ms}ms)");
+        println!("   Model: {} ({} layers)", spec.model_name, n_layers);
+        if let Some((l, c)) = &fail_info {
+            println!("   First divergence: L{l} {c}");
+        }
+        println!("   DB:    {db_path}");
+        println!("\nQuery the DB:");
+        println!("   duckcli {db_path} \"SELECT * FROM invariant_checks WHERE passed=0 ORDER BY id\"");
+        println!("   duckcli {db_path} \"SELECT * FROM captured_tensors WHERE run_id={run_id} ORDER BY layer_idx\"");
+    }
+
+    Ok(())
+}
+
+/// Enumerate per-tensor quant types from the loaded model.
+fn enumerate_tensor_quants(model: &BindlessModel) -> Vec<(String, u32, String)> {
+    let mut out = Vec::new();
+    for (idx, compiled) in model.metadata.compiled_layers.iter().enumerate() {
+        let types = [
+            ("attn_q.weight", compiled.quant_qk),
+            ("attn_k.weight", compiled.quant_qk),
+            ("attn_v.weight", compiled.quant_v),
+            ("attn_output.weight", compiled.quant_attn_out),
+            ("ffn_gate.weight", compiled.quant_ffn_gate),
+            ("ffn_up.weight", compiled.quant_ffn_up),
+            ("ffn_down.weight", compiled.quant_ffn_down),
+        ];
+        for (name, qt) in &types {
+            out.push((
+                format!("blk.{idx}.{name}"),
+                *qt as u32,
+                "[]".to_string(),
+            ));
+        }
+    }
+    // Add token_embd.weight and output.weight
+    if let Some(qt) = model.metadata.get_tensor_type("token_embd.weight") {
+        out.push(("token_embd.weight".to_string(), qt as u32, "[]".to_string()));
+    }
+    if let Some(qt) = model.metadata.get_tensor_type("output.weight") {
+        out.push(("output.weight".to_string(), qt as u32, "[]".to_string()));
+    }
+    out
+}

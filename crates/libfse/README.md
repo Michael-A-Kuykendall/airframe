@@ -218,7 +218,11 @@ The FSE architecture compiles independent semantic rules into a single fused DFA
 
 > **∂runtime / ∂rules ≈ 0** (for shared selectors)
 
-This is formalized in the patent-pending specification. The full technical reconstruction (including FIG. 1–6 diagrams from the patent drawings) is at [`fused_semantic_execution_full_markdown_reconstruction.md`](../../fused_semantic_execution_full_markdown_reconstruction.md).
+This is formalized in the patent-pending specification. See the FSE `docs/`
+directory for the architecture and validation reports; the full technical
+reconstruction (including FIG. 1–6 diagrams from the patent drawings) lives in
+the parent [airframe](https://github.com/Michael-A-Kuykendall/airframe) repo
+(the file is gitignored from this crate).
 
 ---
 

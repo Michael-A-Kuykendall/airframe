@@ -28,7 +28,7 @@ For GPU-dependent tests and examples, set:
 
 ```bash
 export LIBSHIMMY_MODEL_PATH=/path/to/any.gguf
-cargo run --example simple_flight
+cargo test
 ```
 
 ## Code Style

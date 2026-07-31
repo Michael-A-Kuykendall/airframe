@@ -1,0 +1,8 @@
+{"family_id": "qwen3-4b-q4-k-m", "math_ok": true, "n_reds": 0, "chat_paris": "Paris first token", "chat_math": "weak", "ts": "2026-07-28T20:16:44.725034+00:00", "report": "cert/packages/qwen3-4b-q4-k-m/FINAL_REPORT.md", "quant_verify": "ALL PASS", "peel_top1": "Paris 12095"}
+{"family_id": "qwen2-0.5b-instruct-q4-k-m", "math_ok": true, "n_reds": 0, "top1": "\u00e9\u0137\u00bf", "reds": [], "ts": "2026-07-28T20:29:32.142519+00:00"}
+{"family_id": "qwen2-1.5b-instruct-q4-k-m", "math_ok": true, "n_reds": 0, "top1": "\u0120__", "reds": [], "ts": "2026-07-28T20:29:32.153936+00:00"}
+{"family_id": "qwen2-7b-instruct-q4-k-m", "math_ok": false, "n_reds": 8, "top1": "!", "reds": ["L25.k.nan", "L25.q.nan", "L25.v.nan", "L26.k.nan", "L26.q.nan", "L26.v.nan", "L27.k.nan", "L27.q.nan"], "ts": "2026-07-28T20:29:32.165050+00:00"}
+{"family_id": "qwen3-0.6b-q4-k-m", "math_ok": true, "n_reds": 0, "top1": "\u0120the", "reds": [], "ts": "2026-07-28T20:29:32.176137+00:00"}
+{"family_id": "qwen3-1.7b-q4-k-m", "math_ok": true, "n_reds": 0, "top1": "\u0120the", "reds": [], "ts": "2026-07-28T20:29:32.187096+00:00"}
+{"family_id": "qwen3-4b-q4-k-m", "math_ok": true, "n_reds": 0, "top1": "\u0120Paris", "reds": [], "ts": "2026-07-28T20:29:32.199768+00:00"}
+{"family_id": "qwen3-8b-q4-k-m", "math_ok": false, "n_reds": 4, "top1": "!", "reds": ["L32.k_norm.nan", "L33.q_norm.nan", "L35.k_norm.nan", "L35.q_norm.nan"], "ts": "2026-07-28T20:29:32.212211+00:00"}

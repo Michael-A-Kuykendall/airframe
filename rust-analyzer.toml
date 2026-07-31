@@ -1,0 +1,9 @@
+# rust-analyzer configuration for the airframe crate.
+#
+# This repo's real build uses `--features isf` (see Cargo.toml: `isf = ["dep:airframe-observe"]`).
+# Without this, rust-analyzer analyzes with DEFAULT features and emits spurious
+# "cannot find type/method" errors for everything gated behind `isf`
+# (e.g. `GpuRuntime::generate`, `airframe_observe` error types, `kv_dump_probe`).
+# This makes the LSP match the actual build so those diagnostics stop misfiring.
+[cargo]
+features = ["isf"]
