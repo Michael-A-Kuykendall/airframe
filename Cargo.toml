@@ -50,6 +50,7 @@ lazy_static = "1.4"
 airframe-observe = { path = "crates/airframe_observe", version = "0.1.0", optional = true }
 
 [features]
+default = ["isf"]
 isf = ["dep:airframe-observe"]
 dev = ["isf"]
 

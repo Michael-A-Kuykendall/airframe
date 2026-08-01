@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **shimmytok UINT16 support** — `stack_dump_gpu` now correctly handles UINT16 metadata values in GGUF files (was `InvalidMetadata("Unsupported value type: 2")`)
-- **CI pipeline** — PPT contract tests now run with `--features isf`; added `airframe-observe` test step; added `cargo build --features isf` build gate
+- **CI pipeline** — PPT contract tests now run without `--features isf` (ISF is now the default); added `airframe-observe` test step; added `cargo build` build gate
 - **Test isolation** — PPT invariant log made thread-local (`RefCell` instead of `Mutex`), eliminating race conditions when running full test suite
-- **Test required-features** — added `required-features = ["isf"]` to all isf-dependent test targets (`test_invariants`, `tinyllama_smoke`, `algebraic_audit`, `gpu_22layer_verify`, `math_pack_detection`, `tiled_gemm_math`)
+- **Test required-features** — removed `required-features = ["isf"]` from all test targets (ISF is now default)
+
+### Features
+- **ISF is now the default** — `isf` (Inference Saturation Fabric) is the default feature, eliminating the need to pass `--features isf` for full functionality. All diagnostic binaries (`decode_gate`, `stack_dump_gpu`, `layer_dump_gpu`, `quant_verify`, `invariant_probe`, etc.) are now available by default.
 
 ### Cleanup
 - Removed 12 large diagnostic artifacts from git tracking (layer dumps, coverage reports, JSON captures totaling ~10MB)
