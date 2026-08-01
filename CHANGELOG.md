@@ -5,6 +5,22 @@ All notable changes to Airframe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.14] — 2026-08-01 — Hotfix: UINT16 metadata support, CI fixes, docs cleanup
+
+### Fixed
+- **shimmytok UINT16 support** — `stack_dump_gpu` now correctly handles UINT16 metadata values in GGUF files (was `InvalidMetadata("Unsupported value type: 2")`)
+- **CI pipeline** — PPT contract tests now run with `--features isf`; added `airframe-observe` test step; added `cargo build --features isf` build gate
+- **Test isolation** — PPT invariant log made thread-local (`RefCell` instead of `Mutex`), eliminating race conditions when running full test suite
+- **Test required-features** — added `required-features = ["isf"]` to all isf-dependent test targets (`test_invariants`, `tinyllama_smoke`, `algebraic_audit`, `gpu_22layer_verify`, `math_pack_detection`, `tiled_gemm_math`)
+
+### Cleanup
+- Removed 12 large diagnostic artifacts from git tracking (layer dumps, coverage reports, JSON captures totaling ~10MB)
+- Added diagnostic file patterns to `.gitignore` (`capital`, `layer_dump_*.json`, `fc_qwen3_*.json`, `gpu_qwen3_*.json`, `compare_*.json`, `fc_run_*.log`, `tarpaulin-report.html`, `cobertura.xml`, `sanity_out.txt`)
+- Added large-model coverage caveat to README
+
+### Certified
+- Qwen2.5-7B-Instruct Q4_K_M certified (all 5 gates green, run_id=25)
+
 ## [0.2.13] — 2026-07-31 — Certification & Model Expansion Release
 
 ### 🏆 Certified — 11 Families · 25 Model/Quant Combinations
