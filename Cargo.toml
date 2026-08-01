@@ -83,3 +83,43 @@ required-features = ["isf"]
 name = "kv_head_probe"
 path = "src/bin/kv_head_probe.rs"
 required-features = ["isf"]
+
+[[bin]]
+name = "kv_dump_probe"
+path = "src/bin/kv_dump_probe.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "kv_chain_probe"
+path = "src/bin/kv_chain_probe.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "quant_verify"
+path = "src/bin/quant_verify.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "cert_check"
+path = "src/bin/cert_check.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "probe_tokens"
+path = "src/bin/probe_tokens.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "shimmy_server_gpu"
+path = "src/bin/shimmy_server_gpu.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "vault_generator"
+path = "src/bin/vault_generator.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "window_boundary_probe"
+path = "src/bin/window_boundary_probe.rs"
+required-features = ["isf"]
