@@ -63,13 +63,26 @@ crates/libfse/docs/
 
 # Internal developer docs — never committed (session notes, AI handoffs, audits)
 docs/internal/
-artifacts/
 
 # vault/seeds/  # Now committed as canonical vault data
 # vault/vault.duckdb IS committed (via LFS) — do NOT add vault/ here
 
-# Generated fixture CSVs from oracle runs
-fixtures/oracle_*.csv
+# Diagnostic / probe output files (large JSON dumps, local-only)
+capital
+layer_dump_*.json
+layer_dump_pos*.json
+fc_qwen3_*.json
+gpu_qwen3_*.json
+compare_qwen3_*.json
+fc_run_*.log
+sanity_out.txt
+
+# Coverage / test reports (generated locally, never commit)
+tarpaulin-report.html
+cobertura.xml
+
+# Artifacts from cert runs (timestamped, local-only)
+artifacts/battery_int4_*.txt
 
 # Windows reserved device name artifact (from bad command redirect)
 nul

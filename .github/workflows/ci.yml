@@ -40,7 +40,13 @@ jobs:
     - name: PPT Contract Tests (no GPU required)
       # --test-threads=1: the invariant log is a process-global static, so
       # contract tests must not run in parallel (per the PPT framework design).
-      run: cargo test -p airframe --test test_contracts -- --test-threads=1
+      run: cargo test -p airframe --features isf --test test_contracts -- --test-threads=1
+
+    - name: Observe tests (no GPU required)
+      run: cargo test -p airframe-observe
+
+    - name: Build with ISF features
+      run: cargo build --features isf
 
   publish:
     name: Publish to crates.io

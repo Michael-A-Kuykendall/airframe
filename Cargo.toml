@@ -123,3 +123,27 @@ required-features = ["isf"]
 name = "window_boundary_probe"
 path = "src/bin/window_boundary_probe.rs"
 required-features = ["isf"]
+
+[[test]]
+name = "test_invariants"
+required-features = ["isf"]
+
+[[test]]
+name = "tinyllama_smoke"
+required-features = ["isf"]
+
+[[test]]
+name = "algebraic_audit"
+required-features = ["isf"]
+
+[[test]]
+name = "gpu_22layer_verify"
+required-features = ["isf"]
+
+[[test]]
+name = "math_pack_detection"
+required-features = ["isf"]
+
+[[test]]
+name = "tiled_gemm_math"
+required-features = ["isf"]
