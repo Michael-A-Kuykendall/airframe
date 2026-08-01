@@ -178,3 +178,95 @@ pub fn ensure_calibrated(gpu_name: &str, pipeline: &str, n_embd: u32) -> u32 {
     let _ = save_cache(&cache);
     conservative_default
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_cache_has_no_pipelines() {
+        let cache = CalibrationCache::empty("Test GPU");
+        assert_eq!(cache.version, 1);
+        assert_eq!(cache.gpu, "Test GPU");
+        assert!(cache.pipelines.is_empty());
+        assert_eq!(cache.get_safe_workgroups("head_blob", 2048), None);
+    }
+
+    #[test]
+    fn set_and_get_calibration_roundtrip() {
+        let mut cache = CalibrationCache::empty("Test GPU");
+        cache.set_calibration("head_blob", 2048, 512, 1180, 1400);
+        cache.set_calibration("head_blob", 4096, 256, 900, 1400);
+        cache.set_calibration("layer", 2048, 128, 500, 1400);
+
+        assert_eq!(cache.get_safe_workgroups("head_blob", 2048), Some(512));
+        assert_eq!(cache.get_safe_workgroups("head_blob", 4096), Some(256));
+        assert_eq!(cache.get_safe_workgroups("layer", 2048), Some(128));
+        // Missing dimension / pipeline returns None.
+        assert_eq!(cache.get_safe_workgroups("head_blob", 8192), None);
+        assert_eq!(cache.get_safe_workgroups("missing", 2048), None);
+    }
+
+    #[test]
+    fn set_calibration_overwrites_existing() {
+        let mut cache = CalibrationCache::empty("Test GPU");
+        cache.set_calibration("head_blob", 2048, 512, 1180, 1400);
+        cache.set_calibration("head_blob", 2048, 256, 600, 1400);
+        let entry = &cache.pipelines["head_blob"]["2048"];
+        assert_eq!(entry.safe_workgroups, 256);
+        assert_eq!(entry.measured_ms, 600);
+        assert_eq!(entry.budget_ms, 1400);
+    }
+
+    #[test]
+    fn serde_roundtrip_preserves_data() {
+        let mut cache = CalibrationCache::empty("Roundtrip GPU");
+        cache.set_calibration("head_blob", 2048, 512, 1180, 1400);
+        cache.last_updated = "2026-06-18T12:00:00Z".to_string();
+
+        let data = serde_json::to_string(&cache).unwrap();
+        let parsed: CalibrationCache = serde_json::from_str(&data).unwrap();
+        assert_eq!(parsed.gpu, "Roundtrip GPU");
+        assert_eq!(parsed.last_updated, "2026-06-18T12:00:00Z");
+        assert_eq!(parsed.get_safe_workgroups("head_blob", 2048), Some(512));
+    }
+
+    /// Single serialized test for the env-dependent paths. These share the
+    /// process-global `AIRFRAME_CACHE_DIR` env var, so they must not run
+    /// concurrently. Grouping them in one test fn keeps the suite
+    /// deterministic without a serial-test dependency.
+    #[test]
+    fn cache_path_and_disk_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("tdr-test-{}", std::process::id()));
+        std::env::set_var("AIRFRAME_CACHE_DIR", &dir);
+
+        // cache_path respects the env override.
+        let path = cache_path();
+        assert_eq!(
+            path.file_name().unwrap().to_str().unwrap(),
+            "tdr-calibration.json"
+        );
+        assert_eq!(path.parent().unwrap(), dir);
+
+        // No cache yet -> None.
+        assert!(load_cache().is_none());
+
+        let mut cache = CalibrationCache::empty("IO GPU");
+        cache.set_calibration("head_blob", 2048, 512, 1180, 1400);
+        save_cache(&cache).unwrap();
+
+        let loaded = load_cache().expect("cache should load after save");
+        assert_eq!(loaded.get_safe_workgroups("head_blob", 2048), Some(512));
+
+        // ensure_calibrated uses the cached value for the known dim, and the
+        // conservative default for a missing dim.
+        assert_eq!(ensure_calibrated("IO GPU", "head_blob", 2048), 512);
+        assert_eq!(ensure_calibrated("IO GPU", "head_blob", 8192), 512);
+
+        clear_cache().unwrap();
+        assert!(load_cache().is_none());
+
+        std::env::remove_var("AIRFRAME_CACHE_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -19,12 +19,14 @@
 //! *actually exercised* during a run. That is an objective gate that survives
 //! refactors and AI-generated code changes — it cannot be silently dropped.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::Mutex;
 
-lazy_static::lazy_static! {
-    static ref INVARIANT_LOG: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
-    static ref FAILED_INVARIANTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+// HashSet::new is not const, so the INVARIANT_LOG thread_local can't be
+// const-constructed (the Vec one can, so it is).
+thread_local! {
+    static INVARIANT_LOG: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    static FAILED_INVARIANTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Core invariant assertion.
@@ -39,15 +41,15 @@ pub fn assert_invariant(condition: bool, message: &str, context: Option<&str>) {
     };
 
     // Always record that this invariant was checked.
-    if let Ok(mut log) = INVARIANT_LOG.lock() {
-        log.insert(full_message.clone());
-    }
+    INVARIANT_LOG.with(|log| {
+        log.borrow_mut().insert(full_message.clone());
+    });
 
     // Enforce the invariant.
     if !condition {
-        if let Ok(mut failed) = FAILED_INVARIANTS.lock() {
-            failed.push(full_message.clone());
-        }
+        FAILED_INVARIANTS.with(|failed| {
+            failed.borrow_mut().push(full_message.clone());
+        });
         panic!("INVARIANT VIOLATION: {}", full_message);
     }
 }
@@ -79,9 +81,7 @@ where
 pub fn contract_test(name: &str, required_invariants: &[&str]) {
     println!("[PPT] Running contract test: {}", name);
 
-    let log = INVARIANT_LOG
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let log = INVARIANT_LOG.with(|log| log.borrow().clone());
 
     let mut missing_invariants = Vec::new();
     for required in required_invariants {
@@ -121,31 +121,19 @@ where
 
 /// Clear the invariant log (for test isolation between iterations/suites).
 pub fn clear_invariant_log() {
-    let mut log = INVARIANT_LOG
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    log.clear();
-    let mut failed = FAILED_INVARIANTS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    failed.clear();
+    INVARIANT_LOG.with(|log| log.borrow_mut().clear());
+    FAILED_INVARIANTS.with(|failed| failed.borrow_mut().clear());
 }
 
 /// All invariants checked so far this process (for contract assertions).
 pub fn checked_invariants() -> Vec<String> {
-    let log = INVARIANT_LOG
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    log.iter().cloned().collect()
+    INVARIANT_LOG.with(|log| log.borrow().iter().cloned().collect())
 }
 
 /// All invariants that have failed so far this process.
 #[allow(dead_code)] // test introspection helper; retained for debugging
 pub fn failed_invariants() -> Vec<String> {
-    let failed = FAILED_INVARIANTS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    failed.clone()
+    FAILED_INVARIANTS.with(|failed| failed.borrow().clone())
 }
 
 // Shared, reusable invariant gates. The future refactor beads (loader / bind-group

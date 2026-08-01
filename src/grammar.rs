@@ -96,3 +96,18 @@ pub fn grammar_hooks(
 
     Some((mask, Box::new(control)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn developer_mode_grammar_has_required_productions() {
+        let g = developer_mode_grammar();
+        assert!(g.contains("root ::="));
+        assert!(g.contains("start ::="));
+        assert!(g.contains("body ::="));
+        assert!(g.contains("end ::="));
+        assert!(g.contains("// END_RUST_FILE"));
+    }
+}
