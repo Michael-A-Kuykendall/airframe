@@ -72,7 +72,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // Build F32 output head (shimmy's path)
     let f32_head = GpuRuntime::load_output_head_f32(model_path, &gpu_model, &device, &spec)
         .map_err(|e| {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
                 as Box<dyn std::error::Error>
         })?;
 
@@ -138,19 +138,21 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         v.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).map(|(i, &v)| (i, v)).unwrap_or((0, 0.0))
     };
 
+    let gpu_ctx = GpuCtx { device: &device, queue: &queue, gpu_model: &gpu_model, pipeline: &pipeline, spec: &spec };
+
+    let embs = Embeddings { emb_6: &emb_6, emb_7: &emb_7, emb_7th };
+
     eprintln!("\n=== HEAD MODE TEST: BLOB (None) ===");
     let (maxdiff_blob, tok_dec_blob, tok_ref_blob) = run_mode(
-        &device, &queue, &gpu_model, &pipeline, &spec,
+        &gpu_ctx, &embs,
         None,
-        &emb_6, &emb_7, &emb_7th,
         dim_u32, mk_kv, &rms, &argmax,
     )?;
 
     eprintln!("\n=== HEAD MODE TEST: F32 (Some) ===");
     let (maxdiff_f32, tok_dec_f32, tok_ref_f32) = run_mode(
-        &device, &queue, &gpu_model, &pipeline, &spec,
+        &gpu_ctx, &embs,
         Some(&f32_head),
-        &emb_6, &emb_7, &emb_7th,
         dim_u32, mk_kv, &rms, &argmax,
     )?;
 
@@ -161,43 +163,51 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+struct GpuCtx<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    gpu_model: &'a BindlessModel,
+    pipeline: &'a BindlessPipeline,
+    spec: &'a airframe::core::spec::ModelSpec,
+}
+
+struct Embeddings<'a> {
+    emb_6: &'a [f32],
+    emb_7: &'a [f32],
+    emb_7th: &'a [f32],
+}
+
 fn run_mode(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    gpu_model: &BindlessModel,
-    pipeline: &BindlessPipeline,
-    spec: &airframe::core::spec::ModelSpec,
+    ctx: &GpuCtx,
+    embs: &Embeddings,
     head_override: Option<&wgpu::Buffer>,
-    emb_6: &[f32],
-    emb_7: &[f32],
-    emb_7th: &[f32],
-    dim: u32,
+    _dim: u32,
     mk_kv: impl Fn() -> KVCache,
     rms: &dyn Fn(&[f32]) -> f32,
     argmax: &dyn Fn(&[f32]) -> (usize, f32),
 ) -> Result<(f32, usize, usize), Box<dyn std::error::Error>> {
     // Reference: 7-token single-pass prefill -> logits at position 6
     let kv_ref = mk_kv();
-    let rb = pipeline.run_full_model_prefill_chunked_with_cache_state(
-        device, queue, gpu_model, emb_7, head_override, 0,
+    let rb = ctx.pipeline.run_full_model_prefill_chunked_with_cache_state(
+        ctx.device, ctx.queue, ctx.gpu_model, embs.emb_7, head_override, 0,
         Some((kv_ref.get_k_buffers(), kv_ref.get_v_buffers())),
-        spec, 512,
+        ctx.spec, 512,
     )?;
     let logits_ref = rb.2;
 
     // Prefill 6 tokens (0..5)
     let kv_pf = mk_kv();
-    pipeline.run_full_model_prefill_chunked_with_cache_state(
-        device, queue, gpu_model, emb_6, head_override, 0,
+    ctx.pipeline.run_full_model_prefill_chunked_with_cache_state(
+        ctx.device, ctx.queue, ctx.gpu_model, embs.emb_6, head_override, 0,
         Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
-        spec, 512,
+        ctx.spec, 512,
     )?;
 
     // Decode at pos 6 with 7th token embedding
-    let rd = pipeline.run_full_model_prefill_chunked_with_cache_state(
-        device, queue, gpu_model, emb_7th, head_override, 6,
+    let rd = ctx.pipeline.run_full_model_prefill_chunked_with_cache_state(
+        ctx.device, ctx.queue, ctx.gpu_model, embs.emb_7th, head_override, 6,
         Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
-        spec, 1,
+        ctx.spec, 1,
     )?;
     let logits_dec = rd.2;
 

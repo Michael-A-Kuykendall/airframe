@@ -124,7 +124,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let emb_6 = concat(&embs[0..6]);
     let emb_7 = concat(&embs[0..7]);
     let emb_7th = &embs[6];
-    let dim_u32 = dim as u32;
+    let _dim_u32 = dim as u32;
 
     let mk_kv = || KVCache::new(&device, n_layers, n_head_kv, head_dim, max_seq_len);
     let rms = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();

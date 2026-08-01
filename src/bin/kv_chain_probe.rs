@@ -57,7 +57,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     let f32_head = GpuRuntime::load_output_head_f32(model_path, &gpu_model, &device, &spec)
         .map_err(|e| {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
                 as Box<dyn std::error::Error>
         })?;
 
@@ -145,9 +145,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Sequential decode using greedy argmax feedback
         let mut cur_emb = emb_first_decode.clone();
-        let mut pos = (need - 1) as u32;
-
         for step in 0..decode_steps {
+            let pos = (need - 1) as u32 + step;
             let (_, _, logits) = pipeline.run_full_model_prefill_chunked_with_cache_state(
                 &device, &queue, &gpu_model, &cur_emb, head_override, pos,
                 Some((kv_chain.get_k_buffers(), kv_chain.get_v_buffers())),
@@ -164,7 +163,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             cur_emb = pipeline.run_dequant_any_hot(
                 &device, &queue, &gpu_model, offset32, dim_u32, embd_quant_type,
             );
-            pos += 1;
         }
     }
 

@@ -558,89 +558,6 @@ fn skip_metadata<R: Read + Seek>(reader: &mut R, kv_count: u64) -> Result<()> {
                                 }
                             }
                         }
-                        0 => {
-                            // uint8
-                            reader
-                                .seek(SeekFrom::Current(1))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        1 => {
-                            // int8
-                            reader
-                                .seek(SeekFrom::Current(1))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        2 => {
-                            // uint16
-                            reader
-                                .seek(SeekFrom::Current(2))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        3 => {
-                            // int16
-                            reader
-                                .seek(SeekFrom::Current(2))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        4 => {
-                            // uint32
-                            reader
-                                .seek(SeekFrom::Current(4))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        5 => {
-                            // int32
-                            reader
-                                .seek(SeekFrom::Current(4))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        6 => {
-                            // uint64 - but handle special cases where it is actually f32
-                            if key_name == "llama.attention.layer_norm_rms_epsilon"
-                                || key_name == "llama.rope.freq_base"
-                            {
-                                let _f32_val = reader
-                                    .read_f32::<LittleEndian>()
-                                    .map_err(LibshimmyError::Io)?;
-                            } else {
-                                reader
-                                    .seek(SeekFrom::Current(8))
-                                    .map_err(LibshimmyError::Io)?;
-                            }
-                        }
-                        7 => {
-                            // bool
-                            reader
-                                .seek(SeekFrom::Current(1))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        8 => {
-                            // string
-                            let str_len = reader
-                                .read_u64::<LittleEndian>()
-                                .map_err(LibshimmyError::Io)?;
-                            reader
-                                .seek(SeekFrom::Current(str_len as i64))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        10 => {
-                            // f32
-                            reader
-                                .seek(SeekFrom::Current(4))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        11 => {
-                            // bool
-                            reader
-                                .seek(SeekFrom::Current(1))
-                                .map_err(LibshimmyError::Io)?;
-                        }
-                        12 => {
-                            // f64
-                            reader
-                                .seek(SeekFrom::Current(8))
-                                .map_err(LibshimmyError::Io)?;
-                        }
                         _ => {
                             return Err(LibshimmyError::FixtureError {
                                 msg: format!("Unsupported GGUF value type: {}", value_type),
@@ -700,44 +617,6 @@ fn skip_metadata<R: Read + Seek>(reader: &mut R, kv_count: u64) -> Result<()> {
         start_pos,
         end_pos
     );
-    Ok(())
-}
-
-/// Skip a single GGUF metadata value of any type.
-fn skip_value<R: Read + Seek>(reader: &mut R, val_type: u32) -> Result<()> {
-    match val_type {
-        0 | 1 | 7 => {
-            reader.seek(SeekFrom::Current(1)).map_err(LibshimmyError::Io)?;
-        }
-        2 | 3 => {
-            reader.seek(SeekFrom::Current(2)).map_err(LibshimmyError::Io)?;
-        }
-        4 | 5 | 6 | 10 => {
-            reader.seek(SeekFrom::Current(4)).map_err(LibshimmyError::Io)?;
-        }
-        8 => {
-            let str_len = reader.read_u64::<LittleEndian>().map_err(LibshimmyError::Io)?;
-            reader.seek(SeekFrom::Current(str_len as i64)).map_err(LibshimmyError::Io)?;
-        }
-        9 => {
-            let elem_type = reader.read_u32::<LittleEndian>().map_err(LibshimmyError::Io)?;
-            let len = reader.read_u64::<LittleEndian>().map_err(LibshimmyError::Io)?;
-            for _ in 0..len {
-                skip_value(reader, elem_type)?;
-            }
-        }
-        11 => {
-            reader.seek(SeekFrom::Current(8)).map_err(LibshimmyError::Io)?;
-        }
-        12 => {
-            reader.seek(SeekFrom::Current(8)).map_err(LibshimmyError::Io)?;
-        }
-        other => {
-            return Err(LibshimmyError::FixtureError {
-                msg: format!("Unsupported GGUF array element type: {other}"),
-            });
-        }
-    }
     Ok(())
 }
 

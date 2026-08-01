@@ -935,7 +935,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let row_bytes: u64 = match embd_quant_type {
         0 | 1 => spec.n_embd as u64 * 4 / if embd_quant_type == 1 { 2 } else { 1 },
         2 | 3 | 7 => spec.n_embd as u64 / 2,
-        6 => (spec.n_embd as u64 * 5 + 7) / 8,
+        6 => (spec.n_embd as u64 * 5).div_ceil(8),
         8 | 9 => spec.n_embd as u64,
         _ => spec.n_embd as u64 * 4,
     };
@@ -1054,7 +1054,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                         debug_trace_path: None,
                     })
                 }
-                Err(e) => Err(format!("Failed to run eval: {}", e).into()),
+                Err(e) => Err(format!("Failed to run eval: {}", e)),
             }
         } else {
             let inference_req = job.req;
@@ -1090,7 +1090,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                     debug_sanitizer_reason: None,
                     debug_trace_path: None,
                 }),
-                Err(e) => Err(format!("generate failed: {}", e).into()),
+                Err(e) => Err(format!("generate failed: {}", e)),
             }
         };
 
@@ -1679,11 +1679,8 @@ fn log_arch_tensor_registry(
     }
 }
 
-/// Dequantize `token_embd.weight` to a CPU Vec<f32> for embedding lookup.
-
-
+// Dequantize `token_embd.weight` to a CPU Vec<f32> for embedding lookup.
 // TODO: promote send_error to async + TcpStream once streaming error path is wired.
-// HTTP error helper — reserved for future streaming error path; not yet called from active code.
 #[allow(dead_code)] // reserved for future streaming error path
 fn send_error(mut stream: TcpStream, msg: &str) {
     let body = format!("{{\"error\": \"{}\"}}", msg);
