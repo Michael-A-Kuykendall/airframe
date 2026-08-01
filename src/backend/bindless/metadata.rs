@@ -231,47 +231,47 @@ impl BindlessMetadata {
                 let sep_k_bias = opt(&absolute_offsets, layer_idx, "attn_k.bias");
                 let sep_v_bias = opt(&absolute_offsets, layer_idx, "attn_v.bias");
                 let fused_qkv_bias_key = format!("blk.{}.attn_qkv.bias", layer_idx);
-                let (attn_q_bias_off, attn_k_bias_off, attn_v_bias_off) =
-                    if sep_q_bias != 0 || sep_k_bias != 0 || sep_v_bias != 0 {
-                        (sep_q_bias, sep_k_bias, sep_v_bias)
-                    } else if has_fused_qkv {
-                        if let Some(&fused_bias_off) = absolute_offsets.get(&fused_qkv_bias_key) {
-                            // Bias layout mirrors fused QKV rows: [Q rows][K rows][V rows], each f32.
-                            let fused_qkv_key = format!("blk.{}.attn_qkv.weight", layer_idx);
-                            let dim_in = tensor_dims
-                                .get(&fused_qkv_key)
-                                .and_then(|d| d.first())
-                                .copied()
-                                .unwrap_or(0);
-                            let total_out = tensor_dims
-                                .get(&fused_qkv_key)
-                                .and_then(|d| d.get(1))
-                                .copied()
-                                .unwrap_or(0);
-                            let attn_out_key = format!("blk.{}.attn_output.weight", layer_idx);
-                            let dim_q = tensor_dims
-                                .get(&attn_out_key)
-                                .and_then(|d| d.first())
-                                .copied()
-                                .unwrap_or(dim_in);
-                            let dim_k = total_out.saturating_sub(dim_q) / 2;
-                            let q_bias = super::pipeline::pack_blob_offset(fused_bias_off);
-                            let k_bias =
-                                super::pipeline::pack_blob_offset(fused_bias_off + dim_q * 4);
-                            let v_bias = super::pipeline::pack_blob_offset(
-                                fused_bias_off + (dim_q + dim_k) * 4,
-                            );
-                            println!(
-                                "[Metadata] Layer {}: fused QKV bias split Q@{} K@{} V@{}",
-                                layer_idx, q_bias, k_bias, v_bias
-                            );
-                            (q_bias, k_bias, v_bias)
-                        } else {
-                            (0u32, 0u32, 0u32)
-                        }
+                let (attn_q_bias_off, attn_k_bias_off, attn_v_bias_off) = if sep_q_bias != 0
+                    || sep_k_bias != 0
+                    || sep_v_bias != 0
+                {
+                    (sep_q_bias, sep_k_bias, sep_v_bias)
+                } else if has_fused_qkv {
+                    if let Some(&fused_bias_off) = absolute_offsets.get(&fused_qkv_bias_key) {
+                        // Bias layout mirrors fused QKV rows: [Q rows][K rows][V rows], each f32.
+                        let fused_qkv_key = format!("blk.{}.attn_qkv.weight", layer_idx);
+                        let dim_in = tensor_dims
+                            .get(&fused_qkv_key)
+                            .and_then(|d| d.first())
+                            .copied()
+                            .unwrap_or(0);
+                        let total_out = tensor_dims
+                            .get(&fused_qkv_key)
+                            .and_then(|d| d.get(1))
+                            .copied()
+                            .unwrap_or(0);
+                        let attn_out_key = format!("blk.{}.attn_output.weight", layer_idx);
+                        let dim_q = tensor_dims
+                            .get(&attn_out_key)
+                            .and_then(|d| d.first())
+                            .copied()
+                            .unwrap_or(dim_in);
+                        let dim_k = total_out.saturating_sub(dim_q) / 2;
+                        let q_bias = super::pipeline::pack_blob_offset(fused_bias_off);
+                        let k_bias = super::pipeline::pack_blob_offset(fused_bias_off + dim_q * 4);
+                        let v_bias =
+                            super::pipeline::pack_blob_offset(fused_bias_off + (dim_q + dim_k) * 4);
+                        println!(
+                            "[Metadata] Layer {}: fused QKV bias split Q@{} K@{} V@{}",
+                            layer_idx, q_bias, k_bias, v_bias
+                        );
+                        (q_bias, k_bias, v_bias)
                     } else {
                         (0u32, 0u32, 0u32)
-                    };
+                    }
+                } else {
+                    (0u32, 0u32, 0u32)
+                };
 
                 let attn_norm_off = p(&absolute_offsets, layer_idx, "attn_norm.weight");
                 let mut ffn_norm_off = p(&absolute_offsets, layer_idx, "ffn_norm.weight");
@@ -646,5 +646,125 @@ fn skip_value<R: Read + Seek>(r: &mut R, val_type: u32) {
         }
         // Malformed GGUF: unknown type code; size unknown so reader position cannot be advanced.
         _ => panic!("Unknown GGUF value type {}", val_type),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_read_u32() {
+        let bytes = vec![0x78, 0x56, 0x34, 0x12];
+        let mut cursor = Cursor::new(bytes);
+        assert_eq!(read_u32(&mut cursor), 0x12345678);
+    }
+
+    #[test]
+    fn test_read_u64() {
+        let bytes = vec![0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01];
+        let mut cursor = Cursor::new(bytes);
+        assert_eq!(read_u64(&mut cursor), 0x0123456789ABCDEF);
+    }
+
+    #[test]
+    fn test_read_string() {
+        let mut bytes = vec![0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(b"hello");
+        let mut cursor = Cursor::new(bytes);
+        assert_eq!(read_string(&mut cursor), "hello");
+    }
+
+    #[test]
+    fn test_read_gguf_value_u32() {
+        let bytes = vec![0x78, 0x56, 0x34, 0x12];
+        let mut cursor = Cursor::new(bytes);
+        match read_gguf_value(&mut cursor, 4) {
+            GgufValue::U32(v) => assert_eq!(v, 0x12345678),
+            _ => panic!("Expected U32"),
+        }
+    }
+
+    #[test]
+    fn test_read_gguf_value_f32() {
+        let f = std::f32::consts::PI;
+        let bytes = f.to_le_bytes().to_vec();
+        let mut cursor = Cursor::new(bytes);
+        match read_gguf_value(&mut cursor, 6) {
+            GgufValue::F32(v) => assert!((v - f).abs() < 1e-6),
+            _ => panic!("Expected F32"),
+        }
+    }
+
+    #[test]
+    fn test_read_gguf_value_string() {
+        let mut bytes = vec![0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(b"test");
+        let mut cursor = Cursor::new(bytes);
+        match read_gguf_value(&mut cursor, 8) {
+            GgufValue::String(v) => assert_eq!(v, "test"),
+            _ => panic!("Expected String"),
+        }
+    }
+
+    #[test]
+    fn test_read_gguf_value_bool() {
+        let bytes = vec![0x01];
+        let mut cursor = Cursor::new(bytes);
+        match read_gguf_value(&mut cursor, 7) {
+            GgufValue::Bool(v) => assert!(v),
+            _ => panic!("Expected Bool"),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Unknown GGUF value type")]
+    fn test_read_gguf_value_unknown_type() {
+        let bytes = vec![0x00];
+        let mut cursor = Cursor::new(bytes);
+        read_gguf_value(&mut cursor, 99);
+    }
+
+    #[test]
+    fn test_skip_value_u8() {
+        let bytes = vec![0xFF, 0x00];
+        let mut cursor = Cursor::new(bytes);
+        skip_value(&mut cursor, 0);
+        assert_eq!(&cursor.get_ref()[0..1], &[0xFF]);
+    }
+
+    #[test]
+    fn test_to_model_spec_head_dim_correction() {
+        let mut gguf_metadata = HashMap::new();
+        gguf_metadata.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("qwen3".to_string()),
+        );
+        gguf_metadata.insert("llama.attention.head_count".to_string(), GgufValue::U32(16));
+        gguf_metadata.insert("llama.embedding_length".to_string(), GgufValue::U32(2048));
+        gguf_metadata.insert("llama.block_count".to_string(), GgufValue::U32(28));
+        gguf_metadata.insert(
+            "llama.feed_forward_length".to_string(),
+            GgufValue::U32(5632),
+        );
+        gguf_metadata.insert("llama.context_length".to_string(), GgufValue::U32(131072));
+
+        let mut tensor_dims = HashMap::new();
+        tensor_dims.insert("blk.0.attn_q.weight".to_string(), vec![2048, 2048]);
+
+        let meta = BindlessMetadata {
+            version: 3,
+            tensor_count: 1,
+            tensor_offsets: HashMap::new(),
+            tensor_types: HashMap::new(),
+            tensor_dims,
+            data_start_offset: 0,
+            gguf_metadata,
+            compiled_layers: vec![],
+        };
+        let spec = meta.to_model_spec();
+        // n_embd / n_head = 2048 / 16 = 128
+        assert_eq!(spec.head_dim, 128);
     }
 }

@@ -1831,4 +1831,85 @@ mod tests {
             other => panic!("expected InvariantViolation, got {other:?}"),
         }
     }
+
+    #[test]
+    fn test_require_usize_present() {
+        let mut md = HashMap::new();
+        md.insert("test.key".to_string(), GgufMetaValue::U32(42));
+        assert_eq!(require_usize(&md, "test.key").unwrap(), 42);
+    }
+
+    #[test]
+    fn test_require_usize_missing() {
+        let md = HashMap::new();
+        assert!(require_usize(&md, "missing.key").is_err());
+    }
+
+    #[test]
+    fn test_optional_usize_present() {
+        let mut md = HashMap::new();
+        md.insert("test.key".to_string(), GgufMetaValue::U32(99));
+        assert_eq!(optional_usize(&md, "test.key").unwrap(), Some(99));
+    }
+
+    #[test]
+    fn test_optional_usize_absent() {
+        let md = HashMap::new();
+        assert_eq!(optional_usize(&md, "missing.key").unwrap(), None);
+    }
+
+    #[test]
+    fn test_require_f32_present() {
+        let mut md = HashMap::new();
+        md.insert("test.key".to_string(), GgufMetaValue::F32(1e-5));
+        let val = require_f32(&md, "test.key").unwrap();
+        assert!((val - 1e-5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_read_gguf_string() {
+        let mut bytes = vec![0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(b"world");
+        let mut cursor = std::io::Cursor::new(bytes);
+        assert_eq!(read_gguf_string(&mut cursor).unwrap(), "world");
+    }
+
+    #[test]
+    fn test_skip_gguf_string() {
+        let mut bytes = vec![0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(b"abc");
+        let mut cursor = std::io::Cursor::new(bytes);
+        skip_gguf_string(&mut cursor).unwrap();
+        assert_eq!(cursor.stream_position().unwrap(), 11);
+    }
+
+    #[test]
+    fn test_read_gguf_value_i32() {
+        let bytes = (-42i32).to_le_bytes().to_vec();
+        let mut cursor = std::io::Cursor::new(bytes);
+        match read_gguf_value(&mut cursor, 5).unwrap() {
+            GgufMetaValue::I32(v) => assert_eq!(v, -42),
+            _ => panic!("Expected I32"),
+        }
+    }
+
+    #[test]
+    fn test_read_gguf_value_i64() {
+        let bytes = (-99i64).to_le_bytes().to_vec();
+        let mut cursor = std::io::Cursor::new(bytes);
+        match read_gguf_value(&mut cursor, 11).unwrap() {
+            GgufMetaValue::I64(v) => assert_eq!(v, -99),
+            _ => panic!("Expected I64"),
+        }
+    }
+
+    #[test]
+    fn test_read_gguf_value_f64() {
+        let bytes = std::f64::consts::PI.to_le_bytes().to_vec();
+        let mut cursor = std::io::Cursor::new(bytes);
+        match read_gguf_value(&mut cursor, 12).unwrap() {
+            GgufMetaValue::F64(v) => assert!((v - std::f64::consts::PI).abs() < 1e-8),
+            _ => panic!("Expected F64"),
+        }
+    }
 }
