@@ -97,6 +97,8 @@ See [`examples/`](examples/) for tokenizer and GPU probe examples, and the full 
 
 See [docs/SUPPORTED_MODELS.md in shimmy](https://github.com/Michael-A-Kuykendall/shimmy/blob/master/docs/SUPPORTED_MODELS.md) for the full certified-model matrix.
 
+> **Note on large models:** We support models up to 8B+ parameters and >4GiB GGUF files. However, not all supported models can be run locally for certification — very large models may exceed available GPU memory or test infrastructure. Certification coverage is prioritized by model popularity and quant type importance. See the [certification methodology](docs/CERT_REGIMEN.md) for details.
+
 ## Supported Quantization
 
 `F32` · `F16` · `Q4_0` · `Q5_0` · `Q8_0` · `Q4_K` · `Q5_K` · `Q6_K`
