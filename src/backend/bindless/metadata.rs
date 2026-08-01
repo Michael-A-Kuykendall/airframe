@@ -767,4 +767,85 @@ mod tests {
         // n_embd / n_head = 2048 / 16 = 128
         assert_eq!(spec.head_dim, 128);
     }
+
+    #[test]
+    fn test_skip_value_nested_array() {
+        // outer array: item_type=9 (array), len=1
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&9u32.to_le_bytes());
+        stream.extend_from_slice(&1u64.to_le_bytes());
+        // inner array: item_type=4 (u32), len=2
+        stream.extend_from_slice(&4u32.to_le_bytes());
+        stream.extend_from_slice(&2u64.to_le_bytes());
+        // two u32 elements
+        stream.extend_from_slice(&[0u8; 8]);
+        let mut cursor = Cursor::new(stream);
+        skip_value(&mut cursor, 9); // should not panic
+        assert_eq!(cursor.stream_position().unwrap(), 4 + 8 + 4 + 8 + 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unknown GGUF value type")]
+    fn test_skip_value_unknown_type() {
+        let mut cursor = Cursor::new(vec![0u8; 4]);
+        skip_value(&mut cursor, 99);
+    }
+
+    #[test]
+    fn test_get_layer_offsets_missing_layer_returns_none() {
+        let meta = BindlessMetadata {
+            version: 3,
+            tensor_count: 0,
+            tensor_offsets: HashMap::new(),
+            tensor_types: HashMap::new(),
+            tensor_dims: HashMap::new(),
+            data_start_offset: 0,
+            gguf_metadata: HashMap::new(),
+            compiled_layers: vec![],
+        };
+        assert!(meta.get_layer_offsets(0, "llama").is_none());
+    }
+
+    #[test]
+    fn test_get_layer_offsets_separate_qkv() {
+        let mut tensor_offsets = HashMap::new();
+        for (suffix, off) in [
+            ("attn_norm.weight", 100u64),
+            ("attn_q.weight", 200u64),
+            ("attn_k.weight", 300u64),
+            ("attn_v.weight", 400u64),
+            ("attn_output.weight", 500u64),
+            ("ffn_norm.weight", 600u64),
+            ("ffn_down.weight", 700u64),
+            ("ffn_up.weight", 800u64),
+        ] {
+            tensor_offsets.insert(format!("blk.0.{suffix}"), off);
+        }
+        let mut tensor_types = HashMap::new();
+        tensor_types.insert("blk.0.attn_q.weight".to_string(), 2u32);
+        tensor_types.insert("blk.0.attn_v.weight".to_string(), 2u32);
+        tensor_types.insert("blk.0.ffn_down.weight".to_string(), 12u32);
+
+        let meta = BindlessMetadata {
+            version: 3,
+            tensor_count: 8,
+            tensor_offsets,
+            tensor_types,
+            tensor_dims: HashMap::new(),
+            data_start_offset: 0,
+            gguf_metadata: HashMap::new(),
+            compiled_layers: vec![],
+        };
+        let offs = meta.get_layer_offsets(0, "llama").expect("layer 0 exists");
+        assert_eq!(
+            offs.attn_norm,
+            super::super::pipeline::pack_blob_offset(100)
+        );
+        assert_eq!(offs.attn_q, super::super::pipeline::pack_blob_offset(200));
+        assert_eq!(offs.attn_k, super::super::pipeline::pack_blob_offset(300));
+        assert_eq!(offs.attn_v, super::super::pipeline::pack_blob_offset(400));
+        assert_eq!(offs.ffn_down, super::super::pipeline::pack_blob_offset(700));
+        assert_eq!(offs.v_is_q4k, 0);
+        assert_eq!(offs.ffn_down_is_q4k, 1);
+    }
 }

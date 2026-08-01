@@ -1912,4 +1912,67 @@ mod tests {
             _ => panic!("Expected F64"),
         }
     }
+
+    #[test]
+    fn test_parse_gguf_header_valid() {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&2u64.to_le_bytes());
+        bytes.extend_from_slice(&5u64.to_le_bytes());
+        let mut cursor = std::io::Cursor::new(bytes);
+        let h = parse_gguf_header(&mut cursor).unwrap();
+        assert_eq!(h.version, 3);
+        assert_eq!(h.tensor_count, 2);
+        assert_eq!(h.metadata_kv_count, 5);
+    }
+
+    #[test]
+    fn test_parse_gguf_header_invalid_magic() {
+        let bytes = b"NOPE".to_vec();
+        let mut cursor = std::io::Cursor::new(bytes);
+        let err = parse_gguf_header(&mut cursor).unwrap_err();
+        assert!(matches!(err, LibshimmyError::FixtureError { .. }));
+    }
+
+    #[test]
+    fn test_parse_gguf_header_unsupported_version() {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&2u32.to_le_bytes()); // v2 unsupported
+        let mut cursor = std::io::Cursor::new(bytes);
+        let err = parse_gguf_header(&mut cursor).unwrap_err();
+        assert!(matches!(err, LibshimmyError::FixtureError { .. }));
+    }
+
+    #[test]
+    fn test_align_up_exact_and_offset_zero() {
+        // Already-aligned offset is returned unchanged.
+        assert_eq!(align_up(256, 256).unwrap(), 256);
+        assert_eq!(align_up(0, 256).unwrap(), 0);
+        // Non-aligned offset rounds up.
+        assert_eq!(align_up(1, 256).unwrap(), 256);
+        assert_eq!(align_up(255, 256).unwrap(), 256);
+        assert_eq!(align_up(257, 256).unwrap(), 512);
+    }
+
+    #[test]
+    fn test_create_weight_mapping_zero_and_one_layer() {
+        // Even with zero layers, global tensors (embeddings + output) exist.
+        let m0 = create_weight_mapping(0);
+        assert!(m0.contains_key("token_embd.weight"));
+        assert!(m0.contains_key("output.weight"));
+        assert!(!m0.contains_key("blk.0.attn_q.weight"));
+
+        let m1 = create_weight_mapping(1);
+        assert!(m1.contains_key("blk.0.attn_q.weight"));
+        assert!(m1.contains_key("blk.0.attn_k.weight"));
+        assert!(m1.contains_key("blk.0.attn_v.weight"));
+        assert!(m1.contains_key("blk.0.attn_output.weight"));
+        assert!(m1.contains_key("blk.0.ffn_gate.weight"));
+        assert!(m1.contains_key("blk.0.ffn_down.weight"));
+        assert!(m1.contains_key("blk.0.ffn_up.weight"));
+        assert!(m1.contains_key("blk.0.attn_norm.weight"));
+        assert!(m1.contains_key("blk.0.ffn_norm.weight"));
+        // No layer-1 keys for a single-layer model.
+        assert!(!m1.contains_key("blk.1.attn_q.weight"));
+    }
 }
