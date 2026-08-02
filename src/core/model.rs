@@ -804,6 +804,22 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
 
     let n_head_kv = n_head_kv.unwrap_or(n_head);
     let rope_base = rope_base.unwrap_or(10000.0);
+
+    ensure!(n_head > 0, "n_head must be > 0");
+    ensure!(n_head_kv > 0, "n_head_kv must be > 0");
+    ensure!(
+        n_embd.is_multiple_of(n_head),
+        "n_embd % n_head must be 0 (n_embd={} n_head={})",
+        n_embd,
+        n_head
+    );
+    ensure!(
+        n_head.is_multiple_of(n_head_kv),
+        "n_head % n_head_kv must be 0 (n_head={} n_head_kv={})",
+        n_head,
+        n_head_kv
+    );
+
     let rope_dim = rope_dim.unwrap_or(n_embd / n_head).max(n_embd / n_head); // force full head for rope table vs shader (Q4K mismatch)
     let rms_eps = rms_eps.unwrap_or(1e-5);
 
@@ -1974,5 +1990,94 @@ mod tests {
         assert!(m1.contains_key("blk.0.ffn_norm.weight"));
         // No layer-1 keys for a single-layer model.
         assert!(!m1.contains_key("blk.1.attn_q.weight"));
+    }
+
+    fn make_llama_metadata() -> HashMap<String, GgufMetaValue> {
+        let mut md = HashMap::new();
+        md.insert(
+            "general.architecture".to_string(),
+            GgufMetaValue::String("llama".to_string()),
+        );
+        md.insert("llama.block_count".to_string(), GgufMetaValue::U32(32));
+        md.insert(
+            "llama.embedding_length".to_string(),
+            GgufMetaValue::U32(4096),
+        );
+        md.insert(
+            "llama.attention.head_count".to_string(),
+            GgufMetaValue::U32(32),
+        );
+        md.insert(
+            "llama.attention.head_count_kv".to_string(),
+            GgufMetaValue::U32(8),
+        );
+        md.insert(
+            "llama.feed_forward_length".to_string(),
+            GgufMetaValue::U32(11008),
+        );
+        md.insert("llama.context_length".to_string(), GgufMetaValue::U32(8192));
+        md.insert(
+            "llama.rope.freq_base".to_string(),
+            GgufMetaValue::F32(10000.0),
+        );
+        md.insert(
+            "llama.rope.dimension_count".to_string(),
+            GgufMetaValue::U32(128),
+        );
+        md.insert(
+            "llama.attention.layer_norm_rms_epsilon".to_string(),
+            GgufMetaValue::F32(1e-5),
+        );
+        md.insert("llama.vocab_size".to_string(), GgufMetaValue::U32(32000));
+        md
+    }
+
+    #[test]
+    fn test_model_spec_from_metadata_n_head_zero() {
+        let mut md = make_llama_metadata();
+        md.insert(
+            "llama.attention.head_count".to_string(),
+            GgufMetaValue::U32(0),
+        );
+        let err = model_spec_from_metadata(&md).unwrap_err();
+        match err {
+            LibshimmyError::InvariantViolation { msg } => {
+                assert!(msg.contains("n_head must be > 0"))
+            }
+            other => panic!("expected InvariantViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_model_spec_from_metadata_n_head_kv_zero() {
+        let mut md = make_llama_metadata();
+        md.insert(
+            "llama.attention.head_count_kv".to_string(),
+            GgufMetaValue::U32(0),
+        );
+        let err = model_spec_from_metadata(&md).unwrap_err();
+        match err {
+            LibshimmyError::InvariantViolation { msg } => {
+                assert!(msg.contains("n_head_kv must be > 0"))
+            }
+            other => panic!("expected InvariantViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_model_spec_from_metadata_n_head_not_divisible_by_kv() {
+        let mut md = make_llama_metadata();
+        // n_head=32, n_head_kv=7 → 32 % 7 != 0
+        md.insert(
+            "llama.attention.head_count_kv".to_string(),
+            GgufMetaValue::U32(7),
+        );
+        let err = model_spec_from_metadata(&md).unwrap_err();
+        match err {
+            LibshimmyError::InvariantViolation { msg } => {
+                assert!(msg.contains("n_head % n_head_kv"))
+            }
+            other => panic!("expected InvariantViolation, got {other:?}"),
+        }
     }
 }
