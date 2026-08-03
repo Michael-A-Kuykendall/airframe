@@ -5,7 +5,7 @@
 Airframe is a pure-Rust WebGPU inference engine for GGUF models. No C++, no llama.cpp. Runs on NVIDIA/AMD/Intel/Apple Silicon via wgpu.
 
 - **Crate:** `airframe` v0.2.1 — published to crates.io
-- **Public repo:** https://github.com/Michael-A-Kuykendall/airframe (master branch)
+- **Public repo:** https://github.com/Michael-A-Kuykendall/airframe (main branch)
 - **Sub-crate:** `libfse` v0.1.3 — published to crates.io (at `crates/libfse/`)
 - **Workspace member:** `crates/libfse` only. Console CLI is deferred.
 
@@ -13,7 +13,7 @@ Airframe is a pure-Rust WebGPU inference engine for GGUF models. No C++, no llam
 
 | Branch | Purpose | Status |
 |--------|---------|--------|
-| `master` | Stable release — airframe 0.2.1 | Green CI |
+| `main` | Stable release — single live branch | Green CI |
 | `feat/math-pack-turboquant-cas` | Math-pack research checkpoint | Planning only — do NOT merge until CAS work arrives |
 
 ## Math-pack / CAS branch — `feat/math-pack-turboquant-cas`
@@ -30,7 +30,7 @@ This branch holds planning and research docs for the math parsing pipeline, whic
 - `artifacts/battery_int4_*.txt` — INT4 KV cache battery test artifacts from 2026-05-30
 
 **Architecture coupling:**
-- Math intent detection lives in `tests/math_pack_detection.rs` on `master` (Math Pack v0.1.0)
+- Math intent detection lives in `tests/math_pack_detection.rs` on `main` (Math Pack v0.1.0)
 - Detection pipeline: `split_clauses()` → `normalize()` → `FseScanner` → `passes_integer_guard()`
 - When CAS work arrives here, look for this branch and wire it in
 

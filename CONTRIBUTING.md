@@ -41,7 +41,7 @@ cargo test
 ## Pull Request Process
 
 1. Open an issue first for significant changes
-2. Branch from `master`
+2. Branch from `main`
 3. Include a test or benchmark that validates your change
 4. Reference any related issues in the PR description
 

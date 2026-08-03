@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/airframe/master/assets/airframe-logo.png" alt="Airframe" width="480" height="auto" />
+  <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/airframe/main/assets/airframe-logo.png" alt="Airframe" width="480" height="auto" />
 
   ### Pure-Rust WebGPU Inference Engine for GGUF Models
 
@@ -95,7 +95,7 @@ See [`examples/`](examples/) for tokenizer and GPU probe examples, and the full 
 | **DeepSeek-R1** | DeepSeek-R1-0528-Qwen3-8B | ✅ Certified |
 | **GPT-2** | GPT-2 | ✅ Supported |
 
-See [docs/SUPPORTED_MODELS.md in shimmy](https://github.com/Michael-A-Kuykendall/shimmy/blob/master/docs/SUPPORTED_MODELS.md) for the full certified-model matrix.
+See [docs/SUPPORTED_MODELS.md in shimmy](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/SUPPORTED_MODELS.md) for the full certified-model matrix.
 
 > **Note on large models:** We support models up to 8B+ parameters and >4GiB GGUF files. However, not all supported models can be run locally for certification — very large models may exceed available GPU memory or test infrastructure. Certification coverage is prioritized by model popularity and quant type importance. See the [certification methodology](docs/CERT_REGIMEN.md) for details.
 

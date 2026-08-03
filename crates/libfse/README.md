@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/airframe/master/assets/libfse-logo.png" alt="libfse" width="480" height="auto" />
+  <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/airframe/main/assets/libfse-logo.png" alt="libfse" width="480" height="auto" />
 
   ### Fused Semantic Execution — Fail-Closed Policy Engine
 

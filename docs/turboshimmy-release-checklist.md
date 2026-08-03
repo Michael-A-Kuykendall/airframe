@@ -1,7 +1,7 @@
 # TurboShimmy INT4 KV — Production Release Checklist
 
 > Working file. Check items off as they land. Nothing in P0 ships unresolved.
-> Branch: `feat/turboquant-wgsl` → merge target `master` at `v0.2.0`.
+> Branch: `feat/turboquant-wgsl` → merge target `main` at `v0.2.0`.
 
 ---
 
@@ -76,8 +76,8 @@
 - [x] `docs/turboshimmy.md` linked from README ✅
 - [x] CHANGELOG entry for 0.2.0 ✅
 - [x] `cargo publish --dry-run` passes cleanly ✅ (`7bcb3cc` — shimmyjinja 0.5.0 published)
-- [ ] Tag `v0.2.0` on master after merge
-- [ ] `git checkout master && git merge --no-ff feat/turboquant-wgsl`
+- [ ] Tag `v0.2.0` on main after merge
+- [ ] `git checkout main && git merge --no-ff feat/turboquant-wgsl`
 
 ---
 
