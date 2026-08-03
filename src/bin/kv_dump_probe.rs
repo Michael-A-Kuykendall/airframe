@@ -104,9 +104,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     drop(meta_file);
     let mut spec = meta.to_model_spec();
     spec.n_ctx = 8192; // cap KV buffer VRAM on the RTX 3060; only positions 0..5 are used
-    // [B5-debug] Force the CORRECT padded head_dim for Qwen3: attn_q.weight is
-    // [2560, 4096] = [n_embd, n_head*head_dim] -> 4096/32 = 128. The default
-    // n_embd/n_head = 80 is wrong for this padded attention dimension.
+                       // [B5-debug] Force the CORRECT padded head_dim for Qwen3: attn_q.weight is
+                       // [2560, 4096] = [n_embd, n_head*head_dim] -> 4096/32 = 128. The default
+                       // n_embd/n_head = 80 is wrong for this padded attention dimension.
     spec.head_dim = 128;
     spec = spec.compute_derived();
     let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(model_path), Some(&spec));
@@ -153,7 +153,12 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     for &t in &toks {
         let row_offset = embd_weight_offset + (t as u64 * embd_row_bytes as u64);
         let e = pipeline.run_dequant_any_hot(
-            &device, &queue, &gpu_model, row_offset as u32, dim, embd_quant_type,
+            &device,
+            &queue,
+            &gpu_model,
+            row_offset as u32,
+            dim,
+            embd_quant_type,
         );
         emb.push(e);
     }
@@ -202,8 +207,15 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let (kx, vx) = make_kv();
     eprintln!("[kv_dump] A: 5-token prefill (current_pos=0, seq_len=5)");
     let _ = pipeline.run_full_model_with_cache_state(
-        &device, &queue, &gpu_model, &emb_5, None, 0, 5,
-        Some((&kx, &vx)), &spec,
+        &device,
+        &queue,
+        &gpu_model,
+        &emb_5,
+        None,
+        0,
+        5,
+        Some((&kx, &vx)),
+        &spec,
     );
     let ka_after_a = readback_f32(&device, &queue, &kx[0], kv_bytes);
 
@@ -211,8 +223,15 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[kv_dump] C: decode (current_pos=5, seq_len=6)");
     let rc = pipeline
         .run_full_model_with_cache_state(
-            &device, &queue, &gpu_model, emb_1, None, 5, 6,
-            Some((&kx, &vx)), &spec,
+            &device,
+            &queue,
+            &gpu_model,
+            emb_1,
+            None,
+            5,
+            6,
+            Some((&kx, &vx)),
+            &spec,
         )
         .expect("decode forward failed");
     let logits_c = rc.2;
@@ -223,8 +242,15 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[kv_dump] B: 6-token prefill (current_pos=0, seq_len=6)");
     let rb = pipeline
         .run_full_model_with_cache_state(
-            &device, &queue, &gpu_model, &emb_6, None, 0, 6,
-            Some((&ky, &vy)), &spec,
+            &device,
+            &queue,
+            &gpu_model,
+            &emb_6,
+            None,
+            0,
+            6,
+            Some((&ky, &vy)),
+            &spec,
         )
         .expect("prefill forward failed");
     let logits_b = rb.2;
@@ -239,9 +265,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             logits_maxdiff = d;
         }
     }
-    let rms = |v: &[f32]| -> f32 {
-        (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt()
-    };
+    let rms = |v: &[f32]| -> f32 { (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt() };
     println!(
         "\n=== FINAL LOGITS: decode(C) vs 6-tok-prefill(B) ===\n  logits_c_rms={:.6} logits_b_rms={:.6} max|Δ|={:.6e} {}",
         rms(&logits_c),
@@ -252,7 +276,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ---- Compare ----
     let max_diff = |a: &[f32], b: &[f32]| -> f32 {
-        a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+        a.iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max)
     };
 
     let mut verdict = Vec::new();
@@ -300,16 +327,27 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Also report RMS of each position for intuition
-    let rms = |v: &[f32]| -> f32 {
-        (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt()
-    };
+    let rms = |v: &[f32]| -> f32 { (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt() };
     println!("\n=== KV-DUMP VERDICT (layer 0 K cache) ===");
-    println!("RMS  A[pos0..4]={:?}", (0..5).map(|p| format!("{:.4}", rms(&grab(&ka_after_a,p)))).collect::<Vec<_>>());
-    println!("RMS  C[pos0..4]={:?}", (0..5).map(|p| format!("{:.4}", rms(&grab(&kc_after_c,p)))).collect::<Vec<_>>());
+    println!(
+        "RMS  A[pos0..4]={:?}",
+        (0..5)
+            .map(|p| format!("{:.4}", rms(&grab(&ka_after_a, p))))
+            .collect::<Vec<_>>()
+    );
+    println!(
+        "RMS  C[pos0..4]={:?}",
+        (0..5)
+            .map(|p| format!("{:.4}", rms(&grab(&kc_after_c, p))))
+            .collect::<Vec<_>>()
+    );
     println!("RMS  C[pos5]={:.4}  B[pos5]={:.4}", rms(&wc), rms(&wb));
     println!("{}", verdict.join("\n"));
     println!("---");
-    println!("carry_ok={} write_ok={} pref_ok={}", carry_ok, write_ok, pref_ok);
+    println!(
+        "carry_ok={} write_ok={} pref_ok={}",
+        carry_ok, write_ok, pref_ok
+    );
     let overall = if carry_ok && write_ok && pref_ok {
         "ALL MATCH -> decode KV identical to prefill: bug is NOT in KV cache contents"
     } else if !carry_ok {
@@ -334,14 +372,22 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let run_head = |head: Option<&wgpu::Buffer>,
-                      toks: &[f32],
-                      pos: u32,
-                      kv: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>|
-                      -> Vec<f32> {
+                    toks: &[f32],
+                    pos: u32,
+                    kv: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>|
+     -> Vec<f32> {
         let n = (toks.len() / spec.n_embd as usize) as u32;
         pipeline
             .run_full_model_with_cache_state(
-                &device, &queue, &gpu_model, toks, head, pos, pos + n, kv, &spec,
+                &device,
+                &queue,
+                &gpu_model,
+                toks,
+                head,
+                pos,
+                pos + n,
+                kv,
+                &spec,
             )
             .expect("B5 forward failed")
             .2

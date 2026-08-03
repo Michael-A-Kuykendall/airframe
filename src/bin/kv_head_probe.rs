@@ -72,8 +72,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // Build F32 output head (shimmy's path)
     let f32_head = GpuRuntime::load_output_head_f32(model_path, &gpu_model, &device, &spec)
         .map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string()))
-                as Box<dyn std::error::Error>
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
         })?;
 
     let n_layers = gpu_model.metadata.compiled_layers.len();
@@ -113,52 +112,90 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     for &t in &toks {
         let row_offset = embd_weight_offset + (t as u64 * embd_row_bytes as u64);
         let e = pipeline.run_dequant_any_hot(
-            &device, &queue, &gpu_model, row_offset as u32, dim as u32, embd_quant_type,
+            &device,
+            &queue,
+            &gpu_model,
+            row_offset as u32,
+            dim as u32,
+            embd_quant_type,
         );
         embs.push(e);
     }
     let concat = |slice: &[Vec<f32>]| -> Vec<f32> {
         let mut v = Vec::with_capacity(slice.len() * dim);
-        for e in slice { v.extend_from_slice(e); }
+        for e in slice {
+            v.extend_from_slice(e);
+        }
         v
     };
-    let emb_6 = concat(&embs[0..6]);  // positions 0..5 (prefill)
-    let emb_7 = concat(&embs[0..7]);  // positions 0..6 (full prefill reference)
-    let emb_7th = &embs[6];           // 7th token embedding (decode input at pos 6)
+    let emb_6 = concat(&embs[0..6]); // positions 0..5 (prefill)
+    let emb_7 = concat(&embs[0..7]); // positions 0..6 (full prefill reference)
+    let emb_7th = &embs[6]; // 7th token embedding (decode input at pos 6)
     let dim_u32 = dim as u32;
 
-    let mk_kv = || -> KVCache {
-        KVCache::new(&device, n_layers, n_head_kv, head_dim, max_seq_len)
-    };
+    let mk_kv = || -> KVCache { KVCache::new(&device, n_layers, n_head_kv, head_dim, max_seq_len) };
 
-    let rms = |v: &[f32]| -> f32 {
-        (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt()
-    };
+    let rms = |v: &[f32]| -> f32 { (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt() };
     let argmax = |v: &[f32]| -> (usize, f32) {
-        v.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).map(|(i, &v)| (i, v)).unwrap_or((0, 0.0))
+        v.iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(i, &v)| (i, v))
+            .unwrap_or((0, 0.0))
     };
 
-    let gpu_ctx = GpuCtx { device: &device, queue: &queue, gpu_model: &gpu_model, pipeline: &pipeline, spec: &spec };
+    let gpu_ctx = GpuCtx {
+        device: &device,
+        queue: &queue,
+        gpu_model: &gpu_model,
+        pipeline: &pipeline,
+        spec: &spec,
+    };
 
-    let embs = Embeddings { emb_6: &emb_6, emb_7: &emb_7, emb_7th };
+    let embs = Embeddings {
+        emb_6: &emb_6,
+        emb_7: &emb_7,
+        emb_7th,
+    };
 
     eprintln!("\n=== HEAD MODE TEST: BLOB (None) ===");
-    let (maxdiff_blob, tok_dec_blob, tok_ref_blob) = run_mode(
-        &gpu_ctx, &embs,
-        None,
-        dim_u32, mk_kv, &rms, &argmax,
-    )?;
+    let (maxdiff_blob, tok_dec_blob, tok_ref_blob) =
+        run_mode(&gpu_ctx, &embs, None, dim_u32, mk_kv, &rms, &argmax)?;
 
     eprintln!("\n=== HEAD MODE TEST: F32 (Some) ===");
     let (maxdiff_f32, tok_dec_f32, tok_ref_f32) = run_mode(
-        &gpu_ctx, &embs,
+        &gpu_ctx,
+        &embs,
         Some(&f32_head),
-        dim_u32, mk_kv, &rms, &argmax,
+        dim_u32,
+        mk_kv,
+        &rms,
+        &argmax,
     )?;
 
     eprintln!("\n=== SUMMARY ===");
-    eprintln!("BLOB:  max|Δ|={:.6e}  decode_argmax={}  ref_argmax={}  {}", maxdiff_blob, tok_dec_blob, tok_ref_blob, if maxdiff_blob <= 1e-2 { "MATCH" } else { "DIVERGE" });
-    eprintln!("F32:   max|Δ|={:.6e}  decode_argmax={}  ref_argmax={}  {}", maxdiff_f32, tok_dec_f32, tok_ref_f32, if maxdiff_f32 <= 1e-2 { "MATCH" } else { "DIVERGE" });
+    eprintln!(
+        "BLOB:  max|Δ|={:.6e}  decode_argmax={}  ref_argmax={}  {}",
+        maxdiff_blob,
+        tok_dec_blob,
+        tok_ref_blob,
+        if maxdiff_blob <= 1e-2 {
+            "MATCH"
+        } else {
+            "DIVERGE"
+        }
+    );
+    eprintln!(
+        "F32:   max|Δ|={:.6e}  decode_argmax={}  ref_argmax={}  {}",
+        maxdiff_f32,
+        tok_dec_f32,
+        tok_ref_f32,
+        if maxdiff_f32 <= 1e-2 {
+            "MATCH"
+        } else {
+            "DIVERGE"
+        }
+    );
 
     Ok(())
 }
@@ -188,38 +225,68 @@ fn run_mode(
 ) -> Result<(f32, usize, usize), Box<dyn std::error::Error>> {
     // Reference: 7-token single-pass prefill -> logits at position 6
     let kv_ref = mk_kv();
-    let rb = ctx.pipeline.run_full_model_prefill_chunked_with_cache_state(
-        ctx.device, ctx.queue, ctx.gpu_model, embs.emb_7, head_override, 0,
-        Some((kv_ref.get_k_buffers(), kv_ref.get_v_buffers())),
-        ctx.spec, 512,
-    )?;
+    let rb = ctx
+        .pipeline
+        .run_full_model_prefill_chunked_with_cache_state(
+            ctx.device,
+            ctx.queue,
+            ctx.gpu_model,
+            embs.emb_7,
+            head_override,
+            0,
+            Some((kv_ref.get_k_buffers(), kv_ref.get_v_buffers())),
+            ctx.spec,
+            512,
+        )?;
     let logits_ref = rb.2;
 
     // Prefill 6 tokens (0..5)
     let kv_pf = mk_kv();
-    ctx.pipeline.run_full_model_prefill_chunked_with_cache_state(
-        ctx.device, ctx.queue, ctx.gpu_model, embs.emb_6, head_override, 0,
-        Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
-        ctx.spec, 512,
-    )?;
+    ctx.pipeline
+        .run_full_model_prefill_chunked_with_cache_state(
+            ctx.device,
+            ctx.queue,
+            ctx.gpu_model,
+            embs.emb_6,
+            head_override,
+            0,
+            Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
+            ctx.spec,
+            512,
+        )?;
 
     // Decode at pos 6 with 7th token embedding
-    let rd = ctx.pipeline.run_full_model_prefill_chunked_with_cache_state(
-        ctx.device, ctx.queue, ctx.gpu_model, embs.emb_7th, head_override, 6,
-        Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
-        ctx.spec, 1,
-    )?;
+    let rd = ctx
+        .pipeline
+        .run_full_model_prefill_chunked_with_cache_state(
+            ctx.device,
+            ctx.queue,
+            ctx.gpu_model,
+            embs.emb_7th,
+            head_override,
+            6,
+            Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
+            ctx.spec,
+            1,
+        )?;
     let logits_dec = rd.2;
 
     let mut maxdiff = 0.0f32;
     for (a, b) in logits_dec.iter().zip(logits_ref.iter()) {
         let d = (a - b).abs();
-        if d > maxdiff { maxdiff = d; }
+        if d > maxdiff {
+            maxdiff = d;
+        }
     }
     let (tok_dec, _) = argmax(&logits_dec);
     let (tok_ref, _) = argmax(&logits_ref);
 
-    eprintln!("  ref_logits_rms={:.6}  dec_logits_rms={:.6}  max|Δ|={:.6e}", rms(&logits_ref), rms(&logits_dec), maxdiff);
+    eprintln!(
+        "  ref_logits_rms={:.6}  dec_logits_rms={:.6}  max|Δ|={:.6e}",
+        rms(&logits_ref),
+        rms(&logits_dec),
+        maxdiff
+    );
     eprintln!("  ref_argmax={}  dec_argmax={}", tok_ref, tok_dec);
 
     Ok((maxdiff, tok_dec, tok_ref))

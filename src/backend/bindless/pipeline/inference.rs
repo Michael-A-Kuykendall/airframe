@@ -1275,8 +1275,8 @@ impl BindlessPipeline {
         let total_qkv = q_len + kv_len * 2;
         let wg_qkv = total_qkv.div_ceil(256);
         let wg_qknorm = (q_len + kv_len).div_ceil(256); // must cover all Q+K elements, not just head_dim
-        // CRITICAL: attn_out writes [0..attn_dim), not [0..dim). Under-dispatch left
-        // elements dim..attn_dim-1 unwritten → garbage O-proj for Qwen3.
+                                                        // CRITICAL: attn_out writes [0..attn_dim), not [0..dim). Under-dispatch left
+                                                        // elements dim..attn_dim-1 unwritten → garbage O-proj for Qwen3.
         let wg_attn = attn_dim.div_ceil(256);
         let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
@@ -1797,8 +1797,10 @@ impl BindlessPipeline {
             #[cfg(feature = "isf")]
             {
                 let residual_in = residual_in_snap.map(|s| s.into_stage_snap());
-                let stages: Vec<StageSnap> =
-                    stages_host.into_iter().map(|s| s.into_stage_snap()).collect();
+                let stages: Vec<StageSnap> = stages_host
+                    .into_iter()
+                    .map(|s| s.into_stage_snap())
+                    .collect();
                 emit_layer_capture(
                     i as u32,
                     current_pos + batch_size.saturating_sub(1),

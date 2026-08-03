@@ -104,11 +104,7 @@ fn main() {
             .tensor_types
             .iter()
             .filter(|(_, &t)| t == qt)
-            .filter_map(|(n, _)| {
-                meta.tensor_offsets
-                    .get(n)
-                    .map(|&off| (n.clone(), off))
-            })
+            .filter_map(|(n, _)| meta.tensor_offsets.get(n).map(|&off| (n.clone(), off)))
             .collect();
         candidates.sort_by_key(|(_, off)| *off);
 

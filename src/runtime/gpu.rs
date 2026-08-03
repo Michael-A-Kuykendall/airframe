@@ -12,13 +12,13 @@ use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use crate::control::InferenceControl;
 #[cfg(feature = "isf")]
 use crate::control::{ControlDecision, InferenceEvent};
-#[cfg(feature = "isf")]
-use crate::runtime::kvcache::KvSnapshot;
 use crate::core::dequant::{
     dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,
 };
 use crate::core::model::GgufTensorInfo;
 use crate::core::spec::{ModelArch, ModelSpec};
+#[cfg(feature = "isf")]
+use crate::runtime::kvcache::KvSnapshot;
 use memmap2::Mmap;
 use shimmytok::Tokenizer;
 use std::path::Path;
@@ -469,28 +469,40 @@ impl GpuRuntime {
             s.mask = modify_logits.map(|b| std::sync::Arc::from(b));
             s.control = control.map(|c| {
                 let hook: std::sync::Arc<airframe_observe::isf::IsfControlHook> =
-                    std::sync::Arc::new(move |candidate: usize, text: &str, step: usize, tokens: &[u32], kv_len: usize| {
-                        let tokens_usize: Vec<usize> = tokens.iter().map(|t| *t as usize).collect();
-                        let event = InferenceEvent {
-                            tokens: &tokens_usize,
-                            candidate_token: candidate,
-                            step,
-                            kv: KvSnapshot { len: kv_len, version: kv_len },
-                            text,
-                        };
-                        match c.intervene(&event) {
-                            ControlDecision::Allow => airframe_observe::isf::IsfControlDecision::Allow,
-                            ControlDecision::ForceToken(t) => {
-                                airframe_observe::isf::IsfControlDecision::ForceToken(t)
+                    std::sync::Arc::new(
+                        move |candidate: usize,
+                              text: &str,
+                              step: usize,
+                              tokens: &[u32],
+                              kv_len: usize| {
+                            let tokens_usize: Vec<usize> =
+                                tokens.iter().map(|t| *t as usize).collect();
+                            let event = InferenceEvent {
+                                tokens: &tokens_usize,
+                                candidate_token: candidate,
+                                step,
+                                kv: KvSnapshot {
+                                    len: kv_len,
+                                    version: kv_len,
+                                },
+                                text,
+                            };
+                            match c.intervene(&event) {
+                                ControlDecision::Allow => {
+                                    airframe_observe::isf::IsfControlDecision::Allow
+                                }
+                                ControlDecision::ForceToken(t) => {
+                                    airframe_observe::isf::IsfControlDecision::ForceToken(t)
+                                }
+                                ControlDecision::EarlyExit => {
+                                    airframe_observe::isf::IsfControlDecision::EarlyExit
+                                }
+                                ControlDecision::BlockAndTerminate(r) => {
+                                    airframe_observe::isf::IsfControlDecision::Block(r)
+                                }
                             }
-                            ControlDecision::EarlyExit => {
-                                airframe_observe::isf::IsfControlDecision::EarlyExit
-                            }
-                            ControlDecision::BlockAndTerminate(r) => {
-                                airframe_observe::isf::IsfControlDecision::Block(r)
-                            }
-                        }
-                    });
+                        },
+                    );
                 hook
             });
             s.trace = trace_cb.map(|b| std::sync::Arc::new(std::sync::Mutex::new(b)));
@@ -744,14 +756,12 @@ impl GpuRuntime {
             t_fixpoint.elapsed().as_secs_f32()
         ));
 
-         let s = state.lock().unwrap();
-         append_log(&format!(
-             "complete, {} chars, {} steps",
-             s.generated_text.len(),
-             s.all_token_ids
-                 .len()
-                 .saturating_sub(s.prompt_len as usize)
-         ));
+        let s = state.lock().unwrap();
+        append_log(&format!(
+            "complete, {} chars, {} steps",
+            s.generated_text.len(),
+            s.all_token_ids.len().saturating_sub(s.prompt_len as usize)
+        ));
         // Flush log
         {
             use std::io::Write;

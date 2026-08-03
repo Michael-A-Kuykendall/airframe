@@ -272,10 +272,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // Capture full per-layer hidden state on the LAST token only (cross-attn exercised).
     let last_pos = prompt_tokens.len() - 1;
     for (pos, &token_id) in prompt_tokens.iter().enumerate() {
-        eprintln!(
-            "[Layer Dump] Processing token pos={} id={}",
-            pos, token_id
-        );
+        eprintln!("[Layer Dump] Processing token pos={} id={}", pos, token_id);
 
         let row_offset = embd_weight_offset + (token_id as u64 * embd_row_bytes as u64);
         let mut layer_output = pipeline.run_dequant_any_hot(

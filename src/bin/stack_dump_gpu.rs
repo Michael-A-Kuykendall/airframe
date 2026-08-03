@@ -33,7 +33,9 @@ fn rms(v: &[f32]) -> f32 {
 }
 
 fn top_k(logits: &[f32], k: usize, tok: &Tokenizer) -> (TokenScore, Vec<TokenScore>) {
-    let mut idx: Vec<usize> = (0..logits.len()).filter(|&i| logits[i].is_finite()).collect();
+    let mut idx: Vec<usize> = (0..logits.len())
+        .filter(|&i| logits[i].is_finite())
+        .collect();
     idx.sort_by(|&a, &b| {
         logits[b]
             .partial_cmp(&logits[a])

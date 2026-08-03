@@ -921,9 +921,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // This replaces the hand-rolled 1770-line decode loop with
     // GpuRuntime::generate() — the same ISF fabric path shimmy uses.
     let shift_pipeline = RopeShiftPipeline::new(&device);
-    let output_head_f32 = GpuRuntime::load_output_head_f32(
-        &model_path, &gpu_model, &device, &spec,
-    ).map_err(|e| format!("output_head: {}", e))?;
+    let output_head_f32 = GpuRuntime::load_output_head_f32(&model_path, &gpu_model, &device, &spec)
+        .map_err(|e| format!("output_head: {}", e))?;
     let embd_weight_offset = gpu_model
         .metadata
         .get_tensor_offset("token_embd.weight")
@@ -940,10 +939,13 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         _ => spec.n_embd as u64 * 4,
     };
     let eos_token = tokenizer.eos_token();
-    let im_end_token: Option<u32> = tokenizer
-        .encode("<|im_end|>", false)
-        .ok()
-        .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None });
+    let im_end_token: Option<u32> = tokenizer.encode("<|im_end|>", false).ok().and_then(|v| {
+        if v.len() == 1 {
+            Some(v[0])
+        } else {
+            None
+        }
+    });
     let generate_rt = Arc::new(GpuRuntime::from_parts(
         device,
         queue,
@@ -1018,7 +1020,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         let job_id_clone = job.job_id.clone();
 
         let task_type = job.req.task.clone().unwrap_or_else(|| "story".to_string());
-        let result: Result<InferenceResponse, String> = if task_type == "wikitext2" || task_type == "lambada" {
+        let result: Result<InferenceResponse, String> = if task_type == "wikitext2"
+            || task_type == "lambada"
+        {
             eprintln!("[GPU Worker] Running eval task: {}", task_type);
             let _target_bin = "shimmy_eval";
             let cmd = format!("source ~/.cargo/env && cargo run -p shimmy_eval --bin shimmy_eval --release -- --model /opt/repro-arena/models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -t {} --limit 3000", task_type);
@@ -1730,7 +1734,6 @@ mod tests {
             "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
         );
     }
-
 
     #[test]
     fn parse_content_length_from_header() {
