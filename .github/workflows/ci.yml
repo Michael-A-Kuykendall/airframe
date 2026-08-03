@@ -61,4 +61,4 @@ jobs:
       working-directory: crates/airframe_observe
       run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
     - name: Publish airframe
-      run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
