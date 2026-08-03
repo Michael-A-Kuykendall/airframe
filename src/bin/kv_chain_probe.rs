@@ -57,8 +57,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     let f32_head = GpuRuntime::load_output_head_f32(model_path, &gpu_model, &device, &spec)
         .map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string()))
-                as Box<dyn std::error::Error>
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
         })?;
 
     let n_layers = gpu_model.metadata.compiled_layers.len();
@@ -75,62 +74,101 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         .get_tensor_offset("token_embd.weight")
         .expect("token_embd.weight not found");
     let embd_row_bytes = match embd_quant_type {
-        0 => dim * 4, 1 => dim * 2,
-        2 => (dim / 32) * 18, 6 => (dim / 32) * 22,
+        0 => dim * 4,
+        1 => dim * 2,
+        2 => (dim / 32) * 18,
+        6 => (dim / 32) * 22,
         8 => (dim / 32) * 34,
-        12 => (dim / 256) * 144, 13 => (dim / 256) * 176,
+        12 => (dim / 256) * 144,
+        13 => (dim / 256) * 176,
         14 => (dim / 256) * 210,
         _ => panic!("unsupported quant type {}", embd_quant_type),
     };
 
     let tokens = tokenizer.encode(prompt, true)?;
     let need = 12;
-    assert!(tokens.len() >= need, "prompt must tokenize to >={} tokens, got {}", need, tokens.len());
+    assert!(
+        tokens.len() >= need,
+        "prompt must tokenize to >={} tokens, got {}",
+        need,
+        tokens.len()
+    );
     let toks: Vec<u32> = tokens[0..need].to_vec();
-    eprintln!("[chain] prompt_len={} tokens[0..{}]={:?}", tokens.len(), need, toks);
+    eprintln!(
+        "[chain] prompt_len={} tokens[0..{}]={:?}",
+        tokens.len(),
+        need,
+        toks
+    );
 
     let mut embs = Vec::with_capacity(need);
     for &t in &toks {
         let row_offset = embd_weight_offset + (t as u64 * embd_row_bytes as u64);
         let e = pipeline.run_dequant_any_hot(
-            &device, &queue, &gpu_model, row_offset as u32, dim_u32, embd_quant_type,
+            &device,
+            &queue,
+            &gpu_model,
+            row_offset as u32,
+            dim_u32,
+            embd_quant_type,
         );
         embs.push(e);
     }
     let concat = |s: &[Vec<f32>]| -> Vec<f32> {
         let mut v = Vec::with_capacity(s.len() * dim);
-        for e in s { v.extend_from_slice(e); }
+        for e in s {
+            v.extend_from_slice(e);
+        }
         v
     };
     let emb_prefill = concat(&embs[0..need]);
     let emb_first_decode = embs[need - 1].clone();
 
-    let rms = |v: &[f32]| -> f32 {
-        (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt()
-    };
+    let rms = |v: &[f32]| -> f32 { (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt() };
     let argmax = |logits: &[f32]| -> (usize, String) {
-        let (idx, _) = logits.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap_or((0, &0.0));
-        let piece = tokenizer.decode_single(idx as u32, true).unwrap_or_default();
+        let (idx, _) = logits
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap_or((0, &0.0));
+        let piece = tokenizer
+            .decode_single(idx as u32, true)
+            .unwrap_or_default();
         (idx, piece)
     };
 
     let decode_steps = 6;
 
     for mode_name in ["BLOB", "F32"] {
-        let head_override: Option<&wgpu::Buffer> = if mode_name == "F32" { Some(&f32_head) } else { None };
+        let head_override: Option<&wgpu::Buffer> = if mode_name == "F32" {
+            Some(&f32_head)
+        } else {
+            None
+        };
 
         eprintln!("\n=== MODE: {} ===", mode_name);
 
         // Reference: full N-token prefill -> logits at last position
         let kv_ref = KVCache::new(&device, n_layers, n_head_kv, head_dim, 8192);
         let rb_ref = pipeline.run_full_model_prefill_chunked_with_cache_state(
-            &device, &queue, &gpu_model, &emb_prefill, head_override, 0,
+            &device,
+            &queue,
+            &gpu_model,
+            &emb_prefill,
+            head_override,
+            0,
             Some((kv_ref.get_k_buffers(), kv_ref.get_v_buffers())),
-            &spec, 512,
+            &spec,
+            512,
         )?;
         let logits_ref = rb_ref.2;
         let (ref_idx, ref_piece) = argmax(&logits_ref);
-        eprintln!("  REF: last-position logits -> argmax={} piece='{}' rms={:.6}", ref_idx, ref_piece, rms(&logits_ref));
+        eprintln!(
+            "  REF: last-position logits -> argmax={} piece='{}' rms={:.6}",
+            ref_idx,
+            ref_piece,
+            rms(&logits_ref)
+        );
 
         // Chain: prefill (need-1) tokens, then N decode steps
         let kv_chain = KVCache::new(&device, n_layers, n_head_kv, head_dim, 8192);
@@ -138,9 +176,15 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Prefill (need-1) tokens
         pipeline.run_full_model_prefill_chunked_with_cache_state(
-            &device, &queue, &gpu_model, &emb_prefill_short, head_override, 0,
+            &device,
+            &queue,
+            &gpu_model,
+            &emb_prefill_short,
+            head_override,
+            0,
             Some((kv_chain.get_k_buffers(), kv_chain.get_v_buffers())),
-            &spec, 512,
+            &spec,
+            512,
         )?;
 
         // Sequential decode using greedy argmax feedback
@@ -148,20 +192,37 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         for step in 0..decode_steps {
             let pos = (need - 1) as u32 + step;
             let (_, _, logits) = pipeline.run_full_model_prefill_chunked_with_cache_state(
-                &device, &queue, &gpu_model, &cur_emb, head_override, pos,
+                &device,
+                &queue,
+                &gpu_model,
+                &cur_emb,
+                head_override,
+                pos,
                 Some((kv_chain.get_k_buffers(), kv_chain.get_v_buffers())),
-                &spec, 1,
+                &spec,
+                1,
             )?;
             let (tok_idx, tok_piece) = argmax(&logits);
-            let diff: f32 = logits.iter().zip(logits_ref.iter())
-                .map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
-            eprintln!("  step {}: current_pos={} argmax={} piece={:?} max|Δ|_ref={:.6e}", step, pos, tok_idx, tok_piece, diff);
+            let diff: f32 = logits
+                .iter()
+                .zip(logits_ref.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            eprintln!(
+                "  step {}: current_pos={} argmax={} piece={:?} max|Δ|_ref={:.6e}",
+                step, pos, tok_idx, tok_piece, diff
+            );
 
             // Build embedding for this argmax token (re-dequant)
             let row_offset = embd_weight_offset + (tok_idx as u64 * embd_row_bytes as u64);
             let offset32 = row_offset as u32;
             cur_emb = pipeline.run_dequant_any_hot(
-                &device, &queue, &gpu_model, offset32, dim_u32, embd_quant_type,
+                &device,
+                &queue,
+                &gpu_model,
+                offset32,
+                dim_u32,
+                embd_quant_type,
             );
         }
     }
