@@ -16,6 +16,7 @@ gate, and the push/remote policy.
 ## Release Process
 
 Load the `release` skill (`.opencode/skills/release/SKILL.md`) before cutting a release.
-Releases are coordinated with Shimmy via `scripts/release-coordinated.sh` in the
-workspace root. One command handles version bumps, commits, tags, crates.io publish,
+Releases are coordinated with Shimmy via `scripts/deploy.sh` in the
+workspace root (see workspace AGENTS.md for the full deploy process).
+One command handles version bumps, commits, tags, crates.io publish,
 and GitHub Releases for both repos. Never bump versions or tag manually.
