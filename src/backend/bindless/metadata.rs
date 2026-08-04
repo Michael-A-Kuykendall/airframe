@@ -154,13 +154,59 @@ impl BindlessMetadata {
 
             let mut layer_idx = 0usize;
             while absolute_offsets.contains_key(&format!("blk.{}.attn_norm.weight", layer_idx)) {
-                // Optional tensor lookup — returns 0 if not present (e.g. QK norm on non-Qwen3)
+                // Per-layer base byte: min of all tensor offsets, rounded down to 4.
+                let min_offset = [
+                    "attn_norm.weight",
+                    "attn_norm_bias",
+                    "attn_q.weight",
+                    "attn_k.weight",
+                    "attn_v.weight",
+                    "attn_qkv.weight",
+                    "attn_output.weight",
+                    "ffn_norm.weight",
+                    "ffn_norm_bias",
+                    "ffn_gate.weight",
+                    "ffn_down.weight",
+                    "ffn_up.weight",
+                    "attn_q_norm.weight",
+                    "attn_k_norm.weight",
+                    "attn_q.bias",
+                    "attn_k.bias",
+                    "attn_v.bias",
+                ]
+                .iter()
+                .filter_map(|s| {
+                    let key = format!("blk.{}.{}", layer_idx, s);
+                    absolute_offsets.get(&key).copied()
+                })
+                .filter(|&o| o > 0)
+                .min()
+                .unwrap_or(0);
+                let base_byte = min_offset & !3u64;
+                let blob_base_words = (base_byte / 4) as u32;
+                // Override outer p with per-layer relative offsets
+                let p = |offsets: &HashMap<String, u64>, layer: usize, s: &str| -> u32 {
+                    let abs = offsets
+                        .get(&format!("blk.{}.{}", layer, s))
+                        .copied()
+                        .unwrap_or(0);
+                    if abs == 0 {
+                        0
+                    } else {
+                        super::pipeline::pack_blob_offset(abs - base_byte)
+                    }
+                };
+                // Optional tensor lookup with per-layer base
                 let opt = |offsets: &std::collections::HashMap<String, u64>,
                            li: usize,
                            suffix: &str|
                  -> u32 {
-                    let key = format!("blk.{}.{}", li, suffix);
-                    super::pipeline::pack_blob_offset(*offsets.get(&key).unwrap_or(&0))
+                    let abs = *offsets.get(&format!("blk.{}.{}", li, suffix)).unwrap_or(&0);
+                    if abs == 0 {
+                        0
+                    } else {
+                        super::pipeline::pack_blob_offset(abs - base_byte)
+                    }
                 };
                 // Fused QKV support: phi-2, StarCoder2, GPT-2 and similar models store Q+K+V
                 // in a single weight matrix `attn_qkv.weight`. When separate attn_q/k/v tensors
@@ -214,10 +260,12 @@ impl BindlessMetadata {
                         14 => (dim_in / 256) * 210,
                         _ => (dim_in / 32) * 18,
                     };
-                    let q_off = super::pipeline::pack_blob_offset(fused_off);
-                    let k_off = super::pipeline::pack_blob_offset(fused_off + dim_q * bpr);
-                    let v_off =
-                        super::pipeline::pack_blob_offset(fused_off + (dim_q + dim_k) * bpr);
+                    let q_off = super::pipeline::pack_blob_offset(fused_off - base_byte);
+                    let k_off =
+                        super::pipeline::pack_blob_offset(fused_off + dim_q * bpr - base_byte);
+                    let v_off = super::pipeline::pack_blob_offset(
+                        fused_off + (dim_q + dim_k) * bpr - base_byte,
+                    );
                     println!(
                         "[Metadata] Layer {}: fused QKV type={} dim_in={} dim_q={} dim_k={} bpr={} K@{} V@{}",
                         layer_idx, fused_type, dim_in, dim_q, dim_k, bpr, k_off, v_off
@@ -324,6 +372,7 @@ impl BindlessMetadata {
                 };
                 compiled_layers.push(CompiledLayerEntry {
                     offsets,
+                    blob_base_words,
                     quant_qk: lqt_main,
                     quant_v: lqt_v,
                     quant_attn_out: lqt_attn_out,

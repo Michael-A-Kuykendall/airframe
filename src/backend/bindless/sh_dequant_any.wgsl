@@ -53,10 +53,10 @@ fn f16_to_f32(bits: u32) -> f32 {
 //   14 = Q6_K  (256-elem superblocks, 210 bytes each)
 
 struct DequantAnyParams {
-    offset_bytes: u32,  // Absolute byte offset of tensor in gguf_blob
-    count: u32,         // Number of f32 elements to produce
-    formula_index: u32, // B1 registry slot (0..7) — shader switches on this, not raw GGML type
-    pad: u32,
+    blob_base_words: u32, // base_byte/4 for reconstructing absolute word index
+    offset_words: u32,    // word offset relative to base (internal dispatch)
+    count: u32,           // Number of f32 elements to produce
+    formula_index: u32,   // B1 registry slot (0..7) — shader switches on this, not raw GGML type
 };
 
 @group(0) @binding(0)  var<storage, read> blob_0: array<u32>;
@@ -82,7 +82,7 @@ fn read_blob(word_idx: u32) -> u32 {
 }
 
 // Packed absolute offsets (host pack_blob_offset = byte/2). Never pack*2 in u32.
-fn gow(pack: u32) -> u32 { return pack / 2u; }
+fn gow(pack: u32) -> u32 { return pack / 2u + params.blob_base_words; }
 fn add_pack(pack: u32, even_bytes: u32) -> u32 { return pack + even_bytes / 2u; }
 fn read_byte_rel(pack: u32, rel: u32) -> u32 {
     let adj = 2u * (pack % 2u) + rel;
@@ -240,7 +240,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (i >= params.count) { return; }
 
     let slot = params.formula_index;
-    let off_pack = params.offset_bytes; // already packed (host pack_blob_offset)
+    let off_pack = params.offset_words;
     var val: f32;
 
     if (slot == 7u) { // Q6_K — 256-elem superblocks, 210 bytes

@@ -339,11 +339,10 @@ impl BindlessPipeline {
         quant_type: u32,
     ) -> Vec<f32> {
         let params = DequantAnyParams {
-            // Shader uses packed offsets (byte/2); word = pack/2 — no pack*2 overflow.
-            offset_bytes: crate::backend::bindless::pipeline::pack_blob_offset(offset_bytes as u64),
-            count,
+            blob_base_words: (offset_bytes as u64 / 4) as u32,
+            offset_words: 0,
             formula_index: formula_index_for_ggml(quant_type),
-            pad: 0,
+            count,
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("DequantAny Params"),
@@ -453,12 +452,11 @@ impl BindlessPipeline {
         count: u32,
         quant_type: u32,
     ) -> Vec<f32> {
-        // Match LayerOffsets packing (byte/2) so >4GiB tensors address correctly.
         let params = DequantAnyParams {
-            offset_bytes: crate::backend::bindless::pipeline::pack_blob_offset(offset_bytes as u64),
-            count,
+            blob_base_words: (offset_bytes as u64 / 4) as u32,
+            offset_words: 0,
             formula_index: formula_index_for_ggml(quant_type),
-            pad: 0,
+            count,
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("DequantAny Params"),

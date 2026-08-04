@@ -21,10 +21,10 @@ pub struct DequantParams {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DequantAnyParams {
-    pub offset_bytes: u32,
+    pub blob_base_words: u32,
+    pub offset_words: u32,
+    pub formula_index: u32,
     pub count: u32,
-    pub formula_index: u32, // B3b registry slot (0..7); dispatch decision made in Rust B1 registry
-    pub pad: u32,
 }
 
 #[repr(C)]
@@ -140,6 +140,11 @@ pub struct LayerParams {
     pub formula_ffn_gate: u32,
     /// Registry-derived dispatch slot for ffn_up.
     pub formula_ffn_up: u32,
+    /// Word offset of this dispatch's base byte within the GGUF blob.
+    /// Reconstructs absolute word index in shaders: gow(pack) = pack / 2 + blob_base_words.
+    pub blob_base_words: u32,
+    /// Padding to maintain 16-byte struct alignment.
+    pub _pad: u32,
 }
 
 /// Map a raw GGML quant type id to the B1 formula-index slot the shaders
@@ -212,6 +217,9 @@ pub struct HeadBlobParams {
 pub struct CompiledLayerEntry {
     /// All tensor byte-offsets for this layer, ready to upload to GPU.
     pub offsets: LayerOffsets,
+    /// Word offset of the base byte for this layer in the GGUF blob.
+    /// Used by the shader to reconstruct absolute addresses: gow(pack) = pack/2 + blob_base_words.
+    pub blob_base_words: u32,
     pub quant_qk: u32,
     pub quant_v: u32,
     pub quant_attn_out: u32,
