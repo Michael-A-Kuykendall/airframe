@@ -25,6 +25,7 @@ pub struct DequantAnyParams {
     pub offset_words: u32,
     pub count: u32,
     pub formula_index: u32,
+    pub chunk_words: u32,
 }
 
 #[repr(C)]
@@ -43,7 +44,8 @@ pub struct RMSNormParams {
     pub weights_offset: u32,
     pub bias_offset: u32, // 0 = disabled; otherwise word index (byte_offset / 4)
     pub eps: f32,
-    pub norm_type: u32, // 0 = RMSNorm, 1 = LayerNorm (mean+variance)
+    pub norm_type: u32,   // 0 = RMSNorm, 1 = LayerNorm (mean+variance)
+    pub chunk_words: u32, // words per blob chunk — dispatch read_blob across blob_0..blob_7
 }
 
 /// Offsets for a single Transformer Layer (TinyLlama/Llama 2).
@@ -143,8 +145,9 @@ pub struct LayerParams {
     /// Word offset of this dispatch's base byte within the GGUF blob.
     /// Reconstructs absolute word index in shaders: gow(pack) = pack / 2 + blob_base_words.
     pub blob_base_words: u32,
-    /// Padding to maintain 16-byte struct alignment.
-    pub _pad: u32,
+    /// Words per blob chunk (effective_chunk / 4). Shaders dispatch read_blob
+    /// across blob_0..blob_7 using this. Must stay at the END to match WGSL.
+    pub chunk_words: u32,
 }
 
 /// Map a raw GGML quant type id to the B1 formula-index slot the shaders
@@ -206,7 +209,7 @@ pub struct HeadBlobParams {
     pub formula_index: u32, // B3b registry slot (0..7); dispatch decision made in Rust B1 registry (Golden Rule 3)
     pub softcap: f32,       // final_logit_softcap (0.0 = disabled)
     pub base_row: u32,      // output row offset for dispatch splitting (TDR tiles)
-    pub _pad: u32,
+    pub chunk_words: u32,   // words per blob chunk — dispatch read_blob across blob_0..blob_7
 }
 
 /// Pre-compiled per-layer lookup table entry.
@@ -462,6 +465,56 @@ impl BindlessPipeline {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 12,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 13,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 14,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 15,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 16,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
                 ],
             });
         let dequant_any_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -704,6 +757,56 @@ impl BindlessPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 12,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 13,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 16,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -868,6 +971,56 @@ impl BindlessPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 12,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 13,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 16,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -973,6 +1126,56 @@ impl BindlessPipeline {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 12,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 13,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 14,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 15,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 16,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            min_binding_size: None,
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -1013,6 +1216,56 @@ impl BindlessPipeline {
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 11,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    min_binding_size: None,
+                    has_dynamic_offset: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 12,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    min_binding_size: None,
+                    has_dynamic_offset: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 13,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    min_binding_size: None,
+                    has_dynamic_offset: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 14,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    min_binding_size: None,
+                    has_dynamic_offset: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 15,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    min_binding_size: None,
+                    has_dynamic_offset: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 16,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },

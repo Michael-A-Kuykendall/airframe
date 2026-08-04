@@ -352,6 +352,7 @@ mod tests_inner {
             bias_offset: 0,
             eps: 0.0, // Simplify math
             norm_type: 0,
+            chunk_words: u32::MAX,
         };
 
         let result = pipeline.run_rmsnorm_test(&device, &queue, &model, &input, params);
@@ -450,6 +451,7 @@ mod tests_inner {
             bias_offset: 0,
             eps: 0.0,
             norm_type: 0,
+            chunk_words: u32::MAX,
         };
         let rms_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("RMS Params"),
@@ -499,6 +501,26 @@ mod tests_inner {
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.dummy_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
                     resource: model.dummy_buf.as_entire_binding(),
                 },
             ],

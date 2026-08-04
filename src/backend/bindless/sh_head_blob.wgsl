@@ -48,12 +48,6 @@ fn f16_to_f32(bits: u32) -> f32 {
 //  14  = Q6_K  ← primary path for Qwen2/MiniCPM-V output.weight
 
 // ---------------------------------------------------------------------------
-// Blob split constants — must match loader.rs (BLOB_CHUNK_BYTES = 2_000_000_000)
-// ---------------------------------------------------------------------------
-const BLOB_SPLIT_0: u32 = 500000000u;   // 2,000,000,000 bytes / 4 = 500 M words
-const BLOB_SPLIT_1: u32 = 1000000000u;  // 4,000,000,000 bytes / 4 = 1 B words
-
-// ---------------------------------------------------------------------------
 // Bindings
 // ---------------------------------------------------------------------------
 @group(0) @binding(0)  var<storage, read>       blob_0:  array<u32>;  // GGUF blob chunk 0 [0, 2 GB)
@@ -62,6 +56,11 @@ const BLOB_SPLIT_1: u32 = 1000000000u;  // 4,000,000,000 bytes / 4 = 1 B words
 @group(0) @binding(3)  var<uniform>              params:  HeadBlobParams;
 @group(0) @binding(10) var<storage, read>        blob_1:  array<u32>;  // GGUF blob chunk 1 [2 GB, 4 GB)
 @group(0) @binding(11) var<storage, read>        blob_2:  array<u32>;  // GGUF blob chunk 2 [4 GB, end)
+@group(0) @binding(12) var<storage, read>        blob_3:  array<u32>;
+@group(0) @binding(13) var<storage, read>        blob_4:  array<u32>;
+@group(0) @binding(14) var<storage, read>        blob_5:  array<u32>;
+@group(0) @binding(15) var<storage, read>        blob_6:  array<u32>;
+@group(0) @binding(16) var<storage, read>        blob_7:  array<u32>;
 
 // ---------------------------------------------------------------------------
 // Uniform params
@@ -75,20 +74,23 @@ struct HeadBlobParams {
     formula_index: u32,
     softcap:    f32,   // final_logit_softcap (0.0 = disabled, Gemma-2 uses 30.0)
     base_row:   u32,   // output row offset for dispatch splitting (TDR tiles)
-    _pad:       u32,
+    chunk_words: u32,  // words per blob chunk — dispatch read_blob across blob_0..blob_7
 }
 
 // ---------------------------------------------------------------------------
 // Blob read helper
 // ---------------------------------------------------------------------------
 fn read_blob(word_idx: u32) -> u32 {
-    if word_idx < BLOB_SPLIT_0 {
-        return blob_0[word_idx];
-    } else if word_idx < BLOB_SPLIT_1 {
-        return blob_1[word_idx - BLOB_SPLIT_0];
-    } else {
-        return blob_2[word_idx - BLOB_SPLIT_1];
-    }
+    let chunk = word_idx / params.chunk_words;
+    let off = word_idx % params.chunk_words;
+    if chunk == 0u { return blob_0[off]; }
+    if chunk == 1u { return blob_1[off]; }
+    if chunk == 2u { return blob_2[off]; }
+    if chunk == 3u { return blob_3[off]; }
+    if chunk == 4u { return blob_4[off]; }
+    if chunk == 5u { return blob_5[off]; }
+    if chunk == 6u { return blob_6[off]; }
+    return blob_7[off];
 }
 
 fn read_byte_gguf(byte_idx: u32) -> u32 {

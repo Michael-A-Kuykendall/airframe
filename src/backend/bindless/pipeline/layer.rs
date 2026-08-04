@@ -126,6 +126,26 @@ impl BindlessPipeline {
                     binding: 11,
                     resource: model.blob_binding_2(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
+                },
             ],
         });
 
@@ -357,6 +377,26 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: model.blob_binding_2(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
                 },
             ],
         });
@@ -646,6 +686,26 @@ impl BindlessPipeline {
                     binding: 11,
                     resource: model.blob_binding_2(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
+                },
             ],
         });
 
@@ -922,6 +982,26 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: kv_cache.get_k_scale_buffer(layer_idx).as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
@@ -1368,6 +1448,26 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: model.blob_binding_2(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
                 },
             ],
         });

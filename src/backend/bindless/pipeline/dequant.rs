@@ -343,6 +343,8 @@ impl BindlessPipeline {
             offset_words: 0,
             formula_index: formula_index_for_ggml(quant_type),
             count,
+            // Single-blob path: only blob_0 is bound; force chunk dispatch to chunk 0.
+            chunk_words: u32::MAX,
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("DequantAny Params"),
@@ -396,6 +398,26 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
+                    resource: dummy.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: dummy.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: dummy.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: dummy.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: dummy.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
                     resource: dummy.as_entire_binding(),
                 },
             ],
@@ -457,6 +479,7 @@ impl BindlessPipeline {
             offset_words: 0,
             formula_index: formula_index_for_ggml(quant_type),
             count,
+            chunk_words: model.chunk_words(),
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("DequantAny Params"),
@@ -526,6 +549,56 @@ impl BindlessPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 12,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 13,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 16,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -571,6 +644,26 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: model.blob_binding_2(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
                 },
             ],
         });

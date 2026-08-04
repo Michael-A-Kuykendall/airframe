@@ -97,7 +97,7 @@ struct LayerParams {
     formula_ffn_gate: u32,  // ffn_gate
     formula_ffn_up: u32,    // ffn_up
     blob_base_words: u32,   // base_byte/4 for reconstructing absolute word index
-    _pad: u32,              // maintain 16-byte alignment
+    chunk_words: u32,       // words per blob chunk — dispatch read_blob across blob_0..blob_7
 };
 
 struct CacheParams {
@@ -115,18 +115,23 @@ struct CacheParams {
 @group(0) @binding(0)  var<storage, read> blob_0: array<u32>;
 @group(0) @binding(10) var<storage, read> blob_1: array<u32>;
 @group(0) @binding(11) var<storage, read> blob_2: array<u32>;
-
-const BLOB_SPLIT_0: u32 = 500000000u;  // 2,000,000,000 bytes / 4 = 500M words
-const BLOB_SPLIT_1: u32 = 1000000000u; // 4,000,000,000 bytes / 4 = 1B words
+@group(0) @binding(12) var<storage, read> blob_3: array<u32>;
+@group(0) @binding(13) var<storage, read> blob_4: array<u32>;
+@group(0) @binding(14) var<storage, read> blob_5: array<u32>;
+@group(0) @binding(15) var<storage, read> blob_6: array<u32>;
+@group(0) @binding(16) var<storage, read> blob_7: array<u32>;
 
 fn read_blob(word_idx: u32) -> u32 {
-    if word_idx < BLOB_SPLIT_0 {
-        return blob_0[word_idx];
-    } else if word_idx < BLOB_SPLIT_1 {
-        return blob_1[word_idx - BLOB_SPLIT_0];
-    } else {
-        return blob_2[word_idx - BLOB_SPLIT_1];
-    }
+    let chunk = word_idx / params.chunk_words;
+    let off = word_idx % params.chunk_words;
+    if chunk == 0u { return blob_0[off]; }
+    if chunk == 1u { return blob_1[off]; }
+    if chunk == 2u { return blob_2[off]; }
+    if chunk == 3u { return blob_3[off]; }
+    if chunk == 4u { return blob_4[off]; }
+    if chunk == 5u { return blob_5[off]; }
+    if chunk == 6u { return blob_6[off]; }
+    return blob_7[off];
 }
 
 // -------------------------------------------------------------------------

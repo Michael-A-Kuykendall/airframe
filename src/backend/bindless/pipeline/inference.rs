@@ -684,7 +684,7 @@ impl BindlessPipeline {
             formula_ffn_gate: 0,
             formula_ffn_up: 0,
             blob_base_words: 0,
-            _pad: 0,
+            chunk_words: 0,
         };
 
         // Adaptive QKV micro-batch chunk size.
@@ -836,6 +836,7 @@ impl BindlessPipeline {
                 formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
                 formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
                 blob_base_words: compiled.blob_base_words,
+                chunk_words: model.chunk_words(),
                 ..params_base
             };
             if spec.arch_string() == "qwen3" {
@@ -929,6 +930,26 @@ impl BindlessPipeline {
                         wgpu::BindGroupEntry {
                             binding: 11,
                             resource: model.blob_binding_2(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 12,
+                            resource: model.blob_binding_3(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 13,
+                            resource: model.blob_binding_4(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 14,
+                            resource: model.blob_binding_5(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 15,
+                            resource: model.blob_binding_6(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 16,
+                            resource: model.blob_binding_7(),
                         },
                     ],
                 })
@@ -1059,6 +1080,26 @@ impl BindlessPipeline {
                             binding: 11,
                             resource: model.blob_binding_2(),
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 12,
+                            resource: model.blob_binding_3(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 13,
+                            resource: model.blob_binding_4(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 14,
+                            resource: model.blob_binding_5(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 15,
+                            resource: model.blob_binding_6(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 16,
+                            resource: model.blob_binding_7(),
+                        },
                     ],
                 });
                 layer_chunk_params.push(chunk_params_buf);
@@ -1090,6 +1131,7 @@ impl BindlessPipeline {
             } else {
                 0
             },
+            chunk_words: model.chunk_words(),
         };
         let norm_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Final Norm Params"),
@@ -1138,6 +1180,26 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: model.blob_binding_2(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
                 },
             ],
         });
@@ -1218,7 +1280,7 @@ impl BindlessPipeline {
                 formula_index: formula_index_for_ggml(head_quant_type),
                 softcap: spec.final_logit_softcap,
                 base_row: 0,
-                _pad: 0,
+                chunk_words: model.chunk_words(),
             };
             let head_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Head Params Blob"),
@@ -1256,6 +1318,26 @@ impl BindlessPipeline {
                     wgpu::BindGroupEntry {
                         binding: 11,
                         resource: model.blob_binding_2(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: model.blob_binding_3(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: model.blob_binding_4(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: model.blob_binding_5(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 15,
+                        resource: model.blob_binding_6(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 16,
+                        resource: model.blob_binding_7(),
                     },
                 ],
             }))
@@ -1965,7 +2047,7 @@ impl BindlessPipeline {
                                 formula_index: formula_index_for_ggml(head_quant_type),
                                 softcap: spec.final_logit_softcap,
                                 base_row,
-                                _pad: 0,
+                                chunk_words: model.chunk_words(),
                             };
                             let param_buf =
                                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2006,6 +2088,26 @@ impl BindlessPipeline {
                                     wgpu::BindGroupEntry {
                                         binding: 11,
                                         resource: model.blob_binding_2(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 12,
+                                        resource: model.blob_binding_3(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 13,
+                                        resource: model.blob_binding_4(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 14,
+                                        resource: model.blob_binding_5(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 15,
+                                        resource: model.blob_binding_6(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 16,
+                                        resource: model.blob_binding_7(),
                                     },
                                 ],
                             });

@@ -255,7 +255,7 @@ impl BindlessPipeline {
             formula_index: formula_index_for_ggml(quant_type),
             softcap,
             base_row: 0,
-            _pad: 0,
+            chunk_words: model.chunk_words(),
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("LM Head Blob Params"),
@@ -290,6 +290,26 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: model.blob_binding_2(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
                 },
             ],
         });
@@ -400,7 +420,7 @@ impl BindlessPipeline {
                 formula_index: formula_index_for_ggml(quant_type),
                 softcap,
                 base_row,
-                _pad: 0,
+                chunk_words: model.chunk_words(),
             };
             let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!(
@@ -441,6 +461,26 @@ impl BindlessPipeline {
                     wgpu::BindGroupEntry {
                         binding: 11,
                         resource: model.blob_binding_2(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: model.blob_binding_3(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: model.blob_binding_4(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: model.blob_binding_5(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 15,
+                        resource: model.blob_binding_6(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 16,
+                        resource: model.blob_binding_7(),
                     },
                 ],
             });
@@ -546,6 +586,26 @@ impl BindlessPipeline {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: model.blob_binding_2(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: model.blob_binding_3(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: model.blob_binding_4(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: model.blob_binding_5(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: model.blob_binding_6(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: model.blob_binding_7(),
                 },
             ],
         });

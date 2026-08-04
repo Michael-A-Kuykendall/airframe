@@ -57,28 +57,34 @@ struct DequantAnyParams {
     offset_words: u32,    // word offset relative to base (internal dispatch)
     count: u32,           // Number of f32 elements to produce
     formula_index: u32,   // B1 registry slot (0..7) — shader switches on this, not raw GGML type
+    chunk_words: u32,     // words per blob chunk (effective_chunk / 4) — for chunk dispatch
 };
 
 @group(0) @binding(0)  var<storage, read> blob_0: array<u32>;
 @group(0) @binding(10) var<storage, read> blob_1: array<u32>;
 @group(0) @binding(11) var<storage, read> blob_2: array<u32>;
+@group(0) @binding(12) var<storage, read> blob_3: array<u32>;
+@group(0) @binding(13) var<storage, read> blob_4: array<u32>;
+@group(0) @binding(14) var<storage, read> blob_5: array<u32>;
+@group(0) @binding(15) var<storage, read> blob_6: array<u32>;
+@group(0) @binding(16) var<storage, read> blob_7: array<u32>;
 @group(0) @binding(1) var<storage, read_write> output    : array<f32>;
 @group(0) @binding(2) var<uniform>             params    : DequantAnyParams;
 
 // ---------------------------------------------------------------------------
 // Byte-level read helper
 // ---------------------------------------------------------------------------
-const BLOB_SPLIT_0: u32 = 500000000u;
-const BLOB_SPLIT_1: u32 = 1000000000u;
-
 fn read_blob(word_idx: u32) -> u32 {
-    if word_idx < BLOB_SPLIT_0 {
-        return blob_0[word_idx];
-    } else if word_idx < BLOB_SPLIT_1 {
-        return blob_1[word_idx - BLOB_SPLIT_0];
-    } else {
-        return blob_2[word_idx - BLOB_SPLIT_1];
-    }
+    let chunk = word_idx / params.chunk_words;
+    let off = word_idx % params.chunk_words;
+    if chunk == 0u { return blob_0[off]; }
+    if chunk == 1u { return blob_1[off]; }
+    if chunk == 2u { return blob_2[off]; }
+    if chunk == 3u { return blob_3[off]; }
+    if chunk == 4u { return blob_4[off]; }
+    if chunk == 5u { return blob_5[off]; }
+    if chunk == 6u { return blob_6[off]; }
+    return blob_7[off];
 }
 
 // Packed absolute offsets (host pack_blob_offset = byte/2). Never pack*2 in u32.

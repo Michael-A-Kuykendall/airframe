@@ -104,7 +104,7 @@ struct LayerParams {
     formula_ffn_gate: u32,  // ffn_gate
     formula_ffn_up: u32,    // ffn_up
     blob_base_words: u32,   // base_byte/4 for reconstructing absolute word index
-    _pad: u32,              // maintain 16-byte alignment
+    chunk_words: u32,       // words per blob chunk (unused by int4 single-blob path; layout match)
 };
 
 struct CacheParams {

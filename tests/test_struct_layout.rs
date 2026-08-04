@@ -179,7 +179,10 @@ fn head_blob_params_matches_sh_head_blob() {
         ),
         ("softcap", offset_of!(HeadBlobParams, softcap) as u32),
         ("base_row", offset_of!(HeadBlobParams, base_row) as u32),
-        ("_pad", offset_of!(HeadBlobParams, _pad) as u32),
+        (
+            "chunk_words",
+            offset_of!(HeadBlobParams, chunk_words) as u32,
+        ),
     ];
     assert_layout_matches(
         "HeadBlobParams vs sh_head_blob.wgsl",
@@ -204,6 +207,10 @@ fn dequant_any_params_matches_sh_dequant_any() {
         (
             "formula_index",
             offset_of!(DequantAnyParams, formula_index) as u32,
+        ),
+        (
+            "chunk_words",
+            offset_of!(DequantAnyParams, chunk_words) as u32,
         ),
     ];
     assert_layout_matches(

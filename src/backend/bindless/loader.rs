@@ -127,6 +127,62 @@ impl BindlessModel {
         }
     }
 
+    /// Binding resource for blob_3: bytes [3·effective_chunk, size).
+    /// Falls back to the 4-byte dummy for models < 4 chunks.
+    pub fn blob_binding_3(&self) -> wgpu::BindingResource<'_> {
+        if self.gpu_buffers.len() > 3 {
+            self.gpu_buffers[3].as_entire_binding()
+        } else {
+            self.dummy_buf.as_entire_binding()
+        }
+    }
+
+    /// Binding resource for blob_4: bytes [4·effective_chunk, size).
+    /// Falls back to the 4-byte dummy for models < 5 chunks.
+    pub fn blob_binding_4(&self) -> wgpu::BindingResource<'_> {
+        if self.gpu_buffers.len() > 4 {
+            self.gpu_buffers[4].as_entire_binding()
+        } else {
+            self.dummy_buf.as_entire_binding()
+        }
+    }
+
+    /// Binding resource for blob_5: bytes [5·effective_chunk, size).
+    /// Falls back to the 4-byte dummy for models < 6 chunks.
+    pub fn blob_binding_5(&self) -> wgpu::BindingResource<'_> {
+        if self.gpu_buffers.len() > 5 {
+            self.gpu_buffers[5].as_entire_binding()
+        } else {
+            self.dummy_buf.as_entire_binding()
+        }
+    }
+
+    /// Binding resource for blob_6: bytes [6·effective_chunk, size).
+    /// Falls back to the 4-byte dummy for models < 7 chunks.
+    pub fn blob_binding_6(&self) -> wgpu::BindingResource<'_> {
+        if self.gpu_buffers.len() > 6 {
+            self.gpu_buffers[6].as_entire_binding()
+        } else {
+            self.dummy_buf.as_entire_binding()
+        }
+    }
+
+    /// Binding resource for blob_7: bytes [7·effective_chunk, size).
+    /// Falls back to the 4-byte dummy for models < 8 chunks.
+    pub fn blob_binding_7(&self) -> wgpu::BindingResource<'_> {
+        if self.gpu_buffers.len() > 7 {
+            self.gpu_buffers[7].as_entire_binding()
+        } else {
+            self.dummy_buf.as_entire_binding()
+        }
+    }
+
+    /// Words per blob chunk (effective_chunk / 4). Shaders use this to resolve
+    /// an absolute word index to `(chunk_index, offset_in_chunk)`.
+    pub fn chunk_words(&self) -> u32 {
+        (self.effective_chunk / 4) as u32
+    }
+
     /// Resolves an absolute word index to `(buffer_index, word_offset_in_buffer)`
     /// under the loaded multi-buffer plan.
     pub fn buffer_for_word(&self, word_idx: u32) -> (usize, u32) {
