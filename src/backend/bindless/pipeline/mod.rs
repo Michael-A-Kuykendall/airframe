@@ -23,8 +23,8 @@ pub struct DequantParams {
 pub struct DequantAnyParams {
     pub blob_base_words: u32,
     pub offset_words: u32,
-    pub formula_index: u32,
     pub count: u32,
+    pub formula_index: u32,
 }
 
 #[repr(C)]

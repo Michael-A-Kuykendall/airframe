@@ -185,7 +185,7 @@ impl BindlessMetadata {
                 let base_byte = min_offset & !3u64;
                 let blob_base_words = (base_byte / 4) as u32;
                 // Override outer p with per-layer relative offsets
-                let p = |offsets: &HashMap<String, u64>, layer: usize, s: &str| -> u32 {
+                let _p = |offsets: &HashMap<String, u64>, layer: usize, s: &str| -> u32 {
                     let abs = offsets
                         .get(&format!("blk.{}.{}", layer, s))
                         .copied()

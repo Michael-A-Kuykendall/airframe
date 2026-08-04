@@ -251,6 +251,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         batch_count: 1,
         q_weight_k: 0,
         k_weight_k: 0,
+        blob_base_words: 0,
+        _pad: 0,
     };
 
     let mut kv_cache = KVCache::new(
@@ -324,6 +326,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 formula_ffn_down: formula_index_for_ggml(compiled.quant_ffn_down),
                 formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
                 formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
+                blob_base_words: compiled.blob_base_words,
                 ..layer_params_base
             };
             // Match product path: Qwen3 packed K stride hint (2 * n_embd).

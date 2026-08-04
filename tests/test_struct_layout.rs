@@ -193,15 +193,18 @@ fn head_blob_params_matches_sh_head_blob() {
 fn dequant_any_params_matches_sh_dequant_any() {
     let rust = vec![
         (
-            "offset_bytes",
-            offset_of!(DequantAnyParams, offset_bytes) as u32,
+            "blob_base_words",
+            offset_of!(DequantAnyParams, blob_base_words) as u32,
+        ),
+        (
+            "offset_words",
+            offset_of!(DequantAnyParams, offset_words) as u32,
         ),
         ("count", offset_of!(DequantAnyParams, count) as u32),
         (
             "formula_index",
             offset_of!(DequantAnyParams, formula_index) as u32,
         ),
-        ("pad", offset_of!(DequantAnyParams, pad) as u32),
     ];
     assert_layout_matches(
         "DequantAnyParams vs sh_dequant_any.wgsl",

@@ -103,6 +103,8 @@ struct LayerParams {
     formula_ffn_down: u32,  // ffn_down
     formula_ffn_gate: u32,  // ffn_gate
     formula_ffn_up: u32,    // ffn_up
+    blob_base_words: u32,   // base_byte/4 for reconstructing absolute word index
+    _pad: u32,              // maintain 16-byte alignment
 };
 
 struct CacheParams {

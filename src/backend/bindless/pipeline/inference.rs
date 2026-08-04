@@ -683,6 +683,8 @@ impl BindlessPipeline {
             formula_ffn_down: 0,
             formula_ffn_gate: 0,
             formula_ffn_up: 0,
+            blob_base_words: 0,
+            _pad: 0,
         };
 
         // Adaptive QKV micro-batch chunk size.
@@ -833,6 +835,7 @@ impl BindlessPipeline {
                 formula_ffn_down: formula_index_for_ggml(compiled.quant_ffn_down),
                 formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
                 formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
+                blob_base_words: compiled.blob_base_words,
                 ..params_base
             };
             if spec.arch_string() == "qwen3" {
