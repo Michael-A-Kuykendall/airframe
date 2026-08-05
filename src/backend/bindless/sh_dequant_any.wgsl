@@ -92,12 +92,12 @@ fn gow(pack: u32) -> u32 { return pack / 2u + params.blob_base_words; }
 fn add_pack(pack: u32, even_bytes: u32) -> u32 { return pack + even_bytes / 2u; }
 fn read_byte_rel(pack: u32, rel: u32) -> u32 {
     let adj = 2u * (pack % 2u) + rel;
-    let word = pack / 2u + adj / 4u;
+    let word = pack / 2u + adj / 4u + params.blob_base_words;
     return extractBits(read_blob(word), (adj % 4u) * 8u, 8u);
 }
 fn read_f16_rel(pack: u32, rel: u32) -> f32 {
     let adj = 2u * (pack % 2u) + rel;
-    let word = pack / 2u + adj / 4u;
+    let word = pack / 2u + adj / 4u + params.blob_base_words;
     let bits = extractBits(read_blob(word), (adj % 4u) * 8u, 16u);
     return f16_to_f32(bits);
 }
