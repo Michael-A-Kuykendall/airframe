@@ -189,6 +189,7 @@ Repeat for every model/change under test:
 4. **Per-tensor pin (only if step 3 diverges).** `frontier_compare` → `inference_formulas`/`layer_diags`. Use `PerTensorOutput` (key 9) to find the exact broken kernel (Q/K/V / attn-out / ffn).
 5. **Certify.** `vault_verify.py` (log2-fold ≤ 2.0 ⇒ pass) and/or `vault_certify.py` (candle cross-check). Then `cargo test -p airframe --test test_invariants -- --test-threads=1`.
 6. **End-to-end.** `shimmy generate <name> --prompt "Hello" --max-tokens 32` to confirm coherent text.
+   (RETIRED skill — if used, invoke the REPO binary only: `cmd /c "cd /d C:\Users\micha\repos\airframe-workspace\shimmy && target\debug\shimmy.exe ..."`. Never bare `shimmy`; see workspace AGENTS.md SHIMMY INVOCATION.)
 
 Expected behavior when the GPU path is currently broken: step 3/5 **will FAIL on
 the first divergent layer** — that is the intended localization, not a harness
