@@ -117,3 +117,4 @@ crates/candle_probe/target/
 *.duckdb
 *.duckdb-shm
 *.duckdb-wal
+beads.db
