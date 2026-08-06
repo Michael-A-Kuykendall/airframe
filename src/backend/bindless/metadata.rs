@@ -170,34 +170,14 @@ impl BindlessMetadata {
 
             let mut layer_idx = 0usize;
             while absolute_offsets.contains_key(&format!("blk.{}.attn_norm.weight", layer_idx)) {
-                // Per-layer base byte: min of all tensor offsets, rounded down to 4.
-                let min_offset = [
-                    "attn_norm.weight",
-                    "attn_norm_bias",
-                    "attn_q.weight",
-                    "attn_k.weight",
-                    "attn_v.weight",
-                    "attn_qkv.weight",
-                    "attn_output.weight",
-                    "ffn_norm.weight",
-                    "ffn_norm_bias",
-                    "ffn_gate.weight",
-                    "ffn_down.weight",
-                    "ffn_up.weight",
-                    "attn_q_norm.weight",
-                    "attn_k_norm.weight",
-                    "attn_q.bias",
-                    "attn_k.bias",
-                    "attn_v.bias",
-                ]
-                .iter()
-                .filter_map(|s| {
-                    let key = format!("blk.{}.{}", layer_idx, s);
-                    absolute_offsets.get(&key).copied()
-                })
-                .filter(|&o| o > 0)
-                .min()
-                .unwrap_or(0);
+                // Per-layer base byte: min of ALL tensor offsets for this layer, rounded down to 4.
+                let min_offset = absolute_offsets
+                    .keys()
+                    .filter(|k| k.starts_with(&format!("blk.{}.", layer_idx)))
+                    .filter_map(|k| absolute_offsets.get(k).copied())
+                    .filter(|&o| o > 0)
+                    .min()
+                    .unwrap_or(0);
                 let base_byte = min_offset & !3u64;
                 let blob_base_words = (base_byte / 4) as u32;
                 // Shadow outer _p with per-layer relative offsets
@@ -209,7 +189,8 @@ impl BindlessMetadata {
                     if abs == 0 {
                         0
                     } else {
-                        super::pipeline::pack_blob_offset(abs - base_byte)
+                        super::pipeline::relative_packed_offset(abs, base_byte)
+                            .expect("abs underflow")
                     }
                 };
                 // Optional tensor lookup with per-layer base
@@ -221,7 +202,8 @@ impl BindlessMetadata {
                     if abs == 0 {
                         0
                     } else {
-                        super::pipeline::pack_blob_offset(abs - base_byte)
+                        super::pipeline::relative_packed_offset(abs, base_byte)
+                            .expect("abs underflow")
                     }
                 };
                 // Fused QKV support: phi-2, StarCoder2, GPT-2 and similar models store Q+K+V
@@ -276,12 +258,16 @@ impl BindlessMetadata {
                         14 => (dim_in / 256) * 210,
                         _ => (dim_in / 32) * 18,
                     };
-                    let q_off = super::pipeline::pack_blob_offset(fused_off - base_byte);
+                    let q_off = super::pipeline::relative_packed_offset(fused_off, base_byte)
+                        .expect("abs underflow");
                     let k_off =
-                        super::pipeline::pack_blob_offset(fused_off + dim_q * bpr - base_byte);
-                    let v_off = super::pipeline::pack_blob_offset(
-                        fused_off + (dim_q + dim_k) * bpr - base_byte,
-                    );
+                        super::pipeline::relative_packed_offset(fused_off + dim_q * bpr, base_byte)
+                            .expect("abs underflow");
+                    let v_off = super::pipeline::relative_packed_offset(
+                        fused_off + (dim_q + dim_k) * bpr,
+                        base_byte,
+                    )
+                    .expect("abs underflow");
                     println!(
                         "[Metadata] Layer {}: fused QKV type={} dim_in={} dim_q={} dim_k={} bpr={} K@{} V@{}",
                         layer_idx, fused_type, dim_in, dim_q, dim_k, bpr, k_off, v_off
@@ -320,13 +306,18 @@ impl BindlessMetadata {
                                 .unwrap_or(dim_in);
                             let dim_k = total_out.saturating_sub(dim_q) / 2;
                             let q_bias =
-                                super::pipeline::pack_blob_offset(fused_bias_off - base_byte);
-                            let k_bias = super::pipeline::pack_blob_offset(
-                                fused_bias_off + dim_q * 4 - base_byte,
-                            );
-                            let v_bias = super::pipeline::pack_blob_offset(
-                                fused_bias_off + (dim_q + dim_k) * 4 - base_byte,
-                            );
+                                super::pipeline::relative_packed_offset(fused_bias_off, base_byte)
+                                    .expect("abs underflow");
+                            let k_bias = super::pipeline::relative_packed_offset(
+                                fused_bias_off + dim_q * 4,
+                                base_byte,
+                            )
+                            .expect("abs underflow");
+                            let v_bias = super::pipeline::relative_packed_offset(
+                                fused_bias_off + (dim_q + dim_k) * 4,
+                                base_byte,
+                            )
+                            .expect("abs underflow");
                             println!(
                                 "[Metadata] Layer {}: fused QKV bias split Q@{} K@{} V@{}",
                                 layer_idx, q_bias, k_bias, v_bias
@@ -397,10 +388,13 @@ impl BindlessMetadata {
                         .unwrap_or(0);
                     let bpr =
                         quant_type_row_bytes(t(&tensor_types, layer_idx, "ffn_up.weight"), in_dim);
-                    let gate_rel = super::pipeline::pack_blob_offset(ffn_up_abs - base_byte);
-                    let up_rel = super::pipeline::pack_blob_offset(
-                        ffn_up_abs + ff_dim_rows * bpr - base_byte,
-                    );
+                    let gate_rel = super::pipeline::relative_packed_offset(ffn_up_abs, base_byte)
+                        .expect("abs underflow");
+                    let up_rel = super::pipeline::relative_packed_offset(
+                        ffn_up_abs + ff_dim_rows * bpr,
+                        base_byte,
+                    )
+                    .expect("abs underflow");
                     println!(
                         "[Metadata] Layer {}: merged gate+up ffn_up dims={:?} -> gate@{} up@{} (ff_dim={}, bpr={})",
                         layer_idx,
@@ -558,12 +552,11 @@ impl BindlessMetadata {
         .unwrap_or(0);
         let base_byte = min_offset & !3u64;
 
-        let pack = super::pipeline::pack_blob_offset;
         let rel = |abs: u64| -> u32 {
             if abs == 0 {
                 0
             } else {
-                pack(abs - base_byte)
+                super::pipeline::relative_packed_offset(abs, base_byte).expect("abs underflow")
             }
         };
         let p = |s: &str| -> u32 {
@@ -1002,19 +995,19 @@ mod tests {
         assert_eq!(offs.attn_norm, 0);
         assert_eq!(
             offs.attn_q,
-            super::super::pipeline::pack_blob_offset(200 - 100)
+            super::super::pipeline::relative_packed_offset(200, 100).unwrap()
         );
         assert_eq!(
             offs.attn_k,
-            super::super::pipeline::pack_blob_offset(300 - 100)
+            super::super::pipeline::relative_packed_offset(300, 100).unwrap()
         );
         assert_eq!(
             offs.attn_v,
-            super::super::pipeline::pack_blob_offset(400 - 100)
+            super::super::pipeline::relative_packed_offset(400, 100).unwrap()
         );
         assert_eq!(
             offs.ffn_down,
-            super::super::pipeline::pack_blob_offset(700 - 100)
+            super::super::pipeline::relative_packed_offset(700, 100).unwrap()
         );
         assert_eq!(offs.v_is_q4k, 0);
         assert_eq!(offs.ffn_down_is_q4k, 1);

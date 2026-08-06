@@ -71,6 +71,35 @@ pub fn pack_blob_offset(byte_offset: u64) -> u32 {
     packed as u32
 }
 
+/// Safe base-relative offset packing: returns `(abs - base) / 2` as `u32`, with
+/// underflow detection.  Use this instead of `pack_blob_offset(abs - base_byte)`
+/// to prevent `u64` underflow panics when `abs < base_byte` (which can happen
+/// with fused-QKV / merged-gate+up offsets that have non-monotonic absolute
+/// offsets within a layer).
+#[inline]
+pub fn relative_packed_offset(abs: u64, base: u64) -> Result<u32, String> {
+    if abs == 0 {
+        return Ok(0);
+    }
+    let rel = abs
+        .checked_sub(base)
+        .ok_or_else(|| format!("underflow: abs={abs} (0x{abs:x}) < base={base} (0x{base:x})"))?;
+    // rel must be 2-byte aligned for packed word offset
+    if rel % 2 != 0 {
+        return Err(format!(
+            "relative offset {rel} (0x{rel:x}) is not 2-byte aligned"
+        ));
+    }
+    let packed = rel / 2;
+    if packed > u32::MAX as u64 {
+        return Err(format!(
+            "relative offset {rel} (0x{rel:x}) packs to {} which exceeds u32::MAX",
+            packed
+        ));
+    }
+    Ok(packed as u32)
+}
+
 /// All offsets are **packed** absolute byte offsets from the GGUF blob start
 /// (`pack_blob_offset`). Zero means disabled / missing.
 #[repr(C)]
