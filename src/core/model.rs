@@ -674,6 +674,7 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
     let mut rope_base: Option<f32> = None;
     let mut rope_dim: Option<usize> = None;
     let mut rms_eps: Option<f32> = None;
+    let mut norm_kind: crate::core::spec::NormKind = crate::core::spec::NormKind::Rms;
     let mut attn_softcap: Option<f32> = None;
     let mut final_softcap: Option<f32> = None;
     let mut n_vocab_explicit: Option<usize> = None;
@@ -755,6 +756,11 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
                     | "layer_norm_epsilon" => {
                         if let GgufMetaValue::F32(v) = value {
                             rms_eps = Some(*v);
+                            if key.contains("layer_norm_rms_epsilon") {
+                                norm_kind = crate::core::spec::NormKind::Rms;
+                            } else {
+                                norm_kind = crate::core::spec::NormKind::Layer;
+                            }
                         }
                     }
                     "attn_logit_softcapping" | "attention.logit_softcapping" => {
@@ -854,6 +860,7 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
         n_head_kv,
         ff_dim,
         rms_eps,
+        norm_kind,
         rope_base,
         rope_scale: 1.0,
         rope_dim,
@@ -1668,6 +1675,7 @@ mod tests {
             n_head_kv: 2,
             ff_dim: 1024,
             rms_eps: 1e-5,
+            norm_kind: crate::core::spec::NormKind::Rms,
             rope_base: 10000.0,
             rope_scale: 1.0,
             rope_dim: 64,

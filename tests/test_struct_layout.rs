@@ -144,6 +144,11 @@ fn layer_params_rust_layout() -> Vec<(&'static str, u32)> {
             "formula_ffn_up",
             offset_of!(LayerParams, formula_ffn_up) as u32,
         ),
+        (
+            "blob_base_words",
+            offset_of!(LayerParams, blob_base_words) as u32,
+        ),
+        ("chunk_words", offset_of!(LayerParams, chunk_words) as u32),
     ]
 }
 

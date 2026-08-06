@@ -45,19 +45,30 @@ mod parity_tests {
     #[tokio::test]
     async fn test_gpu_layer0_parity_vs_cpu() {
         // === STEP 1: Load CPU Golden Trace ===
-        let csv_path = std::env::var("SHIMMY_L0_TRACE")
+        // Golden trace must live INSIDE this workspace (hard boundary) or be
+        // provided via SHIMMY_L0_TRACE. Absent -> SKIP (same contract as the
+        // model path below), never panic on a missing external artifact.
+        let csv_path = match std::env::var("SHIMMY_L0_TRACE")
             .map(PathBuf::from)
             .or_else(|_| {
-                let p = PathBuf::from(
-                    "C:/Users/micha/repos/libshimmy/artifacts/shimmy_l0_hello_step11.csv",
-                );
+                let p = PathBuf::from(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/fixtures/golden_l0_hello_step11.csv"
+                ));
                 if p.exists() {
                     Ok(p)
                 } else {
                     Err("Golden trace not found")
                 }
-            })
-            .expect("SHIMMY_L0_TRACE not set and golden trace not found at default path");
+            }) {
+            Ok(p) => p,
+            Err(_) => {
+                println!(
+                    "[SKIP] SHIMMY_L0_TRACE not set and no golden trace in airframe/fixtures/ — skipping GPU parity test"
+                );
+                return;
+            }
+        };
 
         println!("Loading CPU golden trace: {:?}", csv_path);
 

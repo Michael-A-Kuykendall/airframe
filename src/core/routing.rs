@@ -255,6 +255,7 @@ mod tests {
             n_head_kv: 4,
             ff_dim: 5632,
             rms_eps: 1e-5,
+            norm_kind: crate::core::spec::NormKind::Rms,
             rope_base: 10000.0,
             rope_scale: 1.0,
             rope_dim: 64,

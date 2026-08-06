@@ -45,6 +45,16 @@ impl From<u32> for GgufFileType {
     }
 }
 
+/// Which normalization the GGUF's metadata key declares.
+/// The GGUF is the law: `attention.layer_norm_rms_epsilon` => RMSNorm,
+/// `attention.layer_norm_epsilon` => LayerNorm. Captured from WHICH key exists,
+/// never guessed from the architecture string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NormKind {
+    Rms,
+    Layer,
+}
+
 /// Model architecture family (from general.architecture)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelArch {
@@ -98,6 +108,9 @@ pub struct ModelSpec {
     pub attn_logit_softcap: f32,
     /// Final logit soft-cap applied after lm_head (Gemma-2: 30.0, others: 0.0 = disabled)
     pub final_logit_softcap: f32,
+    /// Which norm the GGUF declares (from the epsilon KEY, not the arch).
+    /// The law: phi-3/4 carry layer_norm_rms_epsilon => Rms (NOT LayerNorm).
+    pub norm_kind: NormKind,
     /// Per-head Q and K RMSNorm before RoPE (Qwen3). False for all other architectures.
     pub has_qk_norm: bool,
     /// Gemma-2 has post-attention and post-FFW norms. False for others.
@@ -176,6 +189,7 @@ impl ModelSpec {
         let mut n_head: Option<usize> = None;
         let mut n_head_kv: Option<usize> = None;
         let mut rms_eps: Option<f32> = None;
+        let mut norm_kind: NormKind = NormKind::Rms;
         let mut rope_base: Option<f32> = None;
         let mut rope_dim: Option<usize> = None;
         let mut n_ctx: Option<usize> = None;
@@ -251,6 +265,12 @@ impl ModelSpec {
                         | "layer_norm_epsilon" => {
                             if let GgufValue::F32(v) = value {
                                 rms_eps = Some(*v);
+                                // The KEY is the signal: rms vs layer norm.
+                                if key.contains("layer_norm_rms_epsilon") {
+                                    norm_kind = NormKind::Rms;
+                                } else {
+                                    norm_kind = NormKind::Layer;
+                                }
                             }
                         }
                         "rope.freq_base" => {
@@ -315,6 +335,7 @@ impl ModelSpec {
             n_head_kv,
             ff_dim,
             rms_eps: rms_eps.unwrap_or(1e-5),
+            norm_kind,
             rope_base: rope_base.unwrap_or(10000.0),
             rope_scale: 1.0,
             rope_dim: rope_dim.unwrap_or(n_embd / n_head), // trust GGUF metadata; shader handles rope_pairs < n_pairs via identity rotation
@@ -348,6 +369,7 @@ impl ModelSpec {
             n_head_kv: 4,
             ff_dim: 5632,
             rms_eps: 1e-5,
+            norm_kind: NormKind::Rms,
             rope_base: 10000.0,
             rope_scale: 1.0,
             rope_dim: 64,
@@ -440,15 +462,12 @@ impl ModelSpec {
 
     /// Whether this architecture should run LayerNorm math (mean+variance)
     /// instead of RMSNorm in bindless kernels and final norm.
+    ///
+    /// Derived from the GGUF metadata KEY (norm_kind), never from the arch
+    /// string. phi-3/4 carry `layer_norm_rms_epsilon` => RMSNorm, so they must
+    /// NOT use LayerNorm even though they are the Phi arch.
     pub fn uses_layer_norm(&self) -> bool {
-        match &self.arch {
-            ModelArch::Phi => true,
-            ModelArch::Other(s) => {
-                let a = s.to_ascii_lowercase();
-                a.contains("gpt2") || a.contains("starcoder") || a.contains("falcon")
-            }
-            _ => false,
-        }
+        self.norm_kind == NormKind::Layer
     }
 }
 
@@ -631,6 +650,7 @@ mod tests {
             n_head_kv: 2,
             ff_dim: 16,
             rms_eps: 1e-5,
+            norm_kind: NormKind::Rms,
             rope_base: 10000.0,
             rope_scale: 1.0,
             rope_dim: 999, // way over head_dim=4
@@ -789,5 +809,125 @@ mod tests {
         assert_eq!(spec.n_embd, 512);
         assert_eq!(spec.n_layer, 4);
         assert_eq!(spec.n_vocab, 8192);
+    }
+
+    // ── norm_kind: GGUF KEY is the law (phi fix regression) ─────────────────
+
+    #[test]
+    fn test_norm_kind_from_gguf_key_phi3_is_rms() {
+        // phi-3/4 GGUFs carry layer_norm_rms_epsilon => RMSNorm, even though
+        // the arch is Phi. The old code hard-coded Phi => LayerNorm, which is
+        // the phi-family gibberish root cause. The GGUF key must win.
+        let mut meta = HashMap::new();
+        meta.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("phi3".to_string()),
+        );
+        meta.insert("general.file_type".to_string(), GgufValue::U32(12));
+        meta.insert("phi3.embedding_length".to_string(), GgufValue::U32(5120));
+        meta.insert("phi3.block_count".to_string(), GgufValue::U32(40));
+        meta.insert(
+            "phi3.feed_forward_length".to_string(),
+            GgufValue::U32(17920),
+        );
+        meta.insert("phi3.attention.head_count".to_string(), GgufValue::U32(40));
+        meta.insert(
+            "phi3.attention.head_count_kv".to_string(),
+            GgufValue::U32(10),
+        );
+        meta.insert(
+            "phi3.attention.layer_norm_rms_epsilon".to_string(),
+            GgufValue::F32(1e-5),
+        );
+        meta.insert("phi3.rope.freq_base".to_string(), GgufValue::F32(250000.0));
+        meta.insert("phi3.rope.dimension_count".to_string(), GgufValue::U32(128));
+        meta.insert("phi3.context_length".to_string(), GgufValue::U32(4096));
+        meta.insert(
+            "tokenizer.ggml.tokens".to_string(),
+            GgufValue::ArrayLen(151936),
+        );
+
+        let spec = ModelSpec::from_gguf_metadata(&meta);
+        assert!(matches!(spec.arch, ModelArch::Phi), "phi3 maps to Phi arch");
+        assert_eq!(
+            spec.norm_kind,
+            NormKind::Rms,
+            "phi-3/4 GGUF carries layer_norm_rms_epsilon => RMSNorm"
+        );
+        assert!(
+            !spec.uses_layer_norm(),
+            "phi-3/4 must NOT use LayerNorm math (the phi gibberish root cause)"
+        );
+    }
+
+    #[test]
+    fn test_norm_kind_from_gguf_key_starcoder2_is_layer() {
+        // StarCoder2 carries layer_norm_epsilon => LayerNorm. The key (not the
+        // arch) is what decides, so the Other() fallback must not be needed.
+        let mut meta = HashMap::new();
+        meta.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("starcoder2".to_string()),
+        );
+        meta.insert("general.file_type".to_string(), GgufValue::U32(12));
+        meta.insert(
+            "starcoder2.embedding_length".to_string(),
+            GgufValue::U32(3072),
+        );
+        meta.insert("starcoder2.block_count".to_string(), GgufValue::U32(30));
+        meta.insert(
+            "starcoder2.feed_forward_length".to_string(),
+            GgufValue::U32(12288),
+        );
+        meta.insert(
+            "starcoder2.attention.head_count".to_string(),
+            GgufValue::U32(24),
+        );
+        meta.insert(
+            "starcoder2.attention.head_count_kv".to_string(),
+            GgufValue::U32(2),
+        );
+        meta.insert(
+            "starcoder2.attention.layer_norm_epsilon".to_string(),
+            GgufValue::F32(1e-5),
+        );
+        meta.insert(
+            "starcoder2.rope.freq_base".to_string(),
+            GgufValue::F32(999999.0),
+        );
+        meta.insert(
+            "starcoder2.rope.dimension_count".to_string(),
+            GgufValue::U32(128),
+        );
+        meta.insert(
+            "starcoder2.context_length".to_string(),
+            GgufValue::U32(8192),
+        );
+        meta.insert(
+            "tokenizer.ggml.tokens".to_string(),
+            GgufValue::ArrayLen(49152),
+        );
+
+        let spec = ModelSpec::from_gguf_metadata(&meta);
+        assert_eq!(
+            spec.norm_kind,
+            NormKind::Layer,
+            "starcoder2 GGUF carries layer_norm_epsilon => LayerNorm"
+        );
+        assert!(spec.uses_layer_norm(), "starcoder2 must use LayerNorm math");
+    }
+
+    #[test]
+    fn test_uses_layer_norm_derives_from_norm_kind_not_arch() {
+        // Even a Phi-arch spec uses RMSNorm when its GGUF key says rms. And a
+        // Llama-arch spec uses LayerNorm if its key says layer. The arch must
+        // never decide.
+        let mut spec = ModelSpec::tinylama_1_1b_chat_v1_0();
+        spec.arch = ModelArch::Phi;
+        spec.norm_kind = NormKind::Rms;
+        assert!(!spec.uses_layer_norm(), "Phi + rms key => RMSNorm");
+
+        spec.norm_kind = NormKind::Layer;
+        assert!(spec.uses_layer_norm(), "any arch + layer key => LayerNorm");
     }
 }

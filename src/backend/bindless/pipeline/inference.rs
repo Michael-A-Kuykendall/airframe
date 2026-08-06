@@ -1126,11 +1126,7 @@ impl BindlessPipeline {
             weights_offset: (norm_weight / 4) as u32, // word index (byte_offset / 4); safe: 4.4GB/4 = 1.1B < u32::MAX
             bias_offset: norm_bias,
             eps: spec.rms_eps,
-            norm_type: if matches!(spec.arch, crate::core::spec::ModelArch::Phi) {
-                1
-            } else {
-                0
-            },
+            norm_type: if spec.uses_layer_norm() { 1 } else { 0 },
             chunk_words: model.chunk_words(),
         };
         let norm_param_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

@@ -3,6 +3,22 @@ use crate::core::spec::{GgufValue, ModelSpec};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 
+/// Byte size of one output row for a GGML quant type, given the in-dim
+/// (columns) of the matrix. Mirrors the dequant row-stride used everywhere
+/// else (e.g. fused-QKV splitting). Used to split a merged gate+up FFN tensor.
+pub fn quant_type_row_bytes(qt: u32, cols: u64) -> u64 {
+    match qt {
+        0 => cols * 4,
+        1 => cols * 2,
+        2 => (cols / 32) * 18,
+        8 => (cols / 32) * 34,
+        12 => (cols / 256) * 144,
+        13 => (cols / 256) * 176,
+        14 => (cols / 256) * 210,
+        _ => (cols / 32) * 18,
+    }
+}
+
 /// Extracted metadata from GGUF header to locate tensors in the blob.
 #[derive(Debug)]
 pub struct BindlessMetadata {
@@ -340,6 +356,68 @@ impl BindlessMetadata {
                 // (lqt_v comes from the QKV/separate-V branch above; lqt_main comes from the same.)
                 let lqt_down = t(&tensor_types, layer_idx, "ffn_down.weight");
 
+                // ── Merged gate+up FFN (SWIGLU: phi-3/4) ──────────────────────
+                // phi-3/4 store gate and up CONCATENATED in one tensor
+                // `ffn_up.weight` with dims [n_embd, 2*ff_dim] (no separate
+                // `ffn_gate.weight`). The shader reads gate rows 0..ff_dim and
+                // up rows ff_dim..2*ff_dim from the SAME tensor base. Without
+                // this split, ffn_gate resolves to 0 and the shader treats the
+                // model as NON-gated (GELU) — the phi gibberish root cause.
+                // Detection is pure shape math: ffn_up output dim == 2*ffn_down
+                // output dim AND no separate ffn_gate tensor.
+                let up_key = format!("blk.{}.ffn_up.weight", layer_idx);
+                let down_key = format!("blk.{}.ffn_down.weight", layer_idx);
+                let has_gate_tensor =
+                    absolute_offsets.contains_key(&format!("blk.{}.ffn_gate.weight", layer_idx));
+                let ffn_up_abs = absolute_offsets.get(&up_key).copied().unwrap_or(0);
+                // GGUF dims are [in, out]. ffn_up = [n_embd, 2*ff_dim];
+                // ffn_down = [ff_dim, n_embd]. Merged iff up_out == 2 * down_in.
+                let up_out_dim = tensor_dims
+                    .get(&up_key)
+                    .and_then(|d| d.get(1))
+                    .copied()
+                    .unwrap_or(0);
+                let down_in_dim = tensor_dims
+                    .get(&down_key)
+                    .and_then(|d| d.first())
+                    .copied()
+                    .unwrap_or(0);
+                let merged_gate_up = !has_gate_tensor
+                    && ffn_up_abs != 0
+                    && down_in_dim != 0
+                    && up_out_dim == down_in_dim * 2;
+                let (ffn_gate_off, ffn_up_off) = if merged_gate_up {
+                    // Same tensor; gate = rows 0..ff_dim, up = rows ff_dim..2*ff_dim.
+                    // Row byte size depends on the tensor's quant type.
+                    let ff_dim_rows = down_in_dim;
+                    let in_dim = tensor_dims
+                        .get(&up_key)
+                        .and_then(|d| d.first())
+                        .copied()
+                        .unwrap_or(0);
+                    let bpr =
+                        quant_type_row_bytes(t(&tensor_types, layer_idx, "ffn_up.weight"), in_dim);
+                    let gate_rel = super::pipeline::pack_blob_offset(ffn_up_abs - base_byte);
+                    let up_rel = super::pipeline::pack_blob_offset(
+                        ffn_up_abs + ff_dim_rows * bpr - base_byte,
+                    );
+                    println!(
+                        "[Metadata] Layer {}: merged gate+up ffn_up dims={:?} -> gate@{} up@{} (ff_dim={}, bpr={})",
+                        layer_idx,
+                        tensor_dims.get(&up_key),
+                        gate_rel,
+                        up_rel,
+                        ff_dim_rows,
+                        bpr
+                    );
+                    (gate_rel, up_rel)
+                } else {
+                    (
+                        p(&absolute_offsets, layer_idx, "ffn_gate.weight"),
+                        p(&absolute_offsets, layer_idx, "ffn_up.weight"),
+                    )
+                };
+
                 let offsets = super::pipeline::LayerOffsets {
                     attn_norm: attn_norm_off,
                     attn_norm_bias: attn_norm_bias_off,
@@ -349,9 +427,9 @@ impl BindlessMetadata {
                     attn_out: p(&absolute_offsets, layer_idx, "attn_output.weight"),
                     ffn_norm: ffn_norm_off,
                     ffn_norm_bias: ffn_norm_bias_off,
-                    ffn_gate: p(&absolute_offsets, layer_idx, "ffn_gate.weight"),
+                    ffn_gate: ffn_gate_off,
                     ffn_down: p(&absolute_offsets, layer_idx, "ffn_down.weight"),
-                    ffn_up: p(&absolute_offsets, layer_idx, "ffn_up.weight"),
+                    ffn_up: ffn_up_off,
                     layer_idx: layer_idx as u32,
                     v_is_q4k: (lqt_v == 12) as u32,
                     ffn_down_is_q4k: (lqt_down == 12) as u32,
@@ -919,15 +997,59 @@ mod tests {
             compiled_layers: vec![],
         };
         let offs = meta.get_layer_offsets(0, "llama").expect("layer 0 exists");
+        // Offsets are packed base-relative: the min tensor offset (100) is the
+        // layer base, and every sub-tensor is packed(offset - base).
+        assert_eq!(offs.attn_norm, 0);
         assert_eq!(
-            offs.attn_norm,
-            super::super::pipeline::pack_blob_offset(100)
+            offs.attn_q,
+            super::super::pipeline::pack_blob_offset(200 - 100)
         );
-        assert_eq!(offs.attn_q, super::super::pipeline::pack_blob_offset(200));
-        assert_eq!(offs.attn_k, super::super::pipeline::pack_blob_offset(300));
-        assert_eq!(offs.attn_v, super::super::pipeline::pack_blob_offset(400));
-        assert_eq!(offs.ffn_down, super::super::pipeline::pack_blob_offset(700));
+        assert_eq!(
+            offs.attn_k,
+            super::super::pipeline::pack_blob_offset(300 - 100)
+        );
+        assert_eq!(
+            offs.attn_v,
+            super::super::pipeline::pack_blob_offset(400 - 100)
+        );
+        assert_eq!(
+            offs.ffn_down,
+            super::super::pipeline::pack_blob_offset(700 - 100)
+        );
         assert_eq!(offs.v_is_q4k, 0);
         assert_eq!(offs.ffn_down_is_q4k, 1);
+    }
+
+    #[test]
+    fn test_quant_type_row_bytes_matches_fused_qkv_pattern() {
+        // phi-4 merged ffn_up: Q4_K (12), in_dim 5120 => (5120/256)*144 = 2880.
+        assert_eq!(quant_type_row_bytes(12, 5120), 2880);
+        // F16 (1): in_dim * 2. F32 (0): in_dim * 4.
+        assert_eq!(quant_type_row_bytes(1, 5120), 10240);
+        assert_eq!(quant_type_row_bytes(0, 5120), 20480);
+        // Q6_K (14): (cols/256)*210.
+        assert_eq!(quant_type_row_bytes(14, 2560), 2100);
+    }
+
+    #[test]
+    fn test_merged_gate_up_detection_shapes() {
+        // GGUF dims are [in, out]. Merged SWIGLU (phi-3/4):
+        //   ffn_up  = [n_embd, 2*ff_dim]  (5120, 35840)
+        //   ffn_down = [ff_dim, n_embd]   (17920, 5120)
+        // Detection: up_out (35840) == 2 * down_in (17920) AND no ffn_gate tensor.
+        let up_out_dim = 35840u64;
+        let down_in_dim = 17920u64;
+        assert_eq!(up_out_dim, down_in_dim * 2, "phi-4 merged ffn_up shape");
+
+        // Non-merged (tinyllama): ffn_up = [n_embd, ffn_dim], ffn_down = [ffn_dim, n_embd].
+        let tl_up_out = 5632u64;
+        let tl_down_in = 5632u64;
+        assert_ne!(tl_up_out, tl_down_in * 2, "tinyllama ffn_up is NOT merged");
+
+        // Row stride: ff_dim rows of the merged up tensor at 2880 B/row.
+        let ff_dim = down_in_dim;
+        let bpr = quant_type_row_bytes(12, 5120);
+        assert_eq!(ff_dim * bpr, 17920 * 2880);
+        assert_eq!(ff_dim * bpr, 51_609_600);
     }
 }

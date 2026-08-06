@@ -306,6 +306,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "rope_base": spec.rope_base,
             "rope_dim": spec.rope_dim,
             "rms_eps": spec.rms_eps,
+            "norm_kind": format!("{:?}", spec.norm_kind).to_lowercase(),
+            "uses_layer_norm": spec.uses_layer_norm(),
             "qk_norm": spec.has_qk_norm,
             "n_ctx_capped": spec.n_ctx
         },
