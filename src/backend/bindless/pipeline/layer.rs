@@ -23,6 +23,17 @@ impl BindlessPipeline {
             params.dim
         );
 
+        // Window abstraction: bind only the resident chunks this layer's tensors
+        // live in, and rebase blob_base_words to the window start.
+        let (window, window_base_words) =
+            resolve_layer_window(model, &offsets, params.blob_base_words, 0);
+        let params = LayerParams {
+            blob_base_words: window_base_words,
+            ..params
+        };
+        let [blob0, blob1, blob2, blob3, blob4, blob5, blob6, blob7] =
+            blob_bindings_for(model, window.as_ref());
+
         // 1. Activation In (ReadWrite)
         let activation_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Activation In"),
@@ -70,7 +81,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -120,31 +131,31 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: blob1,
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: blob2,
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
+                    resource: blob3,
                 },
                 wgpu::BindGroupEntry {
                     binding: 13,
-                    resource: model.blob_binding_4(),
+                    resource: blob4,
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: model.blob_binding_5(),
+                    resource: blob5,
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
-                    resource: model.blob_binding_6(),
+                    resource: blob6,
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: model.blob_binding_7(),
+                    resource: blob7,
                 },
             ],
         });
@@ -247,6 +258,15 @@ impl BindlessPipeline {
             params.dim
         );
 
+        let (window, window_base_words) =
+            resolve_layer_window(model, &offsets, params.blob_base_words, 0);
+        let params = LayerParams {
+            blob_base_words: window_base_words,
+            ..params
+        };
+        let [blob0, blob1, blob2, blob3, blob4, blob5, blob6, blob7] =
+            blob_bindings_for(model, window.as_ref());
+
         // 1. Activation In (ReadWrite)
         let activation_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Activation In"),
@@ -322,7 +342,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -372,31 +392,31 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: blob1,
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: blob2,
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
+                    resource: blob3,
                 },
                 wgpu::BindGroupEntry {
                     binding: 13,
-                    resource: model.blob_binding_4(),
+                    resource: blob4,
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: model.blob_binding_5(),
+                    resource: blob5,
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
-                    resource: model.blob_binding_6(),
+                    resource: blob6,
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: model.blob_binding_7(),
+                    resource: blob7,
                 },
             ],
         });
@@ -574,6 +594,15 @@ impl BindlessPipeline {
     ) -> Vec<f32> {
         let dim = params.dim as u64;
 
+        let (window, window_base_words) =
+            resolve_layer_window(model, &offsets, params.blob_base_words, layer_idx);
+        let params = LayerParams {
+            blob_base_words: window_base_words,
+            ..params
+        };
+        let [blob0, blob1, blob2, blob3, blob4, blob5, blob6, blob7] =
+            blob_bindings_for(model, window.as_ref());
+
         // 1. Create activation buffer (input/output)
         let activation_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("Activation Layer {}", layer_idx)),
@@ -630,7 +659,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -680,31 +709,31 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: blob1,
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: blob2,
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
+                    resource: blob3,
                 },
                 wgpu::BindGroupEntry {
                     binding: 13,
-                    resource: model.blob_binding_4(),
+                    resource: blob4,
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: model.blob_binding_5(),
+                    resource: blob5,
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
-                    resource: model.blob_binding_6(),
+                    resource: blob6,
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: model.blob_binding_7(),
+                    resource: blob7,
                 },
             ],
         });
@@ -875,6 +904,17 @@ impl BindlessPipeline {
     ) -> Vec<f32> {
         let dim = params.dim as u64;
 
+        let (window, window_base_words) =
+            resolve_layer_window(model, &offsets, params.blob_base_words, layer_idx);
+        let params = LayerParams {
+            blob_base_words: window_base_words,
+            ..params
+        };
+        // Two bind groups read the blob here (INT4 + F32), so resolve twice —
+        // BindingResource is a cheap borrow, not an allocation.
+        let [i4_blob0, ..] = blob_bindings_for(model, window.as_ref());
+        let [f32_blob0, ..] = blob_bindings_for(model, window.as_ref());
+
         let activation_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("Activation Layer {} INT4", layer_idx)),
             contents: bytemuck::cast_slice(input),
@@ -927,7 +967,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffers[0].as_entire_binding(),
+                    resource: i4_blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -985,26 +1025,6 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 13,
-                    resource: model.blob_binding_4(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 14,
-                    resource: model.blob_binding_5(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 15,
-                    resource: model.blob_binding_6(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 16,
-                    resource: model.blob_binding_7(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 12,
                     resource: kv_cache.get_v_packed_buffer(layer_idx).as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
@@ -1021,7 +1041,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.gpu_buffers[0].as_entire_binding(),
+                    resource: f32_blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -1341,6 +1361,15 @@ impl BindlessPipeline {
     ) -> LayerDebugOutput {
         let dim = params.dim as u64;
 
+        let (window, window_base_words) =
+            resolve_layer_window(model, &offsets, params.blob_base_words, layer_idx);
+        let params = LayerParams {
+            blob_base_words: window_base_words,
+            ..params
+        };
+        let [blob0, blob1, blob2, blob3, blob4, blob5, blob6, blob7] =
+            blob_bindings_for(model, window.as_ref());
+
         // 1. Create buffers (same as run_layer_with_cache)
         let activation_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("Activation Layer {}", layer_idx)),
@@ -1393,7 +1422,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -1443,31 +1472,31 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: blob1,
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: blob2,
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
+                    resource: blob3,
                 },
                 wgpu::BindGroupEntry {
                     binding: 13,
-                    resource: model.blob_binding_4(),
+                    resource: blob4,
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: model.blob_binding_5(),
+                    resource: blob5,
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
-                    resource: model.blob_binding_6(),
+                    resource: blob6,
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: model.blob_binding_7(),
+                    resource: blob7,
                 },
             ],
         });

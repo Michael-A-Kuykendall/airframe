@@ -797,6 +797,8 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
+        use crate::backend::bindless::loader::BlobWindow;
+
         // 2. Prepare Layers (Offsets & BindGroups)
         // For ping-pong: two bind group arrays — one with activation_buffer (A) at binding 1,
         // one with activation_buffer_b (B). Layer i uses set_a when i%2==0, set_b when i%2==1.
@@ -806,6 +808,9 @@ impl BindlessPipeline {
         let mut _offset_buffers = Vec::new(); // Keep alive
         let mut _params_buffers: Vec<wgpu::Buffer> = Vec::new(); // Keep alive
         let mut _layer_params: Vec<LayerParams> = Vec::new(); // Per-layer params for QKV chunking
+                                                              // Window info for each layer (for multi-resident-chunk models)
+        let mut _layer_windows: Vec<Option<BlobWindow>> = Vec::new();
+        let mut _layer_blob_base_words: Vec<u32> = Vec::new();
 
         for i in 0..layer_count {
             let compiled = &model.metadata.compiled_layers[i];
@@ -844,11 +849,6 @@ impl BindlessPipeline {
                 layer_params_i.q_weight_k = packed_k;
                 layer_params_i.k_weight_k = packed_k;
             }
-            let params_buffer_i = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Layer {} Params", i)),
-                contents: bytemuck::bytes_of(&layer_params_i),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
 
             let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
                 if let Some((kv_k_layers, kv_v_layers)) = kv_state {
@@ -866,16 +866,47 @@ impl BindlessPipeline {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
+            // --- Window abstraction for multi-resident-chunk models ---
+            // Determine the word span of this layer's tensors and create a window
+            // covering the resident chunks needed. Adjust blob_base_words to be window-local.
+            let (layer_window, layer_blob_base_words) =
+                resolve_layer_window(model, &compiled.offsets, compiled.blob_base_words, i);
+
+            // Update layer_params_i with window-adjusted blob_base_words
+            // Need to recreate params_buffer_i with the adjusted value
+            let layer_params_i = LayerParams {
+                blob_base_words: layer_blob_base_words,
+                ..layer_params_i
+            };
+            let params_buffer_i = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Layer {} Params", i)),
+                contents: bytemuck::bytes_of(&layer_params_i),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
             // Build bind group with a specific activation buffer at binding 1.
             // This closure lets us create both A and B sets without duplicating all entries.
             let make_bg = |act_buf: &wgpu::Buffer, label: &str| {
+                // Create blob bindings fresh for each bind group (BindingResource is not Copy)
+                let blob_bindings = blob_bindings_for(model, layer_window.as_ref());
+
+                // Clone binding resources since BindingResource is not Copy but cheap to clone
+                let b0 = blob_bindings[0].clone();
+                let b1 = blob_bindings[1].clone();
+                let b2 = blob_bindings[2].clone();
+                let b3 = blob_bindings[3].clone();
+                let b4 = blob_bindings[4].clone();
+                let b5 = blob_bindings[5].clone();
+                let b6 = blob_bindings[6].clone();
+                let b7 = blob_bindings[7].clone();
+
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some(label),
                     layout: &self.layer_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: model.blob_binding_0(),
+                            resource: b0,
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
@@ -925,31 +956,31 @@ impl BindlessPipeline {
                         },
                         wgpu::BindGroupEntry {
                             binding: 10,
-                            resource: model.blob_binding_1(),
+                            resource: b1,
                         },
                         wgpu::BindGroupEntry {
                             binding: 11,
-                            resource: model.blob_binding_2(),
+                            resource: b2,
                         },
                         wgpu::BindGroupEntry {
                             binding: 12,
-                            resource: model.blob_binding_3(),
+                            resource: b3,
                         },
                         wgpu::BindGroupEntry {
                             binding: 13,
-                            resource: model.blob_binding_4(),
+                            resource: b4,
                         },
                         wgpu::BindGroupEntry {
                             binding: 14,
-                            resource: model.blob_binding_5(),
+                            resource: b5,
                         },
                         wgpu::BindGroupEntry {
                             binding: 15,
-                            resource: model.blob_binding_6(),
+                            resource: b6,
                         },
                         wgpu::BindGroupEntry {
                             binding: 16,
-                            resource: model.blob_binding_7(),
+                            resource: b7,
                         },
                     ],
                 })
@@ -967,6 +998,8 @@ impl BindlessPipeline {
             _offset_buffers.push(buf);
             _params_buffers.push(params_buffer_i);
             _layer_params.push(layer_params_i);
+            _layer_windows.push(layer_window);
+            _layer_blob_base_words.push(layer_blob_base_words);
             layer_bind_groups.push(bg_a);
         }
 
@@ -990,6 +1023,9 @@ impl BindlessPipeline {
         for i in 0..layer_count {
             let compiled = &model.metadata.compiled_layers[i];
             let layer_params_base = _layer_params[i];
+            // Use window-adjusted blob_base_words for multi-resident-chunk models
+            let layer_blob_base_words = _layer_blob_base_words[i];
+            let layer_window = &_layer_windows[i];
             let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
                 if let Some((kv_k_layers, kv_v_layers)) = kv_state {
                     (&kv_k_layers[i], &kv_v_layers[i])
@@ -1010,6 +1046,7 @@ impl BindlessPipeline {
                 let chunk_params = LayerParams {
                     batch_offset: qkv_offset,
                     batch_count: this_chunk,
+                    blob_base_words: layer_blob_base_words,
                     ..layer_params_base
                 };
                 let chunk_params_buf =
@@ -1018,13 +1055,26 @@ impl BindlessPipeline {
                         contents: bytemuck::bytes_of(&chunk_params),
                         usage: wgpu::BufferUsages::UNIFORM,
                     });
+
+                // Create blob bindings for this chunk (window-aware)
+                let blob_bindings = blob_bindings_for(model, layer_window.as_ref());
+                // Clone since BindingResource is not Copy
+                let b0 = blob_bindings[0].clone();
+                let b1 = blob_bindings[1].clone();
+                let b2 = blob_bindings[2].clone();
+                let b3 = blob_bindings[3].clone();
+                let b4 = blob_bindings[4].clone();
+                let b5 = blob_bindings[5].clone();
+                let b6 = blob_bindings[6].clone();
+                let b7 = blob_bindings[7].clone();
+
                 let chunk_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some(&format!("L{}-QKV-chunk{}-BG", i, qkv_offset)),
                     layout: &self.layer_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: model.blob_binding_0(),
+                            resource: b0,
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
@@ -1074,31 +1124,31 @@ impl BindlessPipeline {
                         },
                         wgpu::BindGroupEntry {
                             binding: 10,
-                            resource: model.blob_binding_1(),
+                            resource: b1,
                         },
                         wgpu::BindGroupEntry {
                             binding: 11,
-                            resource: model.blob_binding_2(),
+                            resource: b2,
                         },
                         wgpu::BindGroupEntry {
                             binding: 12,
-                            resource: model.blob_binding_3(),
+                            resource: b3,
                         },
                         wgpu::BindGroupEntry {
                             binding: 13,
-                            resource: model.blob_binding_4(),
+                            resource: b4,
                         },
                         wgpu::BindGroupEntry {
                             binding: 14,
-                            resource: model.blob_binding_5(),
+                            resource: b5,
                         },
                         wgpu::BindGroupEntry {
                             binding: 15,
-                            resource: model.blob_binding_6(),
+                            resource: b6,
                         },
                         wgpu::BindGroupEntry {
                             binding: 16,
-                            resource: model.blob_binding_7(),
+                            resource: b7,
                         },
                     ],
                 });
@@ -1135,9 +1185,33 @@ impl BindlessPipeline {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
+        // Create window for final norm (output_norm.weight + bias)
+        let norm_window = model
+            .rmsnorm_window(
+                norm_params.weights_offset,
+                if norm_bias != 0 {
+                    Some(norm_bias)
+                } else {
+                    None
+                },
+            )
+            .expect("final norm tensor span exceeds window capacity");
+
         // Offset for the LAST token in the batch
         let last_token_offset = (batch_size as u64 - 1u64) * (dim as u64) * 4u64;
         let token_size = std::num::NonZeroU64::new((dim as u64) * 4u64).unwrap();
+
+        // Create blob bindings for final norm (window-aware)
+        let blob_bindings = norm_window.binding_resources(model);
+        // Clone since BindingResource is not Copy
+        let b0 = blob_bindings[0].clone();
+        let b1 = blob_bindings[1].clone();
+        let b2 = blob_bindings[2].clone();
+        let b3 = blob_bindings[3].clone();
+        let b4 = blob_bindings[4].clone();
+        let b5 = blob_bindings[5].clone();
+        let b6 = blob_bindings[6].clone();
+        let b7 = blob_bindings[7].clone();
 
         let norm_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Final Norm BG"),
@@ -1145,7 +1219,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: b0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -1171,31 +1245,31 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: b1,
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: b2,
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
+                    resource: b3,
                 },
                 wgpu::BindGroupEntry {
                     binding: 13,
-                    resource: model.blob_binding_4(),
+                    resource: b4,
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: model.blob_binding_5(),
+                    resource: b5,
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
-                    resource: model.blob_binding_6(),
+                    resource: b6,
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: model.blob_binding_7(),
+                    resource: b7,
                 },
             ],
         });
@@ -1283,13 +1357,29 @@ impl BindlessPipeline {
                 contents: bytemuck::bytes_of(&head_params),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
+
+            // Create blob bindings for LM head (window-aware)
+            let head_window = model
+                .lm_head_window(0, vocab_size, dim)
+                .expect("LM head tensor span exceeds window capacity");
+            let blob_bindings = head_window.binding_resources(model);
+            // Clone since BindingResource is not Copy
+            let b0 = blob_bindings[0].clone();
+            let b1 = blob_bindings[1].clone();
+            let b2 = blob_bindings[2].clone();
+            let b3 = blob_bindings[3].clone();
+            let b4 = blob_bindings[4].clone();
+            let b5 = blob_bindings[5].clone();
+            let b6 = blob_bindings[6].clone();
+            let b7 = blob_bindings[7].clone();
+
             HeadBg::Blob(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Head BG Blob"),
                 layout: &self.lm_head_blob_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: model.blob_binding_0(),
+                        resource: b0,
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -1309,31 +1399,31 @@ impl BindlessPipeline {
                     },
                     wgpu::BindGroupEntry {
                         binding: 10,
-                        resource: model.blob_binding_1(),
+                        resource: b1,
                     },
                     wgpu::BindGroupEntry {
                         binding: 11,
-                        resource: model.blob_binding_2(),
+                        resource: b2,
                     },
                     wgpu::BindGroupEntry {
                         binding: 12,
-                        resource: model.blob_binding_3(),
+                        resource: b3,
                     },
                     wgpu::BindGroupEntry {
                         binding: 13,
-                        resource: model.blob_binding_4(),
+                        resource: b4,
                     },
                     wgpu::BindGroupEntry {
                         binding: 14,
-                        resource: model.blob_binding_5(),
+                        resource: b5,
                     },
                     wgpu::BindGroupEntry {
                         binding: 15,
-                        resource: model.blob_binding_6(),
+                        resource: b6,
                     },
                     wgpu::BindGroupEntry {
                         binding: 16,
-                        resource: model.blob_binding_7(),
+                        resource: b7,
                     },
                 ],
             }))
@@ -2051,13 +2141,28 @@ impl BindlessPipeline {
                                     contents: bytemuck::bytes_of(&tile_params),
                                     usage: wgpu::BufferUsages::UNIFORM,
                                 });
+
+                            // Create window for this tile's weight range
+                            let tile_window = model
+                                .lm_head_window(base_row, this_tile * tile_size, dim)
+                                .expect("LM head tile tensor span exceeds window capacity");
+                            let blob_bindings = tile_window.binding_resources(model);
+                            let b0 = blob_bindings[0].clone();
+                            let b1 = blob_bindings[1].clone();
+                            let b2 = blob_bindings[2].clone();
+                            let b3 = blob_bindings[3].clone();
+                            let b4 = blob_bindings[4].clone();
+                            let b5 = blob_bindings[5].clone();
+                            let b6 = blob_bindings[6].clone();
+                            let b7 = blob_bindings[7].clone();
+
                             let tile_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: Some(&format!("Head BG tile-{}", tile_idx)),
                                 layout: &self.lm_head_blob_layout,
                                 entries: &[
                                     wgpu::BindGroupEntry {
                                         binding: 0,
-                                        resource: model.blob_binding_0(),
+                                        resource: b0,
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 1,
@@ -2079,31 +2184,31 @@ impl BindlessPipeline {
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 10,
-                                        resource: model.blob_binding_1(),
+                                        resource: b1,
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 11,
-                                        resource: model.blob_binding_2(),
+                                        resource: b2,
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 12,
-                                        resource: model.blob_binding_3(),
+                                        resource: b3,
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 13,
-                                        resource: model.blob_binding_4(),
+                                        resource: b4,
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 14,
-                                        resource: model.blob_binding_5(),
+                                        resource: b5,
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 15,
-                                        resource: model.blob_binding_6(),
+                                        resource: b6,
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 16,
-                                        resource: model.blob_binding_7(),
+                                        resource: b7,
                                     },
                                 ],
                             });

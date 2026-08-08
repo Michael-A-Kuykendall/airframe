@@ -7,6 +7,7 @@ pub(super) mod layer;
 pub(super) mod matmul;
 
 //       pipeline/kv_cache.rs, pipeline/dispatch.rs — see C3 architectural debt.
+use super::loader::{BindlessModel, BlobWindow, BLOB_BINDING_SLOTS};
 use crate::core::spec::ModelSpec;
 
 #[repr(C)]
@@ -124,6 +125,165 @@ pub struct LayerOffsets {
     pub attn_v_bias: u32,     // packed V bias (F32); 0 = disabled; Qwen2
     pub v_is_q4k: u32,        // 1 if attn_v uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
     pub ffn_down_is_q4k: u32, // 1 if ffn_down uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
+}
+
+impl LayerOffsets {
+    /// Returns the minimum and maximum absolute word index covered by this layer's tensors.
+    /// Absolute word = (packed_offset / 2) + blob_base_words.
+    /// Only considers non-zero (present) tensors.
+    pub fn word_span(&self, blob_base_words: u32) -> Option<(u32, u32)> {
+        let mut min_word = u32::MAX;
+        let mut max_word = 0;
+        let mut has_tensor = false;
+
+        let check = |packed: u32, min_word: &mut u32, max_word: &mut u32, has_tensor: &mut bool| {
+            if packed != 0 {
+                *has_tensor = true;
+                let word = (packed / 2) + blob_base_words;
+                *min_word = (*min_word).min(word);
+                *max_word = (*max_word).max(word);
+            }
+        };
+
+        check(
+            self.attn_norm,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_norm_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(self.attn_q, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.attn_k, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.attn_v, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.attn_out, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.ffn_norm, &mut min_word, &mut max_word, &mut has_tensor);
+        check(
+            self.ffn_norm_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(self.ffn_gate, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.ffn_down, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.ffn_up, &mut min_word, &mut max_word, &mut has_tensor);
+        check(
+            self.attn_q_norm,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_k_norm,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_q_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_k_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_v_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+
+        if has_tensor {
+            Some((min_word, max_word))
+        } else {
+            None
+        }
+    }
+}
+
+/// Pure window algebra for a layer dispatch: given the layer's packed tensor
+/// offsets and the loaded chunk plan, returns the [`BlobWindow`] to bind and
+/// the window-local `blob_base_words` the shader must receive.
+///
+/// The shader's `read_blob` resolves `word_idx` against the eight bound blob
+/// slots, so every absolute word index a dispatch touches must be rebased to
+/// the window start. `blob_base_words` is the only host-supplied base the
+/// shader adds to packed offsets, so subtracting `window_base_words()` from it
+/// rebases the whole layer in one place.
+///
+/// Returns `Ok((None, blob_base_words))` unchanged when the layer declares no
+/// tensors (window algebra is a no-op in that case), and `Err` when the span
+/// cannot be covered by `BLOB_BINDING_SLOTS` consecutive resident chunks.
+///
+/// Kept free of `BindlessModel` so the algebra is exercised by the CPU-only
+/// PPT contract suite, not just on a live adapter.
+pub fn plan_layer_window(
+    offsets: &LayerOffsets,
+    blob_base_words: u32,
+    chunk_words: u32,
+    total_resident_chunks: usize,
+) -> Result<(Option<BlobWindow>, u32), String> {
+    let Some((min_word, max_word)) = offsets.word_span(blob_base_words) else {
+        return Ok((None, blob_base_words));
+    };
+    let window = BlobWindow::for_range(min_word, max_word, chunk_words, total_resident_chunks)?;
+    let adjusted = blob_base_words.saturating_sub(window.window_base_words());
+    Ok((Some(window), adjusted))
+}
+
+/// Model-bound wrapper around [`plan_layer_window`] for dispatch sites.
+///
+/// # Panics
+/// Panics if the layer's tensor span cannot be covered by
+/// `BLOB_BINDING_SLOTS` consecutive resident chunks — a silent wrong-chunk read
+/// is far worse than a dispatch-time abort.
+pub fn resolve_layer_window(
+    model: &BindlessModel,
+    offsets: &LayerOffsets,
+    blob_base_words: u32,
+    layer_idx: usize,
+) -> (Option<BlobWindow>, u32) {
+    plan_layer_window(
+        offsets,
+        blob_base_words,
+        model.chunk_words(),
+        model.total_resident_chunks,
+    )
+    .unwrap_or_else(|e| panic!("layer {} window planning failed: {}", layer_idx, e))
+}
+
+/// Returns the eight blob binding resources for a dispatch.
+///
+/// With a window, slot `i` binds resident chunk `window.start_chunk + i`.
+/// Without one (no tensors / legacy single-window models) it falls back to the
+/// identity mapping `blob_binding_0..7`, which is what a window starting at
+/// chunk 0 would produce anyway.
+pub fn blob_bindings_for<'a>(
+    model: &'a BindlessModel,
+    window: Option<&BlobWindow>,
+) -> [wgpu::BindingResource<'a>; BLOB_BINDING_SLOTS] {
+    match window {
+        Some(w) => w.binding_resources(model),
+        None => [
+            model.blob_binding_0(),
+            model.blob_binding_1(),
+            model.blob_binding_2(),
+            model.blob_binding_3(),
+            model.blob_binding_4(),
+            model.blob_binding_5(),
+            model.blob_binding_6(),
+            model.blob_binding_7(),
+        ],
+    }
 }
 
 #[repr(C)]
