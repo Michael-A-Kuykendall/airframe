@@ -1025,3 +1025,210 @@ fn rmsnorm_window_chunk_zero_is_identity() {
 
     contract_test("rmsnorm_window_chunk_zero_is_identity", &[]);
 }
+
+// ---------------------------------------------------------------------------
+// Bead `airframe-djk` — prefill/decode + LM-head window algebra.
+//
+// sh_head_blob.wgsl reads `weight_off + rel_word` with no separate base
+// uniform, so weight_off must be rebased onto the bound window. For a tile
+// whose rows start past the window base, that rebase is negative and relies on
+// u32 wraparound — which these tests pin explicitly.
+//
+// The head row stride also must come from the GGUF spec registry
+// (block_bytes / block_elems), not a 4-bytes-per-element assumption: a Q4_K
+// head is ~4.5 bits/element, so f32 math overstates the span ~7x.
+// ---------------------------------------------------------------------------
+
+/// Row stride in bytes for a quantized LM head row, per the GGUF spec registry.
+fn head_row_bytes(dim: u64, block_elems: u64, block_bytes: u64) -> u64 {
+    assert!(
+        dim.is_multiple_of(block_elems),
+        "dim must fill whole blocks"
+    );
+    (dim / block_elems) * block_bytes
+}
+
+#[test]
+fn lm_head_row_stride_follows_quant_geometry() {
+    clear_invariant_log();
+
+    // Llama-3.2-3B: n_embd = 3072, n_vocab = 128256, Q6_K head.
+    // Q6_K = 256 elems / 210 bytes (registry). A 4-byte/element assumption
+    // would claim 12288 B/row against the true 2520 B/row — ~4.9x too large,
+    // which is exactly how a bindable span becomes unbindable.
+    let dim = 3_072u64;
+    let q6k = head_row_bytes(dim, 256, 210);
+    assert_eq!(q6k, 2_520, "Q6_K row = (3072/256)*210");
+
+    let naive_f32 = dim * 4;
+    assert!(
+        naive_f32 > q6k * 4,
+        "f32 assumption must be shown to grossly overstate the span"
+    );
+
+    // Q4_K = 256 elems / 144 bytes.
+    assert_eq!(head_row_bytes(dim, 256, 144), 1_728);
+    // F16 = 1 elem / 2 bytes.
+    assert_eq!(head_row_bytes(dim, 1, 2), 6_144);
+
+    contract_test("lm_head_row_stride_follows_quant_geometry", &[]);
+}
+
+#[test]
+fn lm_head_full_vocab_window_is_bindable() {
+    clear_invariant_log();
+
+    // Full-vocab head dispatch for Llama-3.2-3B Q6_K, weights near the end of
+    // the file (~1.6 GiB in). The whole head must fit within 8 bound slots.
+    let dim = 3_072u64;
+    let vocab = 128_256u64;
+    let row_bytes = head_row_bytes(dim, 256, 210);
+    let weight_byte = 1_600_000_000u64;
+
+    let start_word = (weight_byte / 4) as u32;
+    let end_word = ((weight_byte + vocab * row_bytes - 1) / 4) as u32;
+
+    let window = BlobWindow::for_range(start_word, end_word, CHUNK_WORDS_128_MIB, 16)
+        .expect("full-vocab Q6_K head must be bindable in 8 slots");
+
+    assert!(window.slot_count <= 8);
+
+    // Drive the real resolution path (not just `contains`) so the word-range
+    // invariant is genuinely exercised for both ends of the head.
+    for (word, label) in [(start_word, "start"), (end_word, "end")] {
+        let (slot, offset) = window
+            .absolute_to_local(word)
+            .unwrap_or_else(|e| panic!("head {} outside window: {}", label, e));
+        assert!(slot < window.slot_count, "head {} in unbound slot", label);
+        assert_eq!(window.local_to_absolute(slot, offset), word);
+    }
+
+    contract_test(
+        "lm_head_full_vocab_window_is_bindable",
+        &["Word index must be within buffer bounds"],
+    );
+}
+
+#[test]
+fn lm_head_tile_weight_off_rebase_wraps_correctly() {
+    clear_invariant_log();
+
+    use airframe::backend::bindless::pipeline::rebase_head_weight_off;
+
+    // A late tile: its rows start far past the weight tensor start, so the
+    // tile window base EXCEEDS weight_off and the rebase goes negative.
+    // WGSL u32 addition wraps, so wrapped_base + rel_word must still land on
+    // the correct window-local word for every row the tile reads.
+    let dim = 3_072u64;
+    let row_bytes = head_row_bytes(dim, 256, 210);
+    let weight_byte = 1_000_000u64; // head starts early in the file
+    let weight_off = (weight_byte / 4) as u32;
+
+    let base_row = 100_000u64; // deep into the vocab
+    let rows = 4_096u64;
+
+    let tile_start_word = ((weight_byte + base_row * row_bytes) / 4) as u32;
+    let tile_end_word = ((weight_byte + (base_row + rows) * row_bytes - 1) / 4) as u32;
+
+    let window = BlobWindow::for_range(tile_start_word, tile_end_word, CHUNK_WORDS_128_MIB, 16)
+        .expect("tile must be bindable");
+
+    assert!(
+        window.window_base_words() > weight_off,
+        "fixture must exercise the negative-rebase case"
+    );
+
+    let wrapped = rebase_head_weight_off(weight_off, &window);
+
+    // For every rel_word the tile actually reads, the shader's
+    // `wrapped + rel_word` (u32, wrapping) must equal the true window-local
+    // word, and resolve to a bound slot.
+    let first_rel = (base_row * row_bytes / 4) as u32;
+    let last_rel = (((base_row + rows) * row_bytes - 1) / 4) as u32;
+    for rel_word in [
+        first_rel,
+        first_rel + 1,
+        (first_rel + last_rel) / 2,
+        last_rel,
+    ] {
+        let shader_local = wrapped.wrapping_add(rel_word);
+        let expected_local = (weight_off + rel_word) - window.window_base_words();
+        assert_eq!(
+            shader_local, expected_local,
+            "wrapped rebase must yield the window-local word for rel_word {}",
+            rel_word
+        );
+
+        let (slot, offset) = window
+            .absolute_to_local(window.window_base_words() + shader_local)
+            .unwrap_or_else(|e| panic!("rel_word {} outside window: {}", rel_word, e));
+        assert!(slot < window.slot_count, "rel_word {} unbound", rel_word);
+        assert_eq!(
+            window.local_to_absolute(slot, offset),
+            weight_off + rel_word,
+            "rel_word {} must round-trip to its absolute word",
+            rel_word
+        );
+    }
+
+    contract_test(
+        "lm_head_tile_weight_off_rebase_wraps_correctly",
+        &["Word index must be within buffer bounds"],
+    );
+}
+
+#[test]
+fn lm_head_tile_windows_cover_every_vocab_row() {
+    clear_invariant_log();
+
+    // Sweep all TDR tiles across the vocab: every tile must be bindable, and
+    // the tiles together must cover every row exactly once with no gap. A gap
+    // means some vocab rows read from an unbound slot.
+    let dim = 3_072u64;
+    let vocab = 128_256u64;
+    let row_bytes = head_row_bytes(dim, 256, 210);
+    let weight_byte = 1_600_000_000u64;
+    let weight_off = (weight_byte / 4) as u32;
+
+    let tile_size = 64u64; // @workgroup_size in sh_head_blob.wgsl
+    let total_wgs = vocab.div_ceil(tile_size);
+    let max_safe_wgs = 256u64; // representative TDR budget
+
+    let mut wgs_dispatched = 0u64;
+    let mut covered_rows = 0u64;
+
+    while wgs_dispatched < total_wgs {
+        let this_tile = (total_wgs - wgs_dispatched).min(max_safe_wgs);
+        let base_row = wgs_dispatched * tile_size;
+        let rows = (this_tile * tile_size).min(vocab - base_row);
+
+        let start_word = ((weight_byte + base_row * row_bytes) / 4) as u32;
+        let end_word = ((weight_byte + (base_row + rows) * row_bytes - 1) / 4) as u32;
+
+        let window = BlobWindow::for_range(start_word, end_word, CHUNK_WORDS_128_MIB, 16)
+            .unwrap_or_else(|e| panic!("tile at base_row {} unbindable: {}", base_row, e));
+
+        // First and last row of the tile must both resolve through the window.
+        let wrapped = weight_off.wrapping_sub(window.window_base_words());
+        for rel_byte in [base_row * row_bytes, (base_row + rows) * row_bytes - 1] {
+            let shader_local = wrapped.wrapping_add((rel_byte / 4) as u32);
+            let abs = window.window_base_words() + shader_local;
+            assert!(
+                window.contains(abs),
+                "tile at base_row {} does not cover byte {}",
+                base_row,
+                rel_byte
+            );
+        }
+
+        covered_rows += rows;
+        wgs_dispatched += this_tile;
+    }
+
+    assert_eq!(
+        covered_rows, vocab,
+        "tiles must cover every vocab row exactly once"
+    );
+
+    contract_test("lm_head_tile_windows_cover_every_vocab_row", &[]);
+}

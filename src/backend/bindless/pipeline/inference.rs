@@ -1366,10 +1366,17 @@ impl BindlessPipeline {
             }))
         } else {
             // --- Default blob-based path: output.weight stays quantized on GPU ---
+            // Window for the LM head weight rows. sh_head_blob.wgsl indexes
+            // read_blob as `weight_off + rel_word` with no separate base
+            // uniform, so weight_off must be rebased to the window start.
+            let head_window = model
+                .lm_head_window(0, vocab_size, dim)
+                .expect("LM head tensor span exceeds window capacity");
+
             let head_params = HeadBlobParams {
                 vocab_size,
                 dim,
-                weight_off: head_weight_off,
+                weight_off: rebase_head_weight_off(head_weight_off, &head_window),
                 formula_index: formula_index_for_ggml(head_quant_type),
                 softcap: spec.final_logit_softcap,
                 base_row: 0,
@@ -1381,10 +1388,6 @@ impl BindlessPipeline {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-            // Create blob bindings for LM head (window-aware)
-            let head_window = model
-                .lm_head_window(0, vocab_size, dim)
-                .expect("LM head tensor span exceeds window capacity");
             let blob_bindings = head_window.binding_resources(model);
             // Clone since BindingResource is not Copy
             let b0 = blob_bindings[0].clone();
@@ -2152,11 +2155,22 @@ impl BindlessPipeline {
                             let tile_params = HeadBlobParams {
                                 vocab_size,
                                 dim,
-                                weight_off: head_weight_off,
+                                weight_off: 0, // rebased below, once the tile window is known
                                 formula_index: formula_index_for_ggml(head_quant_type),
                                 softcap: spec.final_logit_softcap,
                                 base_row,
                                 chunk_words: model.chunk_words(),
+                            };
+
+                            // Window for this tile's weight rows. weight_off is
+                            // rebased onto it because sh_head_blob.wgsl adds it
+                            // to read_blob indices directly.
+                            let tile_window = model
+                                .lm_head_window(base_row, this_tile * tile_size, dim)
+                                .expect("LM head tile tensor span exceeds window capacity");
+                            let tile_params = HeadBlobParams {
+                                weight_off: rebase_head_weight_off(head_weight_off, &tile_window),
+                                ..tile_params
                             };
                             let param_buf =
                                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2165,10 +2179,6 @@ impl BindlessPipeline {
                                     usage: wgpu::BufferUsages::UNIFORM,
                                 });
 
-                            // Create window for this tile's weight range
-                            let tile_window = model
-                                .lm_head_window(base_row, this_tile * tile_size, dim)
-                                .expect("LM head tile tensor span exceeds window capacity");
                             let blob_bindings = tile_window.binding_resources(model);
                             let b0 = blob_bindings[0].clone();
                             let b1 = blob_bindings[1].clone();
