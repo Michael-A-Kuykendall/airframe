@@ -2,7 +2,8 @@
 //!
 //! This crate is TEST-ONLY and must NOT be a production dependency.
 //! It enforces a one-way dependency boundary: conformance code may only import
-//! specification APIs, never production Airframe semantic/loader/dispatch/offset/cache/capture implementations.
+//! specification APIs, never production Airframe semantic/loader/dispatch/offset/
+//! cache/capture implementations. Production capture is consumed as telemetry only.
 
 pub mod capture_protocol;
 pub mod comparison;
@@ -36,10 +37,8 @@ pub const FORBIDDEN_PRODUCTION_PREFIXES: &[&str] = &[
 ];
 
 /// Allowed specification-only module prefixes that conformance code MAY import.
-pub const ALLOWED_SPEC_PREFIXES: &[&str] = &[
-    "airframe::capture::spec",
-    "airframe::capture::telemetry",
-];
+pub const ALLOWED_SPEC_PREFIXES: &[&str] =
+    &["airframe::capture::spec", "airframe::capture::telemetry"];
 
 #[cfg(test)]
 mod tests {
