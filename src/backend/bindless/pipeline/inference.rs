@@ -1171,10 +1171,45 @@ impl BindlessPipeline {
             .get_tensor_offset("output_norm.bias")
             .map(|off| (off / 4) as u32)
             .unwrap_or(0);
+        // word index (byte_offset / 4); safe: 4.4GB/4 = 1.1B < u32::MAX
+        let norm_weight_words = (norm_weight / 4) as u32;
+
+        // Window for final norm (output_norm.weight + bias). sh_rmsnorm.wgsl has
+        // no blob_base_words uniform — it indexes read_blob with weight_offset /
+        // bias_offset directly — so those offsets must themselves be rebased to
+        // the window start.
+        let norm_window = model
+            .rmsnorm_window(
+                norm_weight_words,
+                if norm_bias != 0 {
+                    Some(norm_bias)
+                } else {
+                    None
+                },
+                dim,
+            )
+            .expect("final norm tensor span exceeds window capacity");
+        let norm_window_base = norm_window.window_base_words();
+
+        // 0 is the shader's "bias disabled" sentinel. If a real bias rebased to
+        // exactly 0 it would be silently dropped, so refuse rather than emit
+        // wrong math.
+        let norm_bias_local = if norm_bias != 0 {
+            let local = norm_bias - norm_window_base;
+            assert_ne!(
+                local, 0,
+                "output_norm.bias sits exactly at the window base; rebased offset \
+                 collides with the bias-disabled sentinel"
+            );
+            local
+        } else {
+            0
+        };
+
         let norm_params = RMSNormParams {
             count: dim,
-            weights_offset: (norm_weight / 4) as u32, // word index (byte_offset / 4); safe: 4.4GB/4 = 1.1B < u32::MAX
-            bias_offset: norm_bias,
+            weights_offset: norm_weight_words - norm_window_base,
+            bias_offset: norm_bias_local,
             eps: spec.rms_eps,
             norm_type: if spec.uses_layer_norm() { 1 } else { 0 },
             chunk_words: model.chunk_words(),
@@ -1184,18 +1219,6 @@ impl BindlessPipeline {
             contents: bytemuck::bytes_of(&norm_params),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-
-        // Create window for final norm (output_norm.weight + bias)
-        let norm_window = model
-            .rmsnorm_window(
-                norm_params.weights_offset,
-                if norm_bias != 0 {
-                    Some(norm_bias)
-                } else {
-                    None
-                },
-            )
-            .expect("final norm tensor span exceeds window capacity");
 
         // Offset for the LAST token in the batch
         let last_token_offset = (batch_size as u64 - 1u64) * (dim as u64) * 4u64;

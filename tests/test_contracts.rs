@@ -881,3 +881,147 @@ fn layer_window_plan_no_tensors_is_noop() {
 
     contract_test("layer_window_plan_no_tensors_is_noop", &[]);
 }
+
+// ---------------------------------------------------------------------------
+// Bead `airframe-8r3` — RMSNorm window algebra.
+//
+// sh_rmsnorm.wgsl has NO blob_base_words uniform: it indexes read_blob with
+// `weight_offset + i` and `bias_offset + i` directly. So for a norm tensor
+// living past resident chunk 7, BOTH offsets must be rebased onto the bound
+// window, and the window must span the tensor's whole `count`-element run —
+// not merely the word it starts at.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rmsnorm_window_covers_full_count_span() {
+    clear_invariant_log();
+
+    // A norm tensor starting near the end of a chunk whose `count` elements
+    // spill into the next chunk. A window derived from the start word alone
+    // would be one slot short and the tail would read the wrong buffer.
+    let count = 4_096u32;
+    let weight_offset = CHUNK_WORDS_128_MIB - 16; // 16 words before the boundary
+    let end_word = weight_offset + count - 1;
+
+    assert_eq!(
+        weight_offset / CHUNK_WORDS_128_MIB,
+        0,
+        "fixture must start in chunk 0"
+    );
+    assert_eq!(
+        end_word / CHUNK_WORDS_128_MIB,
+        1,
+        "fixture must spill into chunk 1"
+    );
+
+    let window = BlobWindow::for_range(weight_offset, end_word, CHUNK_WORDS_128_MIB, 16)
+        .expect("valid window");
+
+    assert_eq!(window.start_chunk, 0);
+    assert_eq!(
+        window.slot_count, 2,
+        "window must span both chunks the tensor touches"
+    );
+
+    // Every element of the run resolves inside the bound window.
+    for i in [0u32, 1, 15, 16, count / 2, count - 1] {
+        let (slot, _) = window
+            .absolute_to_local(weight_offset + i)
+            .unwrap_or_else(|e| panic!("element {} outside window: {}", i, e));
+        assert!(slot < window.slot_count, "element {} in unbound slot", i);
+    }
+
+    contract_test(
+        "rmsnorm_window_covers_full_count_span",
+        &["Word index must be within buffer bounds"],
+    );
+}
+
+#[test]
+fn rmsnorm_offsets_rebase_onto_window() {
+    clear_invariant_log();
+
+    // output_norm.weight for Llama-3.2-3B sits ~1.9 GiB in — resident chunk 14
+    // at 128 MiB. The shader's absolute-index reads only land correctly if the
+    // host subtracts the window base from weights_offset/bias_offset.
+    let count = 3_072u32; // n_embd for Llama-3.2-3B
+    let weight_offset = 14 * CHUNK_WORDS_128_MIB + 1_000;
+    let bias_offset = weight_offset + count;
+
+    let window = BlobWindow::for_range(
+        weight_offset,
+        bias_offset + count - 1,
+        CHUNK_WORDS_128_MIB,
+        16,
+    )
+    .expect("valid window");
+    let window_base = window.window_base_words();
+
+    assert_eq!(window.start_chunk, 14);
+    assert!(
+        window_base > 0,
+        "fixture must exercise a nonzero window base"
+    );
+
+    let local_weight = weight_offset - window_base;
+    let local_bias = bias_offset - window_base;
+
+    // Rebased offsets must be reachable through the window's own slots, and
+    // must round-trip back to the original absolute words.
+    for (local, absolute, label) in [
+        (local_weight, weight_offset, "weight"),
+        (local_bias, bias_offset, "bias"),
+    ] {
+        for i in [0u32, 1, count / 2, count - 1] {
+            let (slot, offset) = window
+                .absolute_to_local(window_base + local + i)
+                .unwrap_or_else(|e| panic!("{} element {} outside window: {}", label, i, e));
+            assert_eq!(
+                window.local_to_absolute(slot, offset),
+                absolute + i,
+                "{} element {} must round-trip to its absolute word",
+                label,
+                i
+            );
+        }
+    }
+
+    // A real bias must never rebase onto the shader's disabled sentinel.
+    assert_ne!(
+        local_bias, 0,
+        "rebased bias must not collide with the bias-disabled sentinel"
+    );
+
+    contract_test(
+        "rmsnorm_offsets_rebase_onto_window",
+        &["Word index must be within buffer bounds"],
+    );
+}
+
+#[test]
+fn rmsnorm_window_chunk_zero_is_identity() {
+    clear_invariant_log();
+
+    // Early/small models keep the norm in chunk 0; rebasing must be a no-op so
+    // the single-chunk path is bit-identical to before the window abstraction.
+    let count = 2_048u32;
+    let weight_offset = 4_096u32;
+
+    let window = BlobWindow::for_range(
+        weight_offset,
+        weight_offset + count - 1,
+        CHUNK_WORDS_128_MIB,
+        16,
+    )
+    .expect("valid window");
+
+    assert_eq!(window.start_chunk, 0);
+    assert_eq!(window.window_base_words(), 0);
+    assert_eq!(
+        weight_offset - window.window_base_words(),
+        weight_offset,
+        "a chunk-0 window must not rebase the weight offset"
+    );
+
+    contract_test("rmsnorm_window_chunk_zero_is_identity", &[]);
+}
