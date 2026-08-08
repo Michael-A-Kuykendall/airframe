@@ -407,23 +407,26 @@ impl BindlessModel {
         )
     }
 
-    /// Creates a window for RMSNorm (weight + bias).
+    /// Creates a window for RMSNorm covering the full weight (and bias) span.
+    ///
+    /// `count` is the element count of the norm tensor: the shader reads
+    /// `weight_offset .. weight_offset + count`, so the window must cover the
+    /// whole run, not just the word the tensor starts at.
     pub fn rmsnorm_window(
         &self,
         weight_offset: u32,
         bias_offset: Option<u32>,
+        count: u32,
     ) -> Result<BlobWindow, String> {
-        let chunk_words = self.chunk_words();
-        let start_chunk = (weight_offset / chunk_words) as usize;
-        let mut end_chunk = start_chunk;
-        if let Some(bias) = bias_offset {
-            end_chunk = end_chunk.max((bias / chunk_words) as usize);
-        }
-        let slot_count = end_chunk - start_chunk + 1;
-        BlobWindow::new(
-            start_chunk,
-            slot_count,
-            chunk_words,
+        let last = count.saturating_sub(1);
+        let start_word = weight_offset.min(bias_offset.unwrap_or(weight_offset));
+        let end_word = weight_offset
+            .saturating_add(last)
+            .max(bias_offset.map_or(0, |b| b.saturating_add(last)));
+        BlobWindow::for_range(
+            start_word,
+            end_word,
+            self.chunk_words(),
             self.total_resident_chunks,
         )
     }
