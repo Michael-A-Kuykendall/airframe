@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Airframe Conformance Evidence Package v1",
+  "description": "Complete conformance evidence bundle.",
+  "type": "object",
+  "required": ["$schema", "metadata", "manifest", "captures", "declared_inputs", "build_provenance", "comparisons", "verdict"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "const": "airframe.conformance.evidence.v1"
+    },
+    "metadata": { "$ref": "#/$defs/packageMetadata" },
+    "manifest": { "type": "object" },
+    "captures": {
+      "type": "array",
+      "items": { "type": "object" },
+      "minItems": 1
+    },
+    "declared_inputs": {
+      "type": "array",
+      "items": { "type": "object" },
+      "minItems": 1
+    },
+    "build_provenance": { "type": "object" },
+    "comparisons": {
+      "type": "array",
+      "items": { "type": "object" },
+      "minItems": 1
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail", "inconclusive", "invalid"]
+    }
+  },
+  "$defs": {
+    "packageMetadata": {
+      "type": "object",
+      "required": ["package_id", "created_at", "conformance_version", "schema_version"],
+      "additionalProperties": true,
+      "properties": {
+        "package_id": { "type": "string", "format": "uuid" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "conformance_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+" },
+        "schema_version": { "type": "string", "const": "1" },
+        "description": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "extra": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

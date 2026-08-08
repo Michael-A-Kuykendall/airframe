@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Airframe Conformance Comparison v1",
+  "description": "Comparison result between reference and candidate engines.",
+  "type": "object",
+  "required": ["$schema", "run_id", "conformance_version", "compared_at", "reference_engine", "candidate_engine", "layers", "final_logits", "overall", "summary"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "const": "airframe.conformance.comparison.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conformance_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "compared_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reference_engine": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_engine": {
+      "type": "string",
+      "minLength": 1
+    },
+    "layers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/layerComparison" }
+    },
+    "final_logits": { "$ref": "#/$defs/logitsComparison" },
+    "overall": {
+      "type": "string",
+      "enum": ["pass", "fail", "inconclusive"]
+    },
+    "summary": { "$ref": "#/$defs/comparisonSummary" }
+  },
+  "$defs": {
+    "pointStatus": {
+      "type": "string",
+      "enum": ["match", "mismatch", "unavailable", "error"]
+    },
+    "pointComparison": {
+      "type": "object",
+      "required": ["identity", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "identity": { "$ref": "#/$defs/pointIdentity" },
+        "status": { "$ref": "#/$defs/pointStatus" },
+        "reference_rms": { "type": "number" },
+        "candidate_rms": { "type": "number" },
+        "rms_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "tolerance": { "type": "number", "exclusiveMinimum": 0 },
+        "reference_nan": { "type": "integer", "minimum": 0 },
+        "candidate_nan": { "type": "integer", "minimum": 0 },
+        "message": { "type": "string" }
+      }
+    },
+    "layerStatus": {
+      "type": "string",
+      "enum": ["all_match", "has_mismatches", "unavailable", "error"]
+    },
+    "layerComparison": {
+      "type": "object",
+      "required": ["layer", "status", "points"],
+      "additionalProperties": true,
+      "properties": {
+        "layer": { "type": "integer", "minimum": 0 },
+        "status": { "$ref": "#/$defs/layerStatus" },
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/pointComparison" }
+        },
+        "monotonic_rms": { "type": "boolean" },
+        "monotonic_break": { "type": "string" }
+      }
+    },
+    "logitsComparison": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "$ref": "#/$defs/pointStatus" },
+        "reference_rms": { "type": "number" },
+        "candidate_rms": { "type": "number" },
+        "rms_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "tolerance": { "type": "number", "exclusiveMinimum": 0 },
+        "reference_argmax": { "type": "integer", "minimum": 0 },
+        "candidate_argmax": { "type": "integer", "minimum": 0 },
+        "argmax_match": { "type": "boolean" },
+        "topk_overlap": { "type": "integer", "minimum": 0 },
+        "reference_nan": { "type": "integer", "minimum": 0 },
+        "candidate_nan": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "comparisonSummary": {
+      "type": "object",
+      "required": ["total_points", "matched_points", "mismatched_points", "unavailable_points", "matching_layers", "mismatched_layers", "monotonic_layers", "max_rms_ratio", "max_logits_rms_ratio"],
+      "additionalProperties": true,
+      "properties": {
+        "total_points": { "type": "integer", "minimum": 0 },
+        "matched_points": { "type": "integer", "minimum": 0 },
+        "mismatched_points": { "type": "integer", "minimum": 0 },
+        "unavailable_points": { "type": "integer", "minimum": 0 },
+        "matching_layers": { "type": "integer", "minimum": 0 },
+        "mismatched_layers": { "type": "integer", "minimum": 0 },
+        "monotonic_layers": { "type": "integer", "minimum": 0 },
+        "max_rms_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "max_logits_rms_ratio": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "pointIdentity": {
+      "type": "object",
+      "required": ["layer", "position", "stage"],
+      "additionalProperties": true,
+      "properties": {
+        "layer": { "type": "integer", "minimum": 0 },
+        "position": { "type": "integer", "minimum": 0 },
+        "stage": { "type": "string", "minLength": 1 },
+        "sub_stage": { "type": "string" }
+      }
+    }
+  }
+}

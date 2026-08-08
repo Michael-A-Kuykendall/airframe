@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Airframe Conformance Capture v1",
+  "description": "Capture manifest from a production engine.",
+  "type": "object",
+  "required": ["$schema", "run_id", "conformance_version", "captured_at", "prompts"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "const": "airframe.conformance.capture.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conformance_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "prompts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/promptCapture" },
+      "minItems": 1
+    }
+  },
+  "$defs": {
+    "pointIdentity": {
+      "type": "object",
+      "required": ["layer", "position", "stage"],
+      "additionalProperties": true,
+      "properties": {
+        "layer": { "type": "integer", "minimum": 0 },
+        "position": { "type": "integer", "minimum": 0 },
+        "stage": { "type": "string", "minLength": 1 },
+        "sub_stage": { "type": "string" }
+      }
+    },
+    "availability": {
+      "type": "string",
+      "enum": ["real", "proxy", "unavailable", "error"]
+    },
+    "coordinatePlan": {
+      "type": "object",
+      "required": ["binding", "offset", "count", "stride", "format", "shape"],
+      "additionalProperties": true,
+      "properties": {
+        "binding": { "type": "integer", "minimum": 0 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 1 },
+        "stride": { "type": "integer", "minimum": 1 },
+        "format": { "type": "string", "enum": ["f32", "f16", "bf16", "i8", "u8", "i32"] },
+        "shape": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 1
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["engine", "engine_version", "captured_at", "build_profile", "config_hash"],
+      "additionalProperties": true,
+      "properties": {
+        "engine": { "type": "string", "minLength": 1 },
+        "engine_version": { "type": "string", "minLength": 1 },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "git_commit": { "type": "string" },
+        "build_profile": { "type": "string", "enum": ["debug", "release"] },
+        "config_hash": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tensorStats": {
+      "type": "object",
+      "required": ["rms", "nan_count", "first8", "sampled"],
+      "additionalProperties": true,
+      "properties": {
+        "rms": { "type": "number" },
+        "nan_count": { "type": "integer", "minimum": 0 },
+        "first8": {
+          "type": "array",
+          "items": { "type": "number" },
+          "maxItems": 8
+        },
+        "sampled": {
+          "type": "string",
+          "enum": ["real", "proxy", "unavailable", "temp_last", "activation_last", "wrong_buffer", "proxy_residual"]
+        }
+      }
+    },
+    "capturePoint": {
+      "type": "object",
+      "required": ["identity", "availability", "coordinate", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "identity": { "$ref": "#/$defs/pointIdentity" },
+        "availability": { "$ref": "#/$defs/availability" },
+        "coordinate": { "$ref": "#/$defs/coordinatePlan" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "stats": { "$ref": "#/$defs/tensorStats" },
+        "data": { "type": "string" }
+      }
+    },
+    "modelConfig": {
+      "type": "object",
+      "required": ["arch", "n_layer", "n_embd", "n_head", "n_kv_head", "head_dim"],
+      "additionalProperties": true,
+      "properties": {
+        "arch": { "type": "string", "minLength": 1 },
+        "n_layer": { "type": "integer", "minimum": 0 },
+        "n_embd": { "type": "integer", "minimum": 1 },
+        "n_head": { "type": "integer", "minimum": 1 },
+        "n_kv_head": { "type": "integer", "minimum": 1 },
+        "head_dim": { "type": "integer", "minimum": 1 },
+        "rope_base": { "type": "number" },
+        "rope_dim": { "type": "integer", "minimum": 1 },
+        "rms_eps": { "type": "number" },
+        "qk_norm": { "type": "boolean" },
+        "n_ctx_capped": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "promptCapture": {
+      "type": "object",
+      "required": ["prompt", "token_ids", "points", "model_config"],
+      "additionalProperties": true,
+      "properties": {
+        "prompt": { "type": "string", "minLength": 1 },
+        "token_ids": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 1
+        },
+        "token_pieces": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/capturePoint" }
+        },
+        "model_config": { "$ref": "#/$defs/modelConfig" }
+      }
+    }
+  }
+}

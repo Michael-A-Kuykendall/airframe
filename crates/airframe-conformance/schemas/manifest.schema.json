@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Airframe Conformance Manifest v1",
+  "description": "Describes a conformance run configuration.",
+  "type": "object",
+  "required": ["$schema", "run_id", "conformance_version", "created_at", "model", "capture", "comparison", "evidence"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "const": "airframe.conformance.manifest.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conformance_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "model": {
+      "type": "object",
+      "required": ["model_path", "architecture", "parameter_count", "quantization"],
+      "additionalProperties": true,
+      "properties": {
+        "model_path": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 },
+        "parameter_count": { "type": "string", "minLength": 1 },
+        "quantization": { "type": "string", "minLength": 1 },
+        "gguf_metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "required": ["engine", "prompts", "levels", "max_tokens"],
+      "additionalProperties": true,
+      "properties": {
+        "engine": { "type": "string", "minLength": 1 },
+        "engine_config": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "prompts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
+        "levels": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 8 },
+          "minItems": 1
+        },
+        "max_tokens": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "required": ["reference_engine", "rms_tolerance", "logits_tolerance", "layers", "require_monotonic_rms"],
+      "additionalProperties": true,
+      "properties": {
+        "reference_engine": { "type": "string", "minLength": 1 },
+        "rms_tolerance": { "type": "number", "exclusiveMinimum": 0 },
+        "logits_tolerance": { "type": "number", "exclusiveMinimum": 0 },
+        "layers": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "require_monotonic_rms": { "type": "boolean" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["output_dir", "include_raw_tensors", "include_layer_comparisons", "compression"],
+      "additionalProperties": true,
+      "properties": {
+        "output_dir": { "type": "string", "minLength": 1 },
+        "include_raw_tensors": { "type": "boolean" },
+        "include_layer_comparisons": { "type": "boolean" },
+        "compression": { "type": "string", "enum": ["none", "gzip", "zstd"] }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

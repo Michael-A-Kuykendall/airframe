@@ -1,0 +1,38 @@
+[package]
+name = "airframe-conformance"
+version = "0.1.0"
+edition = "2021"
+description = "Independent conformance verification for Airframe GPU inference engine. Test-only crate — not a production dependency."
+license = "MIT"
+repository = "https://github.com/Michael-A-Kuykendall/airframe"
+homepage = "https://github.com/Michael-A-Kuykendall/airframe"
+readme = "README.md"
+keywords = ["conformance", "verification", "gguf", "inference", "testing"]
+categories = ["development-tools", "testing"]
+
+[dependencies]
+# Specification-only dependencies (no production Airframe semantic/loader/dispatch/offset/cache/capture)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+jsonschema = "0.22"
+thiserror = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.8", features = ["serde", "v4"] }
+semver = "1.0"
+
+[dev-dependencies]
+# Only for testing the conformance crate itself
+tempfile = "3.24"
+tokio = { version = "1.49", features = ["full"] }
+
+[lib]
+name = "airframe_conformance"
+path = "src/lib.rs"
+
+[[test]]
+name = "dependency_policy"
+harness = true
+
+[[test]]
+name = "capture_protocol"
+harness = true

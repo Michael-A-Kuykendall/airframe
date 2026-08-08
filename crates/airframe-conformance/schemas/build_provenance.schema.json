@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Airframe Conformance Build Provenance v1",
+  "description": "Build provenance for Shimmy binary.",
+  "type": "object",
+  "required": ["$schema", "shimmy_version", "git_commit", "built_at", "profile", "target", "features", "dependencies", "airframe_version", "conformance_version"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "const": "airframe.conformance.build_provenance.v1"
+    },
+    "shimmy_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "git_commit": {
+      "type": "string",
+      "minLength": 7
+    },
+    "built_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "profile": {
+      "type": "string",
+      "enum": ["debug", "release"]
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "features": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "airframe_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "airframe_git_commit": {
+      "type": "string"
+    },
+    "conformance_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    }
+  }
+}

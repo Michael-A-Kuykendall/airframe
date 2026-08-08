@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Airframe Conformance Declared Input v1",
+  "description": "Declared numerical token inputs with tokenizer provenance.",
+  "type": "object",
+  "required": ["$schema", "prompt", "tokens", "tokenizer", "declared_at", "conformance_version", "run_id"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "const": "airframe.conformance.declared_input.v1"
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tokens": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/declaredToken" },
+      "minItems": 1
+    },
+    "tokenizer": { "$ref": "#/$defs/tokenizerProvenance" },
+    "declared_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "conformance_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "$defs": {
+    "declaredToken": {
+      "type": "object",
+      "required": ["id", "piece", "byte_offset", "byte_length", "tokenizer", "is_special"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "piece": { "type": "string", "minLength": 1 },
+        "byte_offset": { "type": "integer", "minimum": 0 },
+        "byte_length": { "type": "integer", "minimum": 1 },
+        "tokenizer": { "$ref": "#/$defs/tokenizerProvenance" },
+        "is_special": { "type": "boolean" }
+      }
+    },
+    "tokenizerProvenance": {
+      "type": "object",
+      "required": ["name", "version", "config_hash"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "git_commit": { "type": "string" },
+        "config_hash": { "type": "string", "minLength": 1 },
+        "chat_template": { "type": "string" }
+      }
+    }
+  }
+}
