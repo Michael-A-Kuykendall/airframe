@@ -261,6 +261,23 @@ pub fn resolve_layer_window(
     .unwrap_or_else(|e| panic!("layer {} window planning failed: {}", layer_idx, e))
 }
 
+/// Rebases an LM-head `weight_off` (absolute word index of the weight tensor)
+/// onto a bound [`BlobWindow`].
+///
+/// sh_head_blob.wgsl reads `weight_off + rel_word`, where `rel_word` is an
+/// offset from the start of the weight tensor. For a tile whose rows begin well
+/// past the tensor start, the window base can exceed `weight_off`, so the
+/// rebased base is mathematically negative.
+///
+/// That is fine, and is why this returns a wrapped `u32`: WGSL `u32` addition
+/// wraps modulo 2^32, so `wrap(weight_off - window_base) + rel_word` evaluates
+/// to the true window-local word for every `rel_word` the dispatch actually
+/// reads (all of which satisfy `weight_off + rel_word >= window_base`).
+/// Callers must therefore only use it for reads inside `window`.
+pub fn rebase_head_weight_off(weight_off: u32, window: &BlobWindow) -> u32 {
+    weight_off.wrapping_sub(window.window_base_words())
+}
+
 /// Returns the eight blob binding resources for a dispatch.
 ///
 /// With a window, slot `i` binds resident chunk `window.start_chunk + i`.

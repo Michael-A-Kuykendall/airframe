@@ -248,10 +248,18 @@ impl BindlessPipeline {
             mapped_at_creation: false,
         });
 
+        // Window for the head weight rows; weight_off is rebased onto it since
+        // sh_head_blob.wgsl adds it to read_blob indices directly.
+        let window = model
+            .lm_head_window(0, vocab_size, dim)
+            .expect("LM head tensor span exceeds window capacity");
+        let [blob0, blob1, blob2, blob3, blob4, blob5, blob6, blob7] =
+            blob_bindings_for(model, Some(&window));
+
         let head_params = HeadBlobParams {
             vocab_size,
             dim,
-            weight_off,
+            weight_off: rebase_head_weight_off(weight_off, &window),
             formula_index: formula_index_for_ggml(quant_type),
             softcap,
             base_row: 0,
@@ -269,7 +277,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -285,31 +293,31 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: blob1,
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: blob2,
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
+                    resource: blob3,
                 },
                 wgpu::BindGroupEntry {
                     binding: 13,
-                    resource: model.blob_binding_4(),
+                    resource: blob4,
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: model.blob_binding_5(),
+                    resource: blob5,
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
-                    resource: model.blob_binding_6(),
+                    resource: blob6,
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: model.blob_binding_7(),
+                    resource: blob7,
                 },
             ],
         });
@@ -413,10 +421,19 @@ impl BindlessPipeline {
             let this_tile = (total_wgs - wgs_dispatched).min(max_safe_wgs);
             let base_row = wgs_dispatched * tile_size;
 
+            // Per-tile window over just this tile's weight rows; weight_off is
+            // rebased onto it because sh_head_blob.wgsl adds it to read_blob
+            // indices directly.
+            let tile_window = model
+                .lm_head_window(base_row, this_tile * tile_size, dim)
+                .expect("LM head tile tensor span exceeds window capacity");
+            let [blob0, blob1, blob2, blob3, blob4, blob5, blob6, blob7] =
+                blob_bindings_for(model, Some(&tile_window));
+
             let head_params = HeadBlobParams {
                 vocab_size,
                 dim,
-                weight_off,
+                weight_off: rebase_head_weight_off(weight_off, &tile_window),
                 formula_index: formula_index_for_ggml(quant_type),
                 softcap,
                 base_row,
@@ -440,7 +457,7 @@ impl BindlessPipeline {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: model.blob_binding_0(),
+                        resource: blob0,
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -456,31 +473,31 @@ impl BindlessPipeline {
                     },
                     wgpu::BindGroupEntry {
                         binding: 10,
-                        resource: model.blob_binding_1(),
+                        resource: blob1,
                     },
                     wgpu::BindGroupEntry {
                         binding: 11,
-                        resource: model.blob_binding_2(),
+                        resource: blob2,
                     },
                     wgpu::BindGroupEntry {
                         binding: 12,
-                        resource: model.blob_binding_3(),
+                        resource: blob3,
                     },
                     wgpu::BindGroupEntry {
                         binding: 13,
-                        resource: model.blob_binding_4(),
+                        resource: blob4,
                     },
                     wgpu::BindGroupEntry {
                         binding: 14,
-                        resource: model.blob_binding_5(),
+                        resource: blob5,
                     },
                     wgpu::BindGroupEntry {
                         binding: 15,
-                        resource: model.blob_binding_6(),
+                        resource: blob6,
                     },
                     wgpu::BindGroupEntry {
                         binding: 16,
-                        resource: model.blob_binding_7(),
+                        resource: blob7,
                     },
                 ],
             });

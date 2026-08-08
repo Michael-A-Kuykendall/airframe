@@ -66,6 +66,34 @@ pub fn compute_chunk_plan(file_size: u64, adapter_limit: u64) -> ChunkPlan {
     }
 }
 
+/// Returns `(block_elems, block_bytes)` for a GGML quant type.
+///
+/// Under `isf` this defers to `airframe_observe::quant_formula`, the GGUF spec
+/// registry and single source of truth; otherwise it mirrors the same values so
+/// the always-built loader stays consistent. Mirrors the arrangement used by
+/// `pipeline::formula_index_for_ggml`.
+#[cfg(feature = "isf")]
+fn quant_block_geometry(type_id: u32) -> Option<(usize, usize)> {
+    let elems = airframe_observe::quant_formula::block_elems(type_id)?;
+    let bytes = airframe_observe::quant_formula::block_bytes(type_id)?;
+    Some((elems, bytes))
+}
+
+#[cfg(not(feature = "isf"))]
+fn quant_block_geometry(type_id: u32) -> Option<(usize, usize)> {
+    match type_id {
+        0 => Some((1, 4)),      // F32
+        1 => Some((1, 2)),      // F16
+        2 => Some((32, 18)),    // Q4_0
+        6 => Some((32, 22)),    // Q5_0
+        8 => Some((32, 34)),    // Q8_0
+        12 => Some((256, 144)), // Q4_K
+        13 => Some((256, 176)), // Q5_K
+        14 => Some((256, 210)), // Q6_K
+        _ => None,
+    }
+}
+
 /// A sliding window over resident blob chunks for a single GPU dispatch.
 ///
 /// The shader layout has a fixed `BLOB_BINDING_SLOTS` (8) blob bindings.
@@ -431,19 +459,42 @@ impl BindlessModel {
         )
     }
 
-    /// Creates a window for LM head (tiled weight rows).
-    /// Covers the range of weight rows needed for the dispatch.
+    /// Creates a window covering the LM-head weight rows `base_row..base_row+rows`.
+    ///
+    /// Row stride is derived from the head tensor's quant type via the GGUF
+    /// spec registry (`block_bytes / block_elems`), NOT assumed to be 4 bytes
+    /// per element — a Q4_K head is ~4.5 bits/element, so a f32 assumption
+    /// overstates the span by ~7x and yields a window that cannot be bound.
+    ///
+    /// Falls back to `token_embd.weight` when the model ties its head weights,
+    /// matching the tensor the dispatch actually reads.
     pub fn lm_head_window(&self, base_row: u32, rows: u32, dim: u32) -> Result<BlobWindow, String> {
-        let weight_bytes = self
-            .metadata
-            .tensor_offsets
-            .get("output.weight")
-            .copied()
-            .unwrap_or(0);
-        let weight_words = weight_bytes / 4;
-        let start_word = weight_words + (base_row * dim) as u64 / 4;
-        let end_word = weight_words + ((base_row + rows) * dim) as u64 / 4;
-        self.window_for_range(start_word as u32, end_word as u32)
+        let name = if self.metadata.get_tensor_type("output.weight").is_some() {
+            "output.weight"
+        } else {
+            "token_embd.weight"
+        };
+        let weight_bytes = self.metadata.get_tensor_offset(name).unwrap_or(0);
+        let quant_type = self.metadata.get_tensor_type(name).unwrap_or(0);
+
+        let (block_elems, block_bytes) = quant_block_geometry(quant_type)
+            .ok_or_else(|| format!("unknown quant type {} for {}", quant_type, name))?;
+        if !(dim as usize).is_multiple_of(block_elems) {
+            return Err(format!(
+                "{} row dim {} is not a multiple of block_elems {} for quant type {}",
+                name, dim, block_elems, quant_type
+            ));
+        }
+        let row_bytes = (dim as u64 / block_elems as u64) * block_bytes as u64;
+
+        let start_byte = weight_bytes + (base_row as u64) * row_bytes;
+        // Last byte actually read, not the exclusive end: an exclusive end that
+        // lands on a chunk boundary would pull in a slot the dispatch never
+        // touches, and can push the window past the resident chunk count.
+        let end_byte = weight_bytes + ((base_row as u64) + (rows as u64)) * row_bytes
+            - if rows == 0 { 0 } else { 1 };
+
+        self.window_for_range((start_byte / 4) as u32, (end_byte / 4) as u32)
     }
 }
 
