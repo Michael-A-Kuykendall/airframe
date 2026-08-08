@@ -180,6 +180,11 @@ impl BindlessPipeline {
     }
 
     /// Run Dequant Test (or get embedding)
+    ///
+    /// Q4_0-only legacy path. `dequant_layout` declares a single blob binding
+    /// (0..2, no 10..16), so this reads chunk 0 ONLY and cannot address a tensor
+    /// past `effective_chunk`. Use [`Self::run_dequant_any_hot`] for anything
+    /// that must work on a multi-chunk model.
     pub fn run_dequant_request(
         &self,
         device: &wgpu::Device,
@@ -285,16 +290,22 @@ impl BindlessPipeline {
         count: u32,
         quant_type: u32,
     ) -> Vec<f32> {
-        // Use the model's window abstraction to cover the tensor range.
-        // This replaces the old chunk-0-only staging behavior.
+        // Window over the tensor's byte span, so a row living past resident
+        // chunk 7 is actually bound. Replaces the old chunk-0-only staging.
         let offset_words = offset_bytes / 4;
         let window = model
-            .dequant_window(offset_words, count)
+            .dequant_window(offset_words, count, quant_type)
             .expect("dequant tensor span exceeds window capacity");
 
+        // sh_dequant_any.wgsl resolves an element as
+        //   word = off_pack/2 + blob_base_words
+        // where off_pack is a *packed* (byte/2) offset. The single-blob and
+        // one-shot paths therefore encode the tensor start entirely in
+        // blob_base_words and leave offset_words at 0; do the same here, but
+        // rebased so the shader's index is window-local rather than absolute.
         let params = DequantAnyParams {
-            blob_base_words: window.window_base_words(),
-            offset_words,
+            blob_base_words: offset_words - window.window_base_words(),
+            offset_words: 0,
             formula_index: formula_index_for_ggml(quant_type),
             count,
             chunk_words: model.chunk_words(),
@@ -566,8 +577,17 @@ impl BindlessPipeline {
         count: u32,
         quant_type: u32,
     ) -> Vec<f32> {
+        // Window over the tensor's byte span so rows past resident chunk 7 are
+        // bound; blob_base_words is rebased onto it, matching the hot path.
+        let offset_words = (offset_bytes as u64 / 4) as u32;
+        let window = model
+            .dequant_window(offset_words, count, quant_type)
+            .expect("dequant tensor span exceeds window capacity");
+        let [blob0, blob1, blob2, blob3, blob4, blob5, blob6, blob7] =
+            blob_bindings_for(model, Some(&window));
+
         let params = DequantAnyParams {
-            blob_base_words: (offset_bytes as u64 / 4) as u32,
+            blob_base_words: offset_words - window.window_base_words(),
             offset_words: 0,
             formula_index: formula_index_for_ggml(quant_type),
             count,
@@ -719,7 +739,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -731,31 +751,31 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: blob1,
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: blob2,
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
+                    resource: blob3,
                 },
                 wgpu::BindGroupEntry {
                     binding: 13,
-                    resource: model.blob_binding_4(),
+                    resource: blob4,
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: model.blob_binding_5(),
+                    resource: blob5,
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
-                    resource: model.blob_binding_6(),
+                    resource: blob6,
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: model.blob_binding_7(),
+                    resource: blob7,
                 },
             ],
         });
