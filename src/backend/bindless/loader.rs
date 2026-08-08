@@ -420,17 +420,32 @@ impl BindlessModel {
         )
     }
 
-    /// Creates a window for dequant_any hot path (single tensor row).
-    /// The window covers the chunk containing `offset_words`.
-    pub fn dequant_window(&self, offset_words: u32, count: u32) -> Result<BlobWindow, String> {
-        let chunk_words = self.chunk_words();
-        let start_chunk = (offset_words / chunk_words) as usize;
-        let end_chunk = ((offset_words + count) / chunk_words) as usize;
-        let slot_count = end_chunk - start_chunk + 1;
-        BlobWindow::new(
-            start_chunk,
-            slot_count,
-            chunk_words,
+    /// Creates a window covering a dequant dispatch's `count` elements starting
+    /// at absolute word `offset_words`.
+    ///
+    /// The byte span is derived from the quant type via the GGUF spec registry,
+    /// NOT assumed to be one word per element: `count` counts ELEMENTS, and a
+    /// Q4_K element is ~0.56 bytes, not 4. Treating elements as words overstates
+    /// a quantized span ~7x, which can push the window past the resident chunk
+    /// count and fail a dispatch that is actually bindable.
+    pub fn dequant_window(
+        &self,
+        offset_words: u32,
+        count: u32,
+        quant_type: u32,
+    ) -> Result<BlobWindow, String> {
+        let (block_elems, block_bytes) = quant_block_geometry(quant_type)
+            .ok_or_else(|| format!("unknown quant type {} for dequant window", quant_type))?;
+
+        // Partial trailing blocks still read a whole block from the file.
+        let blocks = (count as u64).div_ceil(block_elems as u64);
+        let span_bytes = blocks * block_bytes as u64;
+        let last_word = (offset_words as u64) + span_bytes.saturating_sub(1) / 4;
+
+        BlobWindow::for_range(
+            offset_words,
+            last_word as u32,
+            self.chunk_words(),
             self.total_resident_chunks,
         )
     }

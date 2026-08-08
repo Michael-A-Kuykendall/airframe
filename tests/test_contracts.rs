@@ -1232,3 +1232,174 @@ fn lm_head_tile_windows_cover_every_vocab_row() {
 
     contract_test("lm_head_tile_windows_cover_every_vocab_row", &[]);
 }
+
+// ---------------------------------------------------------------------------
+// Bead `airframe-kqa` — dequant_any window algebra + the shader offset contract.
+//
+// sh_dequant_any.wgsl resolves an element as
+//     word = off_pack / 2 + blob_base_words
+// where `off_pack` is a PACKED (byte/2) offset. So a caller has exactly two
+// consistent encodings, and they must not be mixed:
+//   A) blob_base_words = byte/4, off_pack = 0     (used by every working path)
+//   B) blob_base_words = 0,      off_pack = byte/2
+// Passing a WORD index as off_pack is encoding (A)'s value into (B)'s slot and
+// silently halves the offset. These tests pin the contract.
+//
+// `count` is also an ELEMENT count, so a dequant window must be sized from the
+// quant type's block geometry, never treated as one word per element.
+// ---------------------------------------------------------------------------
+
+/// The shader's own address arithmetic: `gow(off_pack) = off_pack/2 + base`.
+/// Returns the absolute byte the dispatch reads first.
+fn dequant_shader_first_byte(blob_base_words: u32, off_pack: u32) -> u64 {
+    (off_pack as u64 / 2) * 4 + (blob_base_words as u64) * 4
+}
+
+#[test]
+fn dequant_any_offset_encoding_contract() {
+    clear_invariant_log();
+
+    // A tensor row at an arbitrary 4-byte-aligned offset.
+    let offset_bytes = 1_234_567_890u64 & !3u64;
+
+    // Encoding (A): everything in blob_base_words, off_pack = 0.
+    let enc_a = dequant_shader_first_byte((offset_bytes / 4) as u32, 0);
+    assert_eq!(
+        enc_a, offset_bytes,
+        "encoding A must address the tensor start exactly"
+    );
+
+    // Encoding (B): everything in the packed offset.
+    let enc_b = dequant_shader_first_byte(0, (offset_bytes / 2) as u32);
+    assert_eq!(
+        enc_b, offset_bytes,
+        "encoding B must address the tensor start exactly"
+    );
+
+    // The regression: passing a WORD index (byte/4) as off_pack. gow halves it
+    // again, so the dispatch reads from HALF the intended offset.
+    let mixed = dequant_shader_first_byte(0, (offset_bytes / 4) as u32);
+    assert_eq!(
+        mixed,
+        offset_bytes / 2,
+        "a word index in the packed-offset slot must be shown to halve the address"
+    );
+    assert_ne!(
+        mixed, offset_bytes,
+        "mixing encodings must not accidentally land on the right byte"
+    );
+
+    contract_test("dequant_any_offset_encoding_contract", &[]);
+}
+
+#[test]
+fn dequant_any_window_rebase_addresses_tensor_start() {
+    clear_invariant_log();
+
+    // Embedding row for Llama-3.2-3B living past resident chunk 7 — the case
+    // the window abstraction exists for. After rebasing, the shader's own
+    // arithmetic must land on the tensor start, window-locally.
+    let offset_bytes = 1_500_000_000u64 & !3u64;
+    let offset_words = (offset_bytes / 4) as u32;
+    let count = 3_072u32; // n_embd
+    let q6k_bytes = head_row_bytes(count as u64, 256, 210);
+
+    let last_word = offset_words as u64 + (q6k_bytes - 1) / 4;
+    let window = BlobWindow::for_range(offset_words, last_word as u32, CHUNK_WORDS_128_MIB, 16)
+        .expect("embedding row must be bindable");
+
+    assert!(
+        window.start_chunk > 7,
+        "fixture must exercise a row past the 8 identity slots"
+    );
+
+    // Host-side rebase, exactly as run_dequant_any_hot does it.
+    let local_base = offset_words - window.window_base_words();
+
+    // Shader arithmetic on the rebased params yields the window-local byte…
+    let shader_byte = dequant_shader_first_byte(local_base, 0);
+    // …which maps back to the true absolute byte through the window base.
+    let absolute = (window.window_base_words() as u64) * 4 + shader_byte;
+    assert_eq!(
+        absolute, offset_bytes,
+        "rebased dispatch must address the true tensor start"
+    );
+
+    // Both ends of the row resolve to bound slots.
+    for word in [offset_words, last_word as u32] {
+        let (slot, offset) = window
+            .absolute_to_local(word)
+            .unwrap_or_else(|e| panic!("word {} outside window: {}", word, e));
+        assert!(slot < window.slot_count, "word {} unbound", word);
+        assert_eq!(window.local_to_absolute(slot, offset), word);
+    }
+
+    contract_test(
+        "dequant_any_window_rebase_addresses_tensor_start",
+        &["Word index must be within buffer bounds"],
+    );
+}
+
+#[test]
+fn dequant_window_span_uses_block_geometry_not_element_count() {
+    clear_invariant_log();
+
+    // `count` counts ELEMENTS. Treating it as words (4 B/elem) overstates a
+    // Q4_K span ~7x and a Q6_K span ~4.9x, which can push an otherwise
+    // bindable window past the resident chunk count.
+    let count = 3_072u64;
+
+    let q4k_bytes = head_row_bytes(count, 256, 144);
+    let q6k_bytes = head_row_bytes(count, 256, 210);
+    let naive_bytes = count * 4;
+
+    assert_eq!(q4k_bytes, 1_728);
+    assert_eq!(q6k_bytes, 2_520);
+    assert!(
+        naive_bytes > q4k_bytes * 7,
+        "element-as-word must be shown to grossly overstate a Q4_K span"
+    );
+
+    // A partial trailing block still reads a whole block from the file.
+    let partial = 300u64; // 1 full Q4_K block + 44 elements
+    let blocks = partial.div_ceil(256);
+    assert_eq!(blocks, 2, "partial block must round up");
+    assert_eq!(blocks * 144, 288, "span must cover both whole blocks");
+
+    contract_test(
+        "dequant_window_span_uses_block_geometry_not_element_count",
+        &[],
+    );
+}
+
+#[test]
+fn dequant_window_chunk_zero_is_identity() {
+    clear_invariant_log();
+
+    // Small models keep embeddings in chunk 0; the rebase must be a no-op so
+    // the single-chunk path is bit-identical to the pre-window behaviour.
+    let offset_words = 8_192u32;
+    let count = 2_048u64;
+    let span = head_row_bytes(count, 256, 144);
+
+    let window = BlobWindow::for_range(
+        offset_words,
+        (offset_words as u64 + (span - 1) / 4) as u32,
+        CHUNK_WORDS_128_MIB,
+        16,
+    )
+    .expect("valid window");
+
+    assert_eq!(window.start_chunk, 0);
+    assert_eq!(window.window_base_words(), 0);
+
+    let local_base = offset_words - window.window_base_words();
+    assert_eq!(local_base, offset_words, "chunk-0 rebase must be a no-op");
+    assert_eq!(
+        dequant_shader_first_byte(local_base, 0),
+        (offset_words as u64) * 4,
+        "chunk-0 dispatch must address the tensor start directly"
+    );
+
+    contract_test("dequant_window_chunk_zero_is_identity", &[]);
+}
