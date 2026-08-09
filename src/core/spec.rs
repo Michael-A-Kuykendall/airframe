@@ -146,10 +146,16 @@ impl ModelSpec {
         self.rope_dim = self.head_dim;
         self.gqa_ratio = self.n_head / self.n_head_kv;
         self.kv_dim = self.n_head_kv * self.head_dim;
-        // Qwen3 uses per-head Q and K RMSNorm before RoPE
-        self.has_qk_norm = matches!(self.arch, ModelArch::Qwen3);
-        // Gemma-2 has post-attention and post-FFW norms
-        self.post_norm_enabled = matches!(self.arch, ModelArch::Gemma);
+        // Qwen3 uses per-head Q and K RMSNorm before RoPE — derive from tensor presence (metadata.rs)
+        // Only fall back to arch heuristic if not already set from GGUF tensor presence
+        if !self.has_qk_norm {
+            self.has_qk_norm = matches!(self.arch, ModelArch::Qwen3);
+        }
+        // Gemma-2 has post-attention and post-FFW norms — derive from tensor presence (metadata.rs)
+        // Only fall back to arch heuristic if not already set from GGUF tensor presence
+        if !self.post_norm_enabled {
+            self.post_norm_enabled = matches!(self.arch, ModelArch::Gemma);
+        }
 
         // Temp buffer layout (must fit ALL intermediates at once):
         //   [0..n_embd]              = attn_norm output / activation copy
