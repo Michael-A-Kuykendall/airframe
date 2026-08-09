@@ -479,6 +479,18 @@ impl BindlessMetadata {
     /// Construct ModelSpec from the parsed GGUF metadata
     pub fn to_model_spec(&self) -> ModelSpec {
         let mut spec = ModelSpec::from_gguf_metadata(&self.gguf_metadata);
+        // Derive has_qk_norm from tensor presence (Qwen3: blk.0.attn_q_norm.weight / attn_k_norm.weight)
+        let has_qk_norm = self.tensor_dims.contains_key("blk.0.attn_q_norm.weight")
+            && self.tensor_dims.contains_key("blk.0.attn_k_norm.weight");
+        // Derive post_norm_enabled from tensor presence (Gemma-2: blk.0.post_attention_norm.weight / post_ffw_norm.weight)
+        let post_norm_enabled = self
+            .tensor_dims
+            .contains_key("blk.0.post_attention_norm.weight")
+            && self.tensor_dims.contains_key("blk.0.post_ffw_norm.weight");
+        // Set before compute_derived so arch-based fallback doesn't override
+        spec.has_qk_norm = has_qk_norm;
+        spec.post_norm_enabled = post_norm_enabled;
+
         // If head_dim was not in GGUF metadata (e.g. Qwen3 omits attention.key_length),
         // infer it from the Q weight shape: blk.0.attn_q.weight dims = [n_embd, n_head * head_dim]
         if spec.n_head.checked_div(spec.n_head).is_some() {

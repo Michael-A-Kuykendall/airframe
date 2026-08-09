@@ -151,7 +151,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     eprintln!(
-        "[Layer Dump] Spec: n_embd={}, n_head={}, n_head_kv={}, head_dim={} (n_embd/n_head={}), rope_dim={}, n_ctx={}, ffn_dim={}, rms_eps={}, has_qk_norm={}, attn_logit_softcap={}",
+        "[Layer Dump] Spec: n_embd={}, n_head={}, n_head_kv={}, head_dim={} (n_embd/n_head={}), rope_dim={}, n_ctx={}, ffn_dim={}, rms_eps={}, has_qk_norm={}, post_norm_enabled={}, attn_logit_softcap={}",
         spec.n_embd,
         spec.n_head,
         spec.n_head_kv,
@@ -162,6 +162,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         spec.ff_dim,
         spec.rms_eps,
         spec.has_qk_norm,
+        spec.post_norm_enabled,
         spec.attn_logit_softcap
     );
     if head_dim as usize != spec.n_embd / spec.n_head.max(1) {
