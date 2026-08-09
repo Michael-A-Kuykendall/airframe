@@ -16,7 +16,7 @@ use crate::core::dequant::{
     dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,
 };
 use crate::core::model::GgufTensorInfo;
-use crate::core::spec::{ModelArch, ModelSpec};
+use crate::core::spec::ModelSpec;
 #[cfg(feature = "isf")]
 use crate::runtime::kvcache::KvSnapshot;
 use memmap2::Mmap;
@@ -235,31 +235,29 @@ impl GpuRuntime {
         drop(header_file);
         let mut spec = header_meta.to_model_spec();
 
-        // Gemma-2: n_embd != n_head * head_dim. Q weight shape [n_embd, n_head*head_dim]
-        // gives the actual head_dim. Correct it here because the GGUF metadata omits
-        // attention.key_length, and the default n_embd/n_head is wrong for this arch.
-        if matches!(spec.arch, ModelArch::Gemma) {
-            if let Some(dims) = header_meta
-                .tensor_dims
-                .get("blk.0.attn_q.weight")
-                .or_else(|| {
-                    header_meta
-                        .tensor_dims
-                        .iter()
-                        .find(|(k, _)| k.contains("attn_q.weight") && k.starts_with("blk.0"))
-                        .map(|(_, v)| v)
-                })
-            {
-                if dims.len() >= 2 {
-                    let inferred = dims[1] as usize / spec.n_head;
-                    if inferred > 0 && inferred != spec.head_dim {
-                        eprintln!(
-                            "[GpuRuntime] head_dim corrected {} -> {} from Q weight shape {:?}",
-                            spec.head_dim, inferred, dims
-                        );
-                        spec.head_dim = inferred;
-                        spec = spec.compute_derived();
-                    }
+        // head_dim correction: n_embd != n_head * head_dim for some archs (Gemma, Qwen3).
+        // Q weight shape [n_embd, n_head*head_dim] gives the actual head_dim.
+        // Apply universally for any arch where Q weight shape disagrees with n_embd/n_head.
+        if let Some(dims) = header_meta
+            .tensor_dims
+            .get("blk.0.attn_q.weight")
+            .or_else(|| {
+                header_meta
+                    .tensor_dims
+                    .iter()
+                    .find(|(k, _)| k.contains("attn_q.weight") && k.starts_with("blk.0"))
+                    .map(|(_, v)| v)
+            })
+        {
+            if dims.len() >= 2 {
+                let inferred = dims[1] as usize / spec.n_head;
+                if inferred > 0 && inferred != spec.head_dim {
+                    eprintln!(
+                        "[GpuRuntime] head_dim corrected {} -> {} from Q weight shape {:?}",
+                        spec.head_dim, inferred, dims
+                    );
+                    spec.head_dim = inferred;
+                    spec = spec.compute_derived();
                 }
             }
         }

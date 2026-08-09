@@ -491,6 +491,20 @@ impl BindlessMetadata {
         spec.has_qk_norm = has_qk_norm;
         spec.post_norm_enabled = post_norm_enabled;
 
+        // Derive packed-K stride from actual tensor shapes (not arch string).
+        // For packed formats (Qwen3), attn_q/attn_k column counts differ from n_embd;
+        // for standard models dims[1] == n_embd, so these equal the shader default (dim).
+        if let Some(dims) = self.tensor_dims.get("blk.0.attn_q.weight") {
+            if dims.len() >= 2 {
+                spec.q_weight_k = dims[1] as usize;
+            }
+        }
+        if let Some(dims) = self.tensor_dims.get("blk.0.attn_k.weight") {
+            if dims.len() >= 2 {
+                spec.k_weight_k = dims[1] as usize;
+            }
+        }
+
         // If head_dim was not in GGUF metadata (e.g. Qwen3 omits attention.key_length),
         // infer it from the Q weight shape: blk.0.attn_q.weight dims = [n_embd, n_head * head_dim]
         if spec.n_head.checked_div(spec.n_head).is_some() {

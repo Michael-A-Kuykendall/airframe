@@ -330,11 +330,12 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 blob_base_words: compiled.blob_base_words,
                 ..layer_params_base
             };
-            // Match product path: Qwen3 packed K stride hint (2 * n_embd).
-            if spec.arch_string() == "qwen3" {
-                let packed_k = 2 * dim;
-                layer_params.q_weight_k = packed_k;
-                layer_params.k_weight_k = packed_k;
+            // Tensor-derived packed K stride hints (0 = use dim); matches product path.
+            if spec.q_weight_k > 0 {
+                layer_params.q_weight_k = spec.q_weight_k as u32;
+            }
+            if spec.k_weight_k > 0 {
+                layer_params.k_weight_k = spec.k_weight_k as u32;
             }
 
             layer_output = pipeline.run_layer_with_cache(

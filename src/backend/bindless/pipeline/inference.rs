@@ -844,10 +844,11 @@ impl BindlessPipeline {
                 chunk_words: model.chunk_words(),
                 ..params_base
             };
-            if spec.arch_string() == "qwen3" {
-                let packed_k = 2 * dim;
-                layer_params_i.q_weight_k = packed_k;
-                layer_params_i.k_weight_k = packed_k;
+            if spec.q_weight_k > 0 {
+                layer_params_i.q_weight_k = spec.q_weight_k as u32;
+            }
+            if spec.k_weight_k > 0 {
+                layer_params_i.k_weight_k = spec.k_weight_k as u32;
             }
 
             let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =

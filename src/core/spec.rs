@@ -115,6 +115,10 @@ pub struct ModelSpec {
     pub has_qk_norm: bool,
     /// Gemma-2 has post-attention and post-FFW norms. False for others.
     pub post_norm_enabled: bool,
+    /// Packed-K stride hint for attn_q.weight (0 = use n_embd; for Qwen3 packed format)
+    pub q_weight_k: usize,
+    /// Packed-K stride hint for attn_k.weight (0 = use n_embd; for Qwen3 packed format)
+    pub k_weight_k: usize,
 
     // Derived dimensions (computed once, used everywhere)
     pub head_dim: usize,  // n_embd / n_head
@@ -352,6 +356,8 @@ impl ModelSpec {
             final_logit_softcap: final_softcap.unwrap_or(0.0),
             has_qk_norm: false,       // set in compute_derived() from arch
             post_norm_enabled: false, // set in compute_derived() from arch
+            q_weight_k: 0,            // set from tensor shape in metadata.rs
+            k_weight_k: 0,            // set from tensor shape in metadata.rs
             head_dim: head_dim_expl.unwrap_or(0),
             gqa_ratio: 0,
             kv_dim: 0,
@@ -386,6 +392,8 @@ impl ModelSpec {
             final_logit_softcap: 0.0,
             has_qk_norm: false,
             post_norm_enabled: false,
+            q_weight_k: 0,
+            k_weight_k: 0,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
@@ -667,6 +675,8 @@ mod tests {
             final_logit_softcap: 0.0,
             has_qk_norm: false,
             post_norm_enabled: false,
+            q_weight_k: 0,
+            k_weight_k: 0,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
