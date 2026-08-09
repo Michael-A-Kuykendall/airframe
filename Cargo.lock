@@ -57,6 +57,7 @@ dependencies = [
 name = "airframe-conformance"
 version = "0.1.0"
 dependencies = [
+ "airframe-conformance-protocol",
  "chrono",
  "jsonschema",
  "semver",
@@ -65,6 +66,20 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "airframe-conformance-protocol"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "jsonschema",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
  "uuid",
 ]
 

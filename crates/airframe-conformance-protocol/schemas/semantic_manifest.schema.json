@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Airframe Conformance Semantic Manifest v1",
+  "description": "Semantic manifest with Llama profile derived from raw GGUF evidence.",
+  "type": "object",
+  "required": ["$schema", "raw_identity", "profile", "equations", "unsupported_facts", "conflicting_facts", "created_at", "conformance_version"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "const": "airframe.conformance.semantic_manifest.v1"
+    },
+    "raw_identity": {
+      "$ref": "#/$defs/conformanceManifest"
+    },
+    "profile": {
+      "$ref": "#/$defs/llamaProfile"
+    },
+    "equations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/validatedEquation" }
+    },
+    "unsupported_facts": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "conflicting_facts": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "conformance_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    }
+  },
+  "$defs": {
+    "provenanced": {
+      "type": "object",
+      "required": ["value", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "value": {},
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "valueProvenance": {
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": true,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["gguf_metadata", "tensor_directory", "derived", "default", "unsupported", "conflicting"]
+        },
+        "key": { "type": "string" },
+        "tensor_name": { "type": "string" },
+        "field": { "type": "string" },
+        "equation": { "type": "string" },
+        "inputs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "reason": { "type": "string" },
+        "values": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/provenancedString" }
+        }
+      }
+    },
+    "provenancedString": {
+      "type": "object",
+      "required": ["value", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": "string" },
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "llamaProfile": {
+      "type": "object",
+      "required": ["architecture", "parameter_count", "quantization", "context_length", "embedding_dim", "layer_count", "attention_head_count", "kv_head_count", "head_dim", "rope_dim", "rope_freq_base", "rope_scaling_factor", "rope_scaling_type", "attn_layer_norm_eps", "feed_forward_length", "use_parallel_residual", "tensor_data_layout", "expert_count", "expert_used_count", "file_type", "qk_norm", "post_attention_norm"],
+      "additionalProperties": true,
+      "properties": {
+        "architecture": { "$ref": "#/$defs/provenancedString" },
+        "parameter_count": { "$ref": "#/$defs/provenancedString" },
+        "quantization": { "$ref": "#/$defs/provenancedString" },
+        "context_length": { "$ref": "#/$defs/provenancedUInt32" },
+        "embedding_dim": { "$ref": "#/$defs/provenancedUInt32" },
+        "layer_count": { "$ref": "#/$defs/provenancedUInt32" },
+        "attention_head_count": { "$ref": "#/$defs/provenancedUInt32" },
+        "kv_head_count": { "$ref": "#/$defs/provenancedUInt32" },
+        "head_dim": { "$ref": "#/$defs/provenancedUInt32" },
+        "rope_dim": { "$ref": "#/$defs/provenancedUInt32" },
+        "rope_freq_base": { "$ref": "#/$defs/provenancedFloat32" },
+        "rope_scaling_factor": { "$ref": "#/$defs/provenancedOptionalFloat32" },
+        "rope_scaling_type": { "$ref": "#/$defs/provenancedOptionalString" },
+        "attn_layer_norm_eps": { "$ref": "#/$defs/provenancedFloat32" },
+        "feed_forward_length": { "$ref": "#/$defs/provenancedUInt32" },
+        "use_parallel_residual": { "$ref": "#/$defs/provenancedBool" },
+        "tensor_data_layout": { "$ref": "#/$defs/provenancedString" },
+        "expert_count": { "$ref": "#/$defs/provenancedOptionalUInt32" },
+        "expert_used_count": { "$ref": "#/$defs/provenancedOptionalUInt32" },
+        "file_type": { "$ref": "#/$defs/provenancedUInt32" },
+        "qk_norm": { "$ref": "#/$defs/provenancedBool" },
+        "post_attention_norm": { "$ref": "#/$defs/provenancedBool" }
+      }
+    },
+    "provenancedUInt32": {
+      "type": "object",
+      "required": ["value", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": "integer", "minimum": 0 },
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "provenancedFloat32": {
+      "type": "object",
+      "required": ["value", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": "number" },
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "provenancedBool": {
+      "type": "object",
+      "required": ["value", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": "boolean" },
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "provenancedOptionalFloat32": {
+      "type": "object",
+      "required": ["value", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "provenancedOptionalString": {
+      "type": "object",
+      "required": ["value", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": ["string", "null"] },
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "provenancedOptionalUInt32": {
+      "type": "object",
+      "required": ["value", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": ["integer", "null"], "minimum": 0 },
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "validatedEquation": {
+      "type": "object",
+      "required": ["name", "equation", "passed", "lhs", "rhs", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "equation": { "type": "string", "minLength": 1 },
+        "passed": { "type": "boolean" },
+        "lhs": { "$ref": "#/$defs/provenancedString" },
+        "rhs": { "$ref": "#/$defs/provenancedString" },
+        "provenance": { "$ref": "#/$defs/valueProvenance" }
+      }
+    },
+    "conformanceManifest": {
+      "type": "object",
+      "required": ["$schema", "run_id", "conformance_version", "created_at", "model", "capture", "comparison", "evidence"],
+      "additionalProperties": true,
+      "properties": {
+        "$schema": {
+          "const": "airframe.conformance.manifest.v1"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "conformance_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "model": {
+          "type": "object",
+          "required": ["model_path", "architecture", "parameter_count", "quantization"],
+          "additionalProperties": true,
+          "properties": {
+            "model_path": { "type": "string", "minLength": 1 },
+            "architecture": { "type": "string", "minLength": 1 },
+            "parameter_count": { "type": "string", "minLength": 1 },
+            "quantization": { "type": "string", "minLength": 1 },
+            "gguf_metadata": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "capture": {
+          "type": "object",
+          "required": ["engine", "prompts", "levels", "max_tokens"],
+          "additionalProperties": true,
+          "properties": {
+            "engine": { "type": "string", "minLength": 1 },
+            "engine_config": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "prompts": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "minItems": 1
+            },
+            "levels": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0, "maximum": 8 },
+              "minItems": 1
+            },
+            "max_tokens": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "comparison": {
+          "type": "object",
+          "required": ["reference_engine", "rms_tolerance", "logits_tolerance", "layers", "require_monotonic_rms"],
+          "additionalProperties": true,
+          "properties": {
+            "reference_engine": { "type": "string", "minLength": 1 },
+            "rms_tolerance": { "type": "number", "exclusiveMinimum": 0 },
+            "logits_tolerance": { "type": "number", "exclusiveMinimum": 0 },
+            "layers": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 }
+            },
+            "require_monotonic_rms": { "type": "boolean" }
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "required": ["output_dir", "include_raw_tensors", "include_layer_comparisons", "compression"],
+          "additionalProperties": true,
+          "properties": {
+            "output_dir": { "type": "string", "minLength": 1 },
+            "include_raw_tensors": { "type": "boolean" },
+            "include_layer_comparisons": { "type": "boolean" },
+            "compression": { "type": "string", "enum": ["none", "gzip", "zstd"] }
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

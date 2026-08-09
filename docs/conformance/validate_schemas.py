@@ -13,7 +13,10 @@ from jsonschema import Draft202012Validator
 
 
 SCHEMA_DIR = (
-    Path(__file__).parent.parent.parent / "crates" / "airframe-conformance" / "schemas"
+    Path(__file__).parent.parent.parent
+    / "crates"
+    / "airframe-conformance-protocol"
+    / "schemas"
 )
 
 SCHEMA_FILES = [
@@ -23,6 +26,7 @@ SCHEMA_FILES = [
     "build_provenance.schema.json",
     "comparison.schema.json",
     "evidence.schema.json",
+    "semantic_manifest.schema.json",
 ]
 
 

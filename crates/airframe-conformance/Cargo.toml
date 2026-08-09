@@ -2,15 +2,19 @@
 name = "airframe-conformance"
 version = "0.1.0"
 edition = "2021"
-description = "Independent conformance verification for Airframe GPU inference engine. Test-only crate — not a production dependency."
+description = "Independent conformance evaluator for Airframe GPU inference engine. Test-only crate — not published."
 license = "MIT"
 repository = "https://github.com/Michael-A-Kuykendall/airframe"
 homepage = "https://github.com/Michael-A-Kuykendall/airframe"
 readme = "README.md"
 keywords = ["conformance", "verification", "gguf", "inference", "testing"]
 categories = ["development-tools", "testing"]
+publish = false
 
 [dependencies]
+# Protocol definitions (neutral, shared with production capture)
+airframe-conformance-protocol = { path = "../airframe-conformance-protocol", version = "0.1.0" }
+
 # Specification-only dependencies (no production Airframe semantic/loader/dispatch/offset/cache/capture)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -1,0 +1,27 @@
+[package]
+name = "airframe-conformance-protocol"
+version = "0.1.0"
+edition = "2021"
+description = "Neutral conformance protocol definitions. Shared by production capture and evaluator."
+license = "MIT"
+repository = "https://github.com/Michael-A-Kuykendall/airframe"
+homepage = "https://github.com/Michael-A-Kuykendall/airframe"
+readme = "README.md"
+keywords = ["conformance", "protocol", "gguf", "inference"]
+categories = ["development-tools", "testing"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+jsonschema = "0.22"
+thiserror = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.8", features = ["serde", "v4"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3.24"
+
+[lib]
+name = "airframe_conformance_protocol"
+path = "src/lib.rs"

@@ -1,4 +1,6 @@
-use crate::{capture_protocol, comparison, evidence_package, input_declaration, manifest};
+use crate::{
+    capture_protocol, comparison, evidence_package, input_declaration, manifest, semantic_manifest,
+};
 use jsonschema::{Draft, Validator};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -72,6 +74,14 @@ impl SchemaValidator {
         schemas.insert(
             "airframe.conformance.evidence.v1".to_string(),
             evidence_schema,
+        );
+
+        // Semantic manifest schema
+        let semantic_manifest_schema =
+            Self::compile_schema(include_str!("../schemas/semantic_manifest.schema.json"))?;
+        schemas.insert(
+            "airframe.conformance.semantic_manifest.v1".to_string(),
+            semantic_manifest_schema,
         );
 
         Ok(Self { schemas })
@@ -153,6 +163,15 @@ impl SchemaValidator {
         let value = serde_json::to_value(pkg)?;
         self.validate("airframe.conformance.evidence.v1", &value)
     }
+
+    /// Validate a semantic manifest.
+    pub fn validate_semantic_manifest(
+        &self,
+        manifest: &semantic_manifest::SemanticManifest,
+    ) -> Result<(), ValidationError> {
+        let value = serde_json::to_value(manifest)?;
+        self.validate("airframe.conformance.semantic_manifest.v1", &value)
+    }
 }
 
 impl Default for SchemaValidator {
@@ -195,6 +214,13 @@ pub fn validate_comparison(comp: &comparison::ComparisonResult) -> Result<(), Va
 /// Validate an evidence package.
 pub fn validate_evidence(pkg: &evidence_package::EvidencePackage) -> Result<(), ValidationError> {
     SchemaValidator::new()?.validate_evidence(pkg)
+}
+
+/// Validate a semantic manifest.
+pub fn validate_semantic_manifest(
+    manifest: &semantic_manifest::SemanticManifest,
+) -> Result<(), ValidationError> {
+    SchemaValidator::new()?.validate_semantic_manifest(manifest)
 }
 
 /// Validate all schemas can be compiled (used by validate_schemas.py).

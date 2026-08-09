@@ -1,19 +1,14 @@
-//! airframe-conformance — Independent conformance verification for Airframe GPU inference engine.
+//! airframe-conformance — Independent conformance evaluator for Airframe GPU inference engine.
 //!
-//! This crate is TEST-ONLY and must NOT be a production dependency.
-//! It enforces a one-way dependency boundary: conformance code may only import
-//! specification APIs, never production Airframe semantic/loader/dispatch/offset/
-//! cache/capture implementations. Production capture is consumed as telemetry only.
+//! This crate is TEST-ONLY and must NOT be a production dependency. It is not published.
+//! It depends on the neutral airframe-conformance-protocol crate for shared protocol types.
 
-pub mod capture_protocol;
-pub mod comparison;
-pub mod evidence_package;
-pub mod input_declaration;
-pub mod manifest;
-pub mod schemas;
+pub use airframe_conformance_protocol::{
+    capture_protocol, comparison, evidence_package, input_declaration, manifest, schemas,
+};
 
 /// Re-export schema validation for external tools.
-pub use schemas::{validate_all_schemas, SchemaValidator};
+pub use airframe_conformance_protocol::schemas::{validate_all_schemas, SchemaValidator};
 
 /// The conformance crate version — used in evidence packages.
 pub const CONFORMANCE_VERSION: &str = env!("CARGO_PKG_VERSION");
