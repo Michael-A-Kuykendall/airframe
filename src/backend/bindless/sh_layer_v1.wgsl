@@ -98,6 +98,8 @@ struct LayerParams {
     formula_ffn_up: u32,    // ffn_up
     blob_base_words: u32,   // base_byte/4 for reconstructing absolute word index
     chunk_words: u32,       // words per blob chunk — dispatch read_blob across blob_0..blob_7
+    v_plain_rms_norm: u32,  // 1 = per-head plain RMSNorm on V before attention (Gemma-4); 0 = disabled
+    out_scale_enabled: u32, // 1 = multiply final block residual by layer_scales[layer_idx] (Gemma-4); 0 = disabled
 };
 
 struct CacheParams {
@@ -197,6 +199,7 @@ fn post_ffw_norm_slot() -> u32 {
 @group(0) @binding(7) var<storage, read_write> kv_cache_k: array<f32>;    // K cache [max_seq * n_head_kv * head_dim]
 @group(0) @binding(8) var<storage, read_write> kv_cache_v: array<f32>;    // V cache [max_seq * n_head_kv * head_dim]
 @group(0) @binding(9) var<uniform> cache_params: CacheParams;             // Sequence position tracking
+@group(0) @binding(17) var<storage, read> layer_scales: array<f32>;       // [n_layer] per-block output scale (Gemma-4); absent -> all 1.0
 
 fn is_non_gated() -> bool {
     if (params.ffn_kind_policy == 2u) {
@@ -613,13 +616,34 @@ fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let token_idx  = global_id.y;
 
     if (token_idx >= cache_params.batch_size) { return; }
-    if (params.qk_norm_enabled == 0u) { return; }
+    if (params.qk_norm_enabled == 0u && params.v_plain_rms_norm == 0u) { return; }
 
     let temp_base = token_idx * params.temp_stride;
     let dim_q     = params.head_count    * params.head_dim;
     let dim_k     = params.head_count_kv * params.head_dim;
+    let dim_v     = params.head_count_kv * params.head_dim;
 
-    if (idx >= dim_q + dim_k) { return; }
+    if (idx >= dim_q + dim_k + dim_v) { return; }
+
+    // V plain per-head RMSNorm (Gemma-4: llama.cpp `ggml_rms_norm` on Vcur,
+    // no weight vector — per-head, applied before attention).
+    if (params.v_plain_rms_norm != 0u && idx >= dim_q + dim_k) {
+        let v_idx = idx - dim_q - dim_k;
+        let v_head_idx = v_idx / params.head_dim;
+        let v_dim_in_head = v_idx % params.head_dim;
+        let v_cache_base = (cache_params.current_pos + token_idx) * params.head_count_kv * params.head_dim
+                         + v_head_idx * params.head_dim;
+        var v_sum_sq = 0.0;
+        for (var i = 0u; i < params.head_dim; i++) {
+            let v = kv_cache_v[v_cache_base + i];
+            v_sum_sq += v * v;
+        }
+        let v_rms = inverseSqrt(v_sum_sq / f32(params.head_dim) + params.rms_eps);
+        kv_cache_v[v_cache_base + v_dim_in_head] = kv_cache_v[v_cache_base + v_dim_in_head] * v_rms;
+        return;
+    }
+
+    if (params.qk_norm_enabled == 0u) { return; }
 
     let is_k       = idx >= dim_q;
     let elem_idx   = select(idx, idx - dim_q, is_k);
@@ -874,27 +898,35 @@ fn main_post_ffw_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let token_idx = global_id.y;
 
     if (idx >= params.dim || token_idx >= cache_params.batch_size) { return; }
-    if (params.post_norm_enabled == 0u) { return; }
+    if (params.post_norm_enabled == 0u && params.out_scale_enabled == 0u) { return; }
 
     let act_base = token_idx * params.dim;
     let temp_base = token_idx * params.temp_stride;
 
-    // FFN down stash is at temp_base + ffn_dim*2 + idx (written by main_ffn_down)
-    var sum_sq = 0.0;
-    for (var i = 0u; i < params.dim; i++) {
-        let v = temp_state[temp_base + params.ffn_dim * 2u + i];
-        sum_sq += v * v;
+    if (params.post_norm_enabled != 0u) {
+        // FFN down stash is at temp_base + ffn_dim*2 + idx (written by main_ffn_down)
+        var sum_sq = 0.0;
+        for (var i = 0u; i < params.dim; i++) {
+            let v = temp_state[temp_base + params.ffn_dim * 2u + i];
+            sum_sq += v * v;
+        }
+        let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
+
+        // Apply post-ffw norm weight (4-slot:3 / 6-slot:5)
+        let norm_offset_base = norm_bank_base(post_ffw_norm_slot());
+        let norm_w = norm_bank[norm_offset_base + idx];
+        let dot = temp_state[temp_base + params.ffn_dim * 2u + idx];
+        let normed_dot = dot * rms * norm_w;
+
+        // Correct residual: activation_in was (residual + dot), should be (residual + normed_dot)
+        activation_in[act_base + idx] += normed_dot - dot;
     }
-    let rms = inverseSqrt(sum_sq / f32(params.dim) + params.rms_eps);
 
-    // Apply post-ffw norm weight (4-slot:3 / 6-slot:5)
-    let norm_offset_base = norm_bank_base(post_ffw_norm_slot());
-    let norm_w = norm_bank[norm_offset_base + idx];
-    let dot = temp_state[temp_base + params.ffn_dim * 2u + idx];
-    let normed_dot = dot * rms * norm_w;
-
-    // Correct residual: activation_in was (residual + dot), should be (residual + normed_dot)
-    activation_in[act_base + idx] += normed_dot - dot;
+    // Gemma-4 layer_output_scale: applied to the FULL block output (after all
+    // residual adds incl. post norms) — llama.cpp gemma4.cpp: cur *= out_scale.
+    if (params.out_scale_enabled != 0u) {
+        activation_in[act_base + idx] = activation_in[act_base + idx] * layer_scales[offsets.layer_idx];
+    }
 }
 
 // Workgroup-shared partial sums for the FFN norm cooperative reduction.

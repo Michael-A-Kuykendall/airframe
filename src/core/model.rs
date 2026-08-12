@@ -869,10 +869,19 @@ fn model_spec_from_metadata(metadata: &HashMap<String, GgufMetaValue>) -> Result
         n_ctx,
         attn_logit_softcap: attn_softcap.unwrap_or(0.0),
         final_logit_softcap: final_softcap.unwrap_or(0.0),
-        has_qk_norm: false,       // set by compute_derived via arch
-        post_norm_enabled: false, // set by compute_derived via arch
-        q_weight_k: 0,            // set from tensor shape in metadata.rs
-        k_weight_k: 0,            // set from tensor shape in metadata.rs
+        has_qk_norm: false,         // set by compute_derived via arch
+        post_norm_enabled: false,   // set by compute_derived via arch
+        q_weight_k: 0,              // set from tensor shape in metadata.rs
+        k_weight_k: 0,              // set from tensor shape in metadata.rs
+        dense_latent_layout: false, // set from tensor presence in metadata.rs
+        latent_dim: 0,
+        per_layer_token_embd_offset: 0,
+        per_layer_token_embd_quant: 0,
+        per_layer_model_proj_offset: 0,
+        per_layer_proj_norm_offset: 0,
+        v_plain_rms_norm: false,
+        out_scale_enabled: false,
+        scale_embeddings_by_sqrt_dim: false,
         head_dim: head_dim_explicit.unwrap_or(0),
         gqa_ratio: 0,
         kv_dim: 0,
@@ -1684,6 +1693,15 @@ mod tests {
             yarn_alpha: 0.0,
             yarn_beta: 0.0,
             n_ctx: 1024,
+            dense_latent_layout: false,
+            latent_dim: 0,
+            per_layer_token_embd_offset: 0,
+            per_layer_token_embd_quant: 0,
+            per_layer_model_proj_offset: 0,
+            per_layer_proj_norm_offset: 0,
+            v_plain_rms_norm: false,
+            out_scale_enabled: false,
+            scale_embeddings_by_sqrt_dim: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,

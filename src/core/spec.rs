@@ -119,6 +119,28 @@ pub struct ModelSpec {
     pub q_weight_k: usize,
     /// Packed-K stride hint for attn_k.weight (0 = use n_embd; for Qwen3 packed format)
     pub k_weight_k: usize,
+    /// Gemma-4-E4B dense-latent layout: shared per-layer embedding + projection
+    /// (`per_layer_token_embd` [latent, vocab], `per_layer_model_proj` [n_embd, latent],
+    /// `per_layer_proj_norm` [latent]) feeding a latent-d attention body via
+    /// per-block `inp_gate` / `proj` / `layer_output_scale`. Derived from tensor presence.
+    pub dense_latent_layout: bool,
+    /// Embedding latent dim (10752 for gemma-4-E4B; the row count of
+    /// per_layer_model_proj). 0 when dense_latent_layout is false.
+    pub latent_dim: usize,
+    /// Packed byte offsets (GGUF blob) of the shared per-layer tensors; 0 = absent.
+    pub per_layer_token_embd_offset: u64,
+    pub per_layer_token_embd_quant: u32,
+    pub per_layer_model_proj_offset: u64,
+    pub per_layer_proj_norm_offset: u64,
+    /// Gemma-4-style plain per-head RMSNorm on V (no weight vector) — llama.cpp
+    /// gemma4.cpp: `ggml_rms_norm(Vcur)`. Derived from tensor presence.
+    pub v_plain_rms_norm: bool,
+    /// Gemma-4 `layer_output_scale` per block (F32 scalar, applied to the full
+    /// block output). Derived from `blk.0.layer_output_scale.weight` presence.
+    pub out_scale_enabled: bool,
+    /// Multiply token embeddings by sqrt(n_embd) before the first block
+    /// (llama.cpp gemma4.cpp: `ggml_scale(inpL, sqrtf(n_embd))`).
+    pub scale_embeddings_by_sqrt_dim: bool,
 
     // Derived dimensions (computed once, used everywhere)
     pub head_dim: usize,  // n_embd / n_head
@@ -354,10 +376,19 @@ impl ModelSpec {
             n_ctx: n_ctx.unwrap_or(2048),
             attn_logit_softcap: attn_softcap.unwrap_or(0.0),
             final_logit_softcap: final_softcap.unwrap_or(0.0),
-            has_qk_norm: false,       // set in compute_derived() from arch
-            post_norm_enabled: false, // set in compute_derived() from arch
-            q_weight_k: 0,            // set from tensor shape in metadata.rs
-            k_weight_k: 0,            // set from tensor shape in metadata.rs
+            has_qk_norm: false,         // set in compute_derived() from arch
+            post_norm_enabled: false,   // set in compute_derived() from arch
+            q_weight_k: 0,              // set from tensor shape in metadata.rs
+            k_weight_k: 0,              // set from tensor shape in metadata.rs
+            dense_latent_layout: false, // set from tensor presence in metadata.rs
+            latent_dim: 0,
+            per_layer_token_embd_offset: 0,
+            per_layer_token_embd_quant: 0,
+            per_layer_model_proj_offset: 0,
+            per_layer_proj_norm_offset: 0,
+            v_plain_rms_norm: false,
+            out_scale_enabled: false, // set from tensor presence in metadata.rs
+            scale_embeddings_by_sqrt_dim: false, // set from arch in metadata.rs
             head_dim: head_dim_expl.unwrap_or(0),
             gqa_ratio: 0,
             kv_dim: 0,
@@ -394,6 +425,15 @@ impl ModelSpec {
             post_norm_enabled: false,
             q_weight_k: 0,
             k_weight_k: 0,
+            dense_latent_layout: false,
+            latent_dim: 0,
+            per_layer_token_embd_offset: 0,
+            per_layer_token_embd_quant: 0,
+            per_layer_model_proj_offset: 0,
+            per_layer_proj_norm_offset: 0,
+            v_plain_rms_norm: false,
+            out_scale_enabled: false,
+            scale_embeddings_by_sqrt_dim: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
@@ -677,6 +717,15 @@ mod tests {
             post_norm_enabled: false,
             q_weight_k: 0,
             k_weight_k: 0,
+            dense_latent_layout: false,
+            latent_dim: 0,
+            per_layer_token_embd_offset: 0,
+            per_layer_token_embd_quant: 0,
+            per_layer_model_proj_offset: 0,
+            per_layer_proj_norm_offset: 0,
+            v_plain_rms_norm: false,
+            out_scale_enabled: false,
+            scale_embeddings_by_sqrt_dim: false,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,

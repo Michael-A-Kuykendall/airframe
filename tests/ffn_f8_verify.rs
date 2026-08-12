@@ -134,6 +134,8 @@ async fn test_f8_gpu_ffn_verification() -> Result<(), Box<dyn std::error::Error>
         formula_ffn_up: 0,
         blob_base_words: 0,
         chunk_words: 0,
+        v_plain_rms_norm: 0,
+        out_scale_enabled: 0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);

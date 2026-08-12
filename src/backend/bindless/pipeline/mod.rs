@@ -354,6 +354,10 @@ pub struct LayerParams {
     /// Words per blob chunk (effective_chunk / 4). Shaders dispatch read_blob
     /// across blob_0..blob_7 using this. Must stay at the END to match WGSL.
     pub chunk_words: u32,
+    /// 1 = apply per-head plain RMSNorm on V before attention (Gemma-4); 0 = disabled
+    pub v_plain_rms_norm: u32,
+    /// 1 = multiply the final block residual by layer_scales[layer_idx] (Gemma-4); 0 = disabled
+    pub out_scale_enabled: u32,
 }
 
 /// Map a raw GGML quant type id to the B1 formula-index slot the shaders
@@ -1219,6 +1223,17 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 16,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    // Layer Output Scales (Gemma-4 per-block, F32; binding 17)
+                    binding: 17,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },

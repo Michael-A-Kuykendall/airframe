@@ -22,6 +22,11 @@ pub struct PreflightResources {
     /// Eliminates the need for unaligned reads in the shader.
     /// Layout: [Layer 0 AttnNorm] [Layer 0 FFN Norm] ... [Final Norm]
     pub norm_bank_buffer: wgpu::Buffer,
+
+    /// Per-block output scale (Gemma-4 `layer_output_scale`, F32 per layer).
+    /// All 1.0 when the model has no such tensor (neutral — gated by
+    /// `out_scale_enabled` in LayerParams).
+    pub layer_scales_buffer: wgpu::Buffer,
 }
 
 impl PreflightResources {
@@ -42,11 +47,40 @@ impl PreflightResources {
         let rope_buffer = Self::upload_rope_table(device, &rope_data_ext, spec.rope_scale, spec);
         let norm_buffer = Self::build_norm_bank_from_ram(device, raw_data, metadata, spec);
 
+        // Gemma-4 per-block output scale (F32 dims[1] per layer), read straight
+        // from the GGUF blob. Absent/other models -> all 1.0 (neutral).
+        let mut layer_scales = vec![1.0f32; spec.n_layer];
+        if metadata
+            .tensor_dims
+            .contains_key("blk.0.layer_output_scale.weight")
+        {
+            for (i, scale) in layer_scales.iter_mut().enumerate() {
+                let key = format!("blk.{}.layer_output_scale.weight", i);
+                if let Some(off) = metadata.get_tensor_offset(&key) {
+                    let start = off as usize;
+                    if start + 4 <= raw_data.len() {
+                        *scale = f32::from_le_bytes([
+                            raw_data[start],
+                            raw_data[start + 1],
+                            raw_data[start + 2],
+                            raw_data[start + 3],
+                        ]);
+                    }
+                }
+            }
+        }
+        let scales_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Layer Output Scales"),
+            contents: bytemuck::cast_slice(&layer_scales),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
         Self {
             rope_cache_buffer: rope_buffer,
             rope_data_native,
             rope_data_ext,
             norm_bank_buffer: norm_buffer,
+            layer_scales_buffer: scales_buffer,
         }
     }
 
@@ -287,6 +321,15 @@ mod tests {
             post_norm_enabled: false,
             q_weight_k: 0,
             k_weight_k: 0,
+            dense_latent_layout: false,
+            latent_dim: 0,
+            per_layer_token_embd_offset: 0,
+            per_layer_token_embd_quant: 0,
+            per_layer_model_proj_offset: 0,
+            per_layer_proj_norm_offset: 0,
+            v_plain_rms_norm: false,
+            out_scale_enabled: false,
+            scale_embeddings_by_sqrt_dim: false,
         }
     }
 

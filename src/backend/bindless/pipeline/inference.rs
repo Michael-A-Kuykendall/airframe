@@ -7,12 +7,64 @@ use crate::backend::tdr_calibration;
 use crate::core::routing::ModelRoutePlan;
 use std::sync::{Mutex, OnceLock};
 use wgpu::util::DeviceExt;
-
 /// Result type for model inference returning three activation vectors
 type InferenceResult = Result<(Vec<f32>, Vec<f32>, Vec<f32>), String>;
 
-// ── Layer Dump Capture Hook ──────────────────────────────────────────────────
-// Gated on the AIRFRAME_LAYER_DUMP_CAPTURE env var (set by layer_dump_gpu).
+// ── PPT Invariant Capture Hook ───────────────────────────────────────────────
+// Gated behind the `isf` feature (which also gates `airframe_observe`). When the
+// invariant probe sets `AIRFRAME_CAPTURE_INVARIANT=1`, each transformer layer's
+// post-layer activation is read back from the GPU and appended to a global
+// in-memory sink. This is the CAPTURE side of the PPT invariant cage — it must
+// NOT run in normal inference (the gate short-circuits before any GPU work).
+#[cfg(feature = "isf")]
+pub static mut INVARIANT_CAPTURE: Option<*mut Vec<airframe_observe::facts::CapturedLayer>> = None;
+
+/// A single captured layer activation (rms + checksum, lightweight — no full
+/// vector retained, to keep the sink small across many layers/positions).
+#[cfg(feature = "isf")]
+#[derive(Clone)]
+pub struct CapturedLayer {
+    pub layer_idx: u32,
+    pub position: u32,
+    pub rms: f32,
+    pub checksum: i64,
+    pub is_final_logits: bool,
+}
+
+/// Install the capture sink. `sink` must outlive the forward pass.
+#[cfg(feature = "isf")]
+pub fn set_invariant_capture_sink(sink: &mut Vec<airframe_observe::facts::CapturedLayer>) {
+    // SAFETY: the probe owns `sink` for the duration of the forward pass; we
+    // store the pointer and only deref it synchronously inside the forward call.
+    unsafe {
+        INVARIANT_CAPTURE = Some(sink as *mut Vec<airframe_observe::facts::CapturedLayer>);
+    }
+}
+
+/// Clear the capture sink (call after the forward pass completes).
+#[cfg(feature = "isf")]
+pub fn clear_invariant_capture_sink() {
+    unsafe {
+        INVARIANT_CAPTURE = None;
+    }
+}
+
+/// Borrow the registered capture sink mutably, if one is set.
+#[cfg(feature = "isf")]
+pub fn invariant_capture_sink_mut(
+) -> Option<&'static mut Vec<airframe_observe::facts::CapturedLayer>> {
+    unsafe { INVARIANT_CAPTURE.map(|p| &mut *p) }
+}
+
+// ── Layer-dump capture (q1c req 4: fused multi-token prefill states) ─────────
+// Env-gated full-state capture for layer_dump_gpu: after each transformer layer
+// of a fused multi-token prefill, the LAST token's activation slice is read
+// back and pushed into a global sink drained by the dump tool. Unlike the
+// isf-gated invariant capture (rms+checksum only), the full hidden state is
+// retained so the dump tool can emit per-layer stats and run strict
+// layer-to-layer divergence checks (q1c Gate 1). NOT isf-gated — plain release
+// builds must work. No-op unless AIRFRAME_LAYER_DUMP_CAPTURE=1.
+#[derive(Clone, Debug)]
 pub struct LayerDumpState {
     pub layer_idx: u32,
     pub position: u32,
@@ -84,53 +136,6 @@ fn emit_layer_dump_state(
     drop(mapped);
     staging.unmap();
 }
-
-// ── PPT Invariant Capture Hook ───────────────────────────────────────────────
-// Gated behind the `isf` feature (which also gates `airframe_observe`). When the
-// invariant probe sets `AIRFRAME_CAPTURE_INVARIANT=1`, each transformer layer's
-// post-layer activation is read back from the GPU and appended to a global
-// in-memory sink. This is the CAPTURE side of the PPT invariant cage — it must
-// NOT run in normal inference (the gate short-circuits before any GPU work).
-#[cfg(feature = "isf")]
-pub static mut INVARIANT_CAPTURE: Option<*mut Vec<airframe_observe::facts::CapturedLayer>> = None;
-
-/// A single captured layer activation (rms + checksum, lightweight — no full
-/// vector retained, to keep the sink small across many layers/positions).
-#[cfg(feature = "isf")]
-#[derive(Clone)]
-pub struct CapturedLayer {
-    pub layer_idx: u32,
-    pub position: u32,
-    pub rms: f32,
-    pub checksum: i64,
-    pub is_final_logits: bool,
-}
-
-/// Install the capture sink. `sink` must outlive the forward pass.
-#[cfg(feature = "isf")]
-pub fn set_invariant_capture_sink(sink: &mut Vec<airframe_observe::facts::CapturedLayer>) {
-    // SAFETY: the probe owns `sink` for the duration of the forward pass; we
-    // store the pointer and only deref it synchronously inside the forward call.
-    unsafe {
-        INVARIANT_CAPTURE = Some(sink as *mut Vec<airframe_observe::facts::CapturedLayer>);
-    }
-}
-
-/// Clear the capture sink (call after the forward pass completes).
-#[cfg(feature = "isf")]
-pub fn clear_invariant_capture_sink() {
-    unsafe {
-        INVARIANT_CAPTURE = None;
-    }
-}
-
-/// Borrow the registered capture sink mutably, if one is set.
-#[cfg(feature = "isf")]
-pub fn invariant_capture_sink_mut(
-) -> Option<&'static mut Vec<airframe_observe::facts::CapturedLayer>> {
-    unsafe { INVARIANT_CAPTURE.map(|p| &mut *p) }
-}
-
 // ── Stack dump capture (OBS-1 / PEEL): residual + per-stage intercepts ────────
 // Enabled when a stack sink is installed (stack_dump_gpu / AIRFRAME_STACK_DUMP).
 // Shares the same GPU readback as invariant capture when both are active.
@@ -563,17 +568,30 @@ impl BindlessPipeline {
         );
         assert!(chunk_tokens > 0, "chunk_tokens must be > 0");
 
+        // Gemma-4 input embedding scale: llama.cpp gemma4.cpp applies
+        // `ggml_scale(inpL, sqrtf(n_embd))` to token embeddings. RMSNorm makes
+        // it invisible to normed stages, but pre-norm projections (PLE context
+        // branch, MoE routers, decode logits) read inpL directly.
+        let scaled_embd: std::borrow::Cow<'_, [f32]>;
+        let embd_slice: &[f32] = if spec.scale_embeddings_by_sqrt_dim {
+            let s = (dim as f32).sqrt();
+            scaled_embd = std::borrow::Cow::Owned(input_embd.iter().map(|v| v * s).collect());
+            scaled_embd.as_ref()
+        } else {
+            input_embd
+        };
+
         let trace_chunks = std::env::var("AIRFRAME_TRACE_PREFILL_CHUNKS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
-        let total_tokens = input_embd.len() / dim;
+        let total_tokens = embd_slice.len() / dim;
         if total_tokens == 0 {
             return self.run_full_model_with_cache_state(
                 device,
                 queue,
                 model,
-                input_embd,
+                embd_slice,
                 head_weights_override,
                 current_pos,
                 current_pos,
@@ -587,7 +605,7 @@ impl BindlessPipeline {
         let mut processed_tokens = 0u32;
         let mut last_result = None;
 
-        for (chunk_idx, chunk) in input_embd.chunks(chunk_rows * dim).enumerate() {
+        for (chunk_idx, chunk) in embd_slice.chunks(chunk_rows * dim).enumerate() {
             let chunk_token_count = (chunk.len() / dim) as u32;
             let chunk_current_pos = current_pos + processed_tokens;
             let chunk_seq_len = chunk_current_pos + chunk_token_count;
@@ -760,6 +778,8 @@ impl BindlessPipeline {
             formula_ffn_up: 0,
             blob_base_words: 0,
             chunk_words: 0,
+            v_plain_rms_norm: spec.v_plain_rms_norm as u32,
+            out_scale_enabled: spec.out_scale_enabled as u32,
         };
 
         // Adaptive QKV micro-batch chunk size.
@@ -1058,6 +1078,15 @@ impl BindlessPipeline {
                             binding: 16,
                             resource: b7,
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 17,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .layer_scales_buffer
+                                .as_entire_binding(),
+                        },
                     ],
                 })
             };
@@ -1225,6 +1254,15 @@ impl BindlessPipeline {
                         wgpu::BindGroupEntry {
                             binding: 16,
                             resource: b7,
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 17,
+                            resource: model
+                                .preflight
+                                .as_ref()
+                                .unwrap()
+                                .layer_scales_buffer
+                                .as_entire_binding(),
                         },
                     ],
                 });

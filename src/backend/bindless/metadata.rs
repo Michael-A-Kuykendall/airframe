@@ -491,6 +491,45 @@ impl BindlessMetadata {
         spec.has_qk_norm = has_qk_norm;
         spec.post_norm_enabled = post_norm_enabled;
 
+        // Gemma-4-E4B dense-latent layout: shared per-layer embedding + projection.
+        // Recognized by the presence of the two shared `per_layer_*` weight tensors
+        // (per_layer_token_embd [latent, vocab], per_layer_model_proj [n_embd, latent]).
+        // The per-block inp_gate / proj / layer_output_scale tensors live in
+        // compiled_layers and are consumed by the latent-d layer pipeline.
+        let dense_latent_layout = self.tensor_dims.contains_key("per_layer_token_embd.weight")
+            && self.tensor_dims.contains_key("per_layer_model_proj.weight");
+        spec.dense_latent_layout = dense_latent_layout;
+
+        // Gemma-4 runtime gates (llama.cpp 49f35421 src/models/gemma4.cpp):
+        //   - v_plain_rms_norm: `ggml_rms_norm(Vcur)` — plain per-head RMS, no weight.
+        //   - out_scale_enabled: `cur *= out_scale` on the FULL block output.
+        //   - scale_embeddings_by_sqrt_dim: `ggml_scale(inpL, sqrtf(n_embd))`.
+        spec.v_plain_rms_norm = dense_latent_layout && has_qk_norm && post_norm_enabled;
+        spec.out_scale_enabled = self
+            .tensor_dims
+            .contains_key("blk.0.layer_output_scale.weight");
+        spec.scale_embeddings_by_sqrt_dim = dense_latent_layout;
+        if dense_latent_layout {
+            // latent_dim = row count of per_layer_model_proj (dims[1] of [n_embd, latent])
+            if let Some(dims) = self.tensor_dims.get("per_layer_model_proj.weight") {
+                if dims.len() >= 2 {
+                    spec.latent_dim = dims[1] as usize;
+                }
+            }
+            spec.per_layer_token_embd_offset = self
+                .get_tensor_offset("per_layer_token_embd.weight")
+                .unwrap_or(0);
+            spec.per_layer_token_embd_quant = self
+                .get_tensor_type("per_layer_token_embd.weight")
+                .unwrap_or(0);
+            spec.per_layer_model_proj_offset = self
+                .get_tensor_offset("per_layer_model_proj.weight")
+                .unwrap_or(0);
+            spec.per_layer_proj_norm_offset = self
+                .get_tensor_offset("per_layer_proj_norm.weight")
+                .unwrap_or(0);
+        }
+
         // Derive packed-K stride from actual tensor shapes (not arch string).
         // For packed formats (Qwen3), attn_q/attn_k column counts differ from n_embd;
         // for standard models dims[1] == n_embd, so these equal the shader default (dim).

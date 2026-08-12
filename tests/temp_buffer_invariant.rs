@@ -95,6 +95,15 @@ fn temp_buffer_formula_is_monotone_in_model_size() {
         chat_template: None,
         temp_buffer_size: 0,
         kv_cache_size_per_layer: 0,
+        dense_latent_layout: false,
+        latent_dim: 0,
+        per_layer_token_embd_offset: 0,
+        per_layer_token_embd_quant: 0,
+        per_layer_model_proj_offset: 0,
+        per_layer_proj_norm_offset: 0,
+        v_plain_rms_norm: false,
+        out_scale_enabled: false,
+        scale_embeddings_by_sqrt_dim: false,
     }
     .compute_derived();
 
@@ -128,6 +137,15 @@ fn temp_buffer_formula_is_monotone_in_model_size() {
         chat_template: None,
         temp_buffer_size: 0,
         kv_cache_size_per_layer: 0,
+        dense_latent_layout: false,
+        latent_dim: 0,
+        per_layer_token_embd_offset: 0,
+        per_layer_token_embd_quant: 0,
+        per_layer_model_proj_offset: 0,
+        per_layer_proj_norm_offset: 0,
+        v_plain_rms_norm: false,
+        out_scale_enabled: false,
+        scale_embeddings_by_sqrt_dim: false,
     }
     .compute_derived();
 
