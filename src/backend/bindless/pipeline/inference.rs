@@ -5,10 +5,85 @@ use super::*;
 use crate::backend::tdr::TdrScheduler;
 use crate::backend::tdr_calibration;
 use crate::core::routing::ModelRoutePlan;
+use std::sync::{Mutex, OnceLock};
 use wgpu::util::DeviceExt;
 
 /// Result type for model inference returning three activation vectors
 type InferenceResult = Result<(Vec<f32>, Vec<f32>, Vec<f32>), String>;
+
+// ── Layer Dump Capture Hook ──────────────────────────────────────────────────
+// Gated on the AIRFRAME_LAYER_DUMP_CAPTURE env var (set by layer_dump_gpu).
+pub struct LayerDumpState {
+    pub layer_idx: u32,
+    pub position: u32,
+    pub hidden_states: Vec<f32>,
+}
+
+static LAYER_DUMP_STATES: OnceLock<Mutex<Vec<LayerDumpState>>> = OnceLock::new();
+
+pub fn layer_dump_capture_enabled() -> bool {
+    std::env::var("AIRFRAME_LAYER_DUMP_CAPTURE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Drain (and clear) all captured layer states.
+pub fn layer_dump_drain() -> Vec<LayerDumpState> {
+    let sink = LAYER_DUMP_STATES.get_or_init(|| Mutex::new(Vec::new()));
+    std::mem::take(&mut *sink.lock().unwrap())
+}
+
+fn emit_layer_dump_state(
+    layer_idx: u32,
+    position: u32,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    activation_buffer: &wgpu::Buffer,
+    offset: u64,
+    byte_len: u64,
+) {
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(&format!("Layer Dump Staging {}", layer_idx)),
+        size: byte_len,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&format!("Layer Dump Capture {}", layer_idx)),
+    });
+    enc.copy_buffer_to_buffer(activation_buffer, offset, &staging, 0, byte_len);
+    queue.submit(Some(enc.finish()));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("GPU device lost during layer dump capture");
+    let slice = staging.slice(..byte_len);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |res| {
+        let _ = tx.send(res);
+    });
+    loop {
+        device
+            .poll(wgpu::PollType::Poll)
+            .expect("GPU device lost during layer dump poll");
+        if let Ok(res) = rx.try_recv() {
+            res.expect("layer dump capture buffer map failed");
+            break;
+        }
+    }
+    let mapped = slice.get_mapped_range();
+    let vals: &[f32] = bytemuck::cast_slice(&mapped);
+    LAYER_DUMP_STATES
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap()
+        .push(LayerDumpState {
+            layer_idx,
+            position,
+            hidden_states: vals.to_vec(),
+        });
+    drop(mapped);
+    staging.unmap();
+}
 
 // ── PPT Invariant Capture Hook ───────────────────────────────────────────────
 // Gated behind the `isf` feature (which also gates `airframe_observe`). When the
@@ -2009,6 +2084,18 @@ impl BindlessPipeline {
                     (dim as u64) * 4,
                     residual_in,
                     stages,
+                );
+            }
+
+            if layer_dump_capture_enabled() {
+                emit_layer_dump_state(
+                    i as u32,
+                    current_pos + batch_size.saturating_sub(1),
+                    device,
+                    queue,
+                    &activation_buffer,
+                    last_token_offset,
+                    (dim as u64) * 4,
                 );
             }
 

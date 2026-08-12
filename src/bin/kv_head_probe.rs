@@ -47,7 +47,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter_limits = adapter.limits();
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
-    limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
+    limits.max_buffer_size = adapter_limits.max_buffer_size;
     limits.max_storage_buffers_per_shader_stage =
         adapter_limits.max_storage_buffers_per_shader_stage;
     limits.max_compute_invocations_per_workgroup = 256;
@@ -163,15 +163,15 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         run_mode(&gpu_ctx, &embs, None, dim_u32, mk_kv, &rms, &argmax)?;
 
     eprintln!("\n=== HEAD MODE TEST: F32 (Some) ===");
-    let (maxdiff_f32, tok_dec_f32, tok_ref_f32) = run_mode(
-        &gpu_ctx,
-        &embs,
-        Some(&f32_head),
-        dim_u32,
-        mk_kv,
-        &rms,
-        &argmax,
-    )?;
+    let (maxdiff_f32, tok_dec_f32, tok_ref_f32) = match f32_head.as_ref() {
+        Some(head) => run_mode(&gpu_ctx, &embs, Some(head), dim_u32, mk_kv, &rms, &argmax)?,
+        None => {
+            eprintln!(
+                "  (skipped: F32 head unavailable on this device — blob-based quantized head in use)"
+            );
+            (f32::NAN, usize::MAX, usize::MAX)
+        }
+    };
 
     eprintln!("\n=== SUMMARY ===");
     eprintln!(

@@ -33,7 +33,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter_limits = adapter.limits();
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
-    limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
+    limits.max_buffer_size = adapter_limits.max_buffer_size;
     limits.max_storage_buffers_per_shader_stage =
         adapter_limits.max_storage_buffers_per_shader_stage;
     limits.max_compute_invocations_per_workgroup = 256;
@@ -141,10 +141,17 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     for mode_name in ["BLOB", "F32"] {
         let head_override: Option<&wgpu::Buffer> = if mode_name == "F32" {
-            Some(&f32_head)
+            f32_head.as_ref()
         } else {
             None
         };
+        if mode_name == "F32" && head_override.is_none() {
+            eprintln!(
+                "\n=== MODE: F32 === (skipped: F32 head unavailable on this device — \
+                 blob-based quantized head in use)"
+            );
+            continue;
+        }
 
         eprintln!("\n=== MODE: {} ===", mode_name);
 

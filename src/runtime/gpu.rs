@@ -75,7 +75,7 @@ pub struct GpuRuntime {
     shift_pipeline: RopeShiftPipeline,
     tokenizer: Arc<Tokenizer>,
     spec: ModelSpec,
-    output_head_f32: wgpu::Buffer,
+    output_head_f32: Option<wgpu::Buffer>,
     kv_cache: Arc<Mutex<KVCache>>,
     // Precomputed constants
     embd_weight_offset: u64,
@@ -99,7 +99,7 @@ impl GpuRuntime {
         shift_pipeline: RopeShiftPipeline,
         tokenizer: Arc<Tokenizer>,
         spec: ModelSpec,
-        output_head_f32: wgpu::Buffer,
+        output_head_f32: Option<wgpu::Buffer>,
         kv_cache: Arc<Mutex<KVCache>>,
         embd_weight_offset: u64,
         row_bytes: u64,
@@ -172,7 +172,6 @@ impl GpuRuntime {
         let model_file_size = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
         let max_buffer_size = adapter_limits.max_buffer_size;
         let max_binding = adapter_limits.max_storage_buffer_binding_size as u64;
-        let chunk_size = crate::backend::bindless::loader::BLOB_CHUNK_BYTES;
 
         if model_file_size > max_buffer_size {
             return Err(format!(
@@ -184,22 +183,20 @@ impl GpuRuntime {
             .into());
         }
 
-        if chunk_size > max_binding {
-            return Err(format!(
-                "GPU storage buffer binding limit ({:.0} MB) is too small for the \
-                 bindless chunk size ({:.0} MB). Update your GPU drivers.",
-                max_binding as f64 / 1_048_576.0,
-                chunk_size as f64 / 1_048_576.0,
-            )
-            .into());
-        }
-
-        // Log if using multi-chunk mode for large models
-        if model_file_size > chunk_size {
+        // Adapter-aware chunk plan. The bindless loader clamps BLOB_CHUNK_BYTES to the
+        // adapter's storage-buffer binding limit itself (compute_chunk_plan), so a small
+        // binding limit (e.g. llvmpipe 128 MB) is not fatal — it only raises the number
+        // of resident chunks. Do not hard-fail on the raw 2 GB constant here.
+        let chunk_plan =
+            crate::backend::bindless::loader::compute_chunk_plan(model_file_size, max_binding);
+        if chunk_plan.num_chunks > 1 {
             eprintln!(
-                "[GpuRuntime] Large model ({:.0} MB): using {}-chunk bindless split",
+                "[GpuRuntime] Model ({:.0} MB) exceeds chunk size: using {}-chunk bindless split \
+                 ({} MB each, binding limit {:.0} MB)",
                 model_file_size as f64 / 1_048_576.0,
-                model_file_size.div_ceil(chunk_size)
+                chunk_plan.num_chunks,
+                chunk_plan.effective_chunk as f64 / 1_048_576.0,
+                max_binding as f64 / 1_048_576.0,
             );
         }
 
@@ -533,7 +530,7 @@ impl GpuRuntime {
             unsafe { &*(&self.pipeline as *const _) };
         let tokenizer_ref: &'static shimmytok::Tokenizer =
             unsafe { &*(&*self.tokenizer as *const Tokenizer) };
-        let output_head_ref: &'static wgpu::Buffer =
+        let output_head_ref: &'static Option<wgpu::Buffer> =
             unsafe { &*(&self.output_head_f32 as *const _) };
         let kv_cache_isf = self.kv_cache.clone();
         let spec_isf = self.spec.clone();
@@ -555,21 +552,22 @@ impl GpuRuntime {
                 )
             });
 
-        // For models with large untied output vocabularies (e.g. Gemma2 256K),
-        // the dequanted F32 output head can exceed the 2GB storage buffer binding
-        // limit. When that happens, pass None — the pipeline reads the quantized
-        // output.weight directly from the already-loaded blobs (line 920 of
-        // inference.rs: "blob-based quantized head").
-        let output_f32_bytes = spec_isf.n_embd as u64 * spec_isf.n_vocab as u64 * 4;
-        let max_binding = 2_147_483_647u64; // 2GB wgpu binding limit
-        let head_override: Option<&wgpu::Buffer> = if output_f32_bytes <= max_binding {
-            Some(output_head_ref)
-        } else {
-            eprintln!(
-                "[GpuRuntime] output head F32 ({:.1} MB) exceeds 2GB binding limit — using blob-based quantized head",
-                output_f32_bytes as f64 / 1_048_576.0
-            );
-            None
+        // The dequantized F32 output head is only usable when it fits the device's
+        // storage-buffer binding limit (it is bound as one storage binding). When it
+        // does not (e.g. Gemma2 256K vocab on a 2GB-limit GPU, or ANY head on
+        // llvmpipe's 128 MB limit), pass None — the pipeline reads the quantized
+        // output.weight directly from the already-loaded blobs (inference.rs:
+        // "blob-based quantized head").
+        let max_binding = device_ref.limits().max_storage_buffer_binding_size as u64;
+        let head_override: Option<&wgpu::Buffer> = match output_head_ref.as_ref() {
+            Some(buf) if buf.size() <= max_binding => Some(buf),
+            _ => {
+                eprintln!(
+                    "[GpuRuntime] output head F32 unavailable (binding limit {:.1} MB) — using blob-based quantized head",
+                    max_binding as f64 / 1_048_576.0
+                );
+                None
+            }
         };
 
         // ── Closure: GPU prefill dispatch ─────────────────────────────────
@@ -866,12 +864,17 @@ impl GpuRuntime {
         )
     }
 
+    /// Dequantize the output head to F32 and upload it as a storage buffer.
+    ///
+    /// Returns `Ok(None)` when the F32 head cannot fit the device's buffer or
+    /// storage-binding limits — callers must then fall back to the blob-based
+    /// quantized head (pass `None` as the head override to the pipeline).
     pub fn load_output_head_f32(
         model_path: &str,
         gpu_model: &BindlessModel,
         device: &wgpu::Device,
         spec: &ModelSpec,
-    ) -> Result<wgpu::Buffer, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Option<wgpu::Buffer>, Box<dyn std::error::Error + Send + Sync>> {
         use wgpu::util::DeviceExt;
 
         println!(
@@ -983,12 +986,16 @@ impl GpuRuntime {
 
         let buf_size = (tensor_f32.data.len() as u64) * 4;
         let max_buf = device.limits().max_buffer_size;
-        if buf_size > max_buf {
-            return Err(format!(
-                "Output head F32 buffer would be {} bytes, but device max_buffer_size={}",
-                buf_size, max_buf
-            )
-            .into());
+        let max_binding = device.limits().max_storage_buffer_binding_size as u64;
+        if buf_size > max_buf || buf_size > max_binding {
+            eprintln!(
+                "[OutputHead] F32 head ({:.1} MB) exceeds device limits (max_buffer_size={:.1} MB, \
+                 max_storage_buffer_binding_size={:.1} MB) — falling back to blob-based quantized head",
+                buf_size as f64 / 1_048_576.0,
+                max_buf as f64 / 1_048_576.0,
+                max_binding as f64 / 1_048_576.0,
+            );
+            return Ok(None);
         }
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Output Head F32"),
@@ -1015,7 +1022,7 @@ impl GpuRuntime {
             max_abs
         );
 
-        Ok(buffer)
+        Ok(Some(buffer))
     }
 }
 

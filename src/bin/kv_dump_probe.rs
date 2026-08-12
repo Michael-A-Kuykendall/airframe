@@ -85,7 +85,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter_limits = adapter.limits();
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
-    limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
+    limits.max_buffer_size = adapter_limits.max_buffer_size;
     limits.max_storage_buffers_per_shader_stage =
         adapter_limits.max_storage_buffers_per_shader_stage;
     limits.max_compute_invocations_per_workgroup = 256;
@@ -414,7 +414,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Prefill 6 tokens: blob head vs f32 head
     let lp_none = run_head(None, &emb_6, 0, Some((kb, vb)));
-    let lp_f32 = run_head(Some(&f32_head), &emb_6, 0, Some((kb, vb)));
+    let lp_f32 = run_head(f32_head.as_ref(), &emb_6, 0, Some((kb, vb)));
     let tk_none = tokenizer
         .decode_single(argmax(&lp_none) as u32, true)
         .unwrap_or_default();
@@ -437,7 +437,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Decode 1 token at pos5 (uses the kv carry from the 6-tok prefill above)
     let ld_none = run_head(None, emb_1, 5, Some((kb, vb)));
-    let ld_f32 = run_head(Some(&f32_head), emb_1, 5, Some((kb, vb)));
+    let ld_f32 = run_head(f32_head.as_ref(), emb_1, 5, Some((kb, vb)));
     let tkd_none = tokenizer
         .decode_single(argmax(&ld_none) as u32, true)
         .unwrap_or_default();

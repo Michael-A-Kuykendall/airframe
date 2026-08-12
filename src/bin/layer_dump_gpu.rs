@@ -4,9 +4,8 @@
 use airframe::backend::bindless::kv_cache::KVCache;
 use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::metadata::BindlessMetadata;
-use airframe::backend::bindless::pipeline::{
-    formula_index_for_ggml, BindlessPipeline, LayerParams,
-};
+use airframe::backend::bindless::pipeline::inference::layer_dump_drain;
+use airframe::backend::bindless::pipeline::BindlessPipeline;
 use serde::Serialize;
 use shimmytok::Tokenizer;
 use std::fs::File;
@@ -151,7 +150,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     eprintln!(
-        "[Layer Dump] Spec: n_embd={}, n_head={}, n_head_kv={}, head_dim={} (n_embd/n_head={}), rope_dim={}, n_ctx={}, ffn_dim={}, rms_eps={}, has_qk_norm={}, attn_logit_softcap={}",
+        "[Layer Dump] Spec: n_embd={}, n_head={}, n_head_kv={}, head_dim={} (n_embd/n_head={}), rope_dim={}, n_ctx={}, ffn_dim={}, rms_eps={}, has_qk_norm={}, post_norm_enabled={}, attn_logit_softcap={}",
         spec.n_embd,
         spec.n_head,
         spec.n_head_kv,
@@ -162,6 +161,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         spec.ff_dim,
         spec.rms_eps,
         spec.has_qk_norm,
+        spec.post_norm_enabled,
         spec.attn_logit_softcap
     );
     if head_dim as usize != spec.n_embd / spec.n_head.max(1) {
@@ -218,44 +218,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         _ => panic!("unsupported embedding quant type: {}", embd_quant_type),
     };
 
-    let layer_params_base = LayerParams {
-        dim,
-        head_count: spec.n_head as u32,
-        head_count_kv: spec.n_head_kv as u32,
-        head_dim,
-        rope_dim,
-        rms_eps: spec.rms_eps,
-        ffn_dim: spec.ff_dim as u32,
-        temp_stride: spec.temp_buffer_size as u32,
-        quant_qk: 0,
-        quant_v: 0,
-        quant_attn_out: 0,
-        quant_ffn_down: 0,
-        quant_ffn_gate: 0,
-        quant_ffn_up: 0,
-        formula_qk: 0,
-        formula_v: 0,
-        formula_attn_out: 0,
-        formula_ffn_down: 0,
-        formula_ffn_gate: 0,
-        formula_ffn_up: 0,
-        attn_logit_softcap: spec.attn_logit_softcap,
-        post_norm_enabled: spec.post_norm_enabled as u32,
-        qk_norm_enabled: spec.has_qk_norm as u32,
-        layer_norm_enabled: spec.uses_layer_norm() as u32,
-        ffn_kind_policy: 0,
-        qkv_layout_policy: 0,
-        batch_offset: 0,
-        // QKV shader early-outs when global_id.y >= batch_count. Must be 1 for
-        // sequential single-token dumps or QKV is a complete no-op.
-        batch_count: 1,
-        q_weight_k: 0,
-        k_weight_k: 0,
-        blob_base_words: 0,
-        chunk_words: 0,
-    };
-
-    let mut kv_cache = KVCache::new(
+    let kv_cache = KVCache::new(
         &device,
         n_layers,
         spec.n_head_kv as u32,
@@ -267,17 +230,18 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         head_dim, spec.n_head_kv, spec.n_ctx
     );
 
-    let mut layers = Vec::new();
-    let mut first_nan_layer: Option<usize> = None;
-
-    // === Prefill ALL prompt tokens (multi-token path) ===
-    // Capture full per-layer hidden state on the LAST token only (cross-attn exercised).
+    // === Build fused batch embedding (all prompt tokens in ONE prefill) ===
+    // Fused multi-token prefill (batch>1) is mandatory: with batch_size==1 the
+    // layer-boundary capture sees the pre-layer residual (documented phantom,
+    // inference.rs:2017). layer_dump must use the production prefill path, not
+    // a per-token loop (q1c requirement 4).
     let last_pos = prompt_tokens.len() - 1;
-    for (pos, &token_id) in prompt_tokens.iter().enumerate() {
-        eprintln!("[Layer Dump] Processing token pos={} id={}", pos, token_id);
-
+    let last_token_id = prompt_tokens[last_pos];
+    let mut input_embd: Vec<f32> = Vec::with_capacity(prompt_tokens.len() * dim as usize);
+    let mut emb_last: Vec<f32> = Vec::new();
+    for &token_id in &prompt_tokens {
         let row_offset = embd_weight_offset + (token_id as u64 * embd_row_bytes as u64);
-        let mut layer_output = pipeline.run_dequant_any_hot(
+        let row = pipeline.run_dequant_any_hot(
             &device,
             &queue,
             &gpu_model,
@@ -285,93 +249,63 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             dim,
             embd_quant_type,
         );
+        input_embd.extend_from_slice(&row);
+        emb_last = row;
+    }
+    let st_emb = LayerStats::compute(&emb_last);
+    eprintln!(
+        "[Layer Dump] Embedding complete (min={:.6}, max={:.6}, mean={:.6})",
+        st_emb.min, st_emb.max, st_emb.mean
+    );
 
-        if pos == 0 {
-            let st = LayerStats::compute(&layer_output);
-            eprintln!(
-                "[Layer Dump] Embedding complete (min={:.6}, max={:.6}, mean={:.6})",
-                st.min, st.max, st.mean
-            );
+    // === Fused multi-token prefill (production path, forces layer-boundary yield) ===
+    std::env::set_var("AIRFRAME_LAYER_DUMP_CAPTURE", "1");
+    pipeline.run_full_model_prefill_chunked_with_cache_state(
+        &device,
+        &queue,
+        &gpu_model,
+        &input_embd,
+        None,
+        0,
+        Some((kv_cache.get_k_buffers(), kv_cache.get_v_buffers())),
+        &spec,
+        512,
+    )?;
+    std::env::remove_var("AIRFRAME_LAYER_DUMP_CAPTURE");
+
+    // === Collect captures (embedding = layer 0, transformer layers 1..=N) ===
+    let mut layers = Vec::new();
+    let mut first_nan_layer: Option<usize> = None;
+    layers.push(LayerOutput {
+        layer_idx: 0,
+        token_id: last_token_id,
+        position: last_pos,
+        stats: st_emb,
+        hidden_states: emb_last,
+    });
+    for state in layer_dump_drain() {
+        if state.position != last_pos as u32 {
+            continue;
         }
-
-        // Capture embedding only for last position (keeps JSON size bounded)
-        if pos == last_pos {
-            layers.push(LayerOutput {
-                layer_idx: 0,
-                token_id,
-                position: pos,
-                stats: LayerStats::compute(&layer_output),
-                hidden_states: layer_output.clone(),
-            });
+        let st = LayerStats::compute(&state.hidden_states);
+        if first_nan_layer.is_none() && (st.min.is_nan() || st.max.is_nan() || st.mean.is_nan()) {
+            first_nan_layer = Some(state.layer_idx as usize);
         }
-
-        for layer_idx in 0..n_layers {
-            let compiled = &gpu_model.metadata.compiled_layers[layer_idx];
-
-            let layer_offsets = gpu_model
-                .metadata
-                .get_layer_offsets(layer_idx, spec.arch_string())
-                .unwrap_or_else(|| panic!("Layer {} offsets not found", layer_idx));
-
-            let mut layer_params = LayerParams {
-                quant_qk: compiled.quant_qk,
-                quant_v: compiled.quant_v,
-                quant_attn_out: compiled.quant_attn_out,
-                quant_ffn_down: compiled.quant_ffn_down,
-                quant_ffn_gate: compiled.quant_ffn_gate,
-                quant_ffn_up: compiled.quant_ffn_up,
-                formula_qk: formula_index_for_ggml(compiled.quant_qk),
-                formula_v: formula_index_for_ggml(compiled.quant_v),
-                formula_attn_out: formula_index_for_ggml(compiled.quant_attn_out),
-                formula_ffn_down: formula_index_for_ggml(compiled.quant_ffn_down),
-                formula_ffn_gate: formula_index_for_ggml(compiled.quant_ffn_gate),
-                formula_ffn_up: formula_index_for_ggml(compiled.quant_ffn_up),
-                blob_base_words: compiled.blob_base_words,
-                ..layer_params_base
-            };
-            // Match product path: Qwen3 packed K stride hint (2 * n_embd).
-            if spec.arch_string() == "qwen3" {
-                let packed_k = 2 * dim;
-                layer_params.q_weight_k = packed_k;
-                layer_params.k_weight_k = packed_k;
-            }
-
-            layer_output = pipeline.run_layer_with_cache(
-                &device,
-                &queue,
-                &gpu_model,
-                &mut kv_cache,
-                layer_idx,
-                &layer_output,
-                layer_offsets,
-                layer_params,
-            );
-
-            if pos == last_pos {
-                let st = LayerStats::compute(&layer_output);
-                if first_nan_layer.is_none()
-                    && (st.min.is_nan() || st.max.is_nan() || st.mean.is_nan())
-                {
-                    first_nan_layer = Some(layer_idx);
-                }
-                layers.push(LayerOutput {
-                    layer_idx: layer_idx + 1, // +1 because embedding is layer 0
-                    token_id,
-                    position: pos,
-                    stats: st,
-                    hidden_states: layer_output.clone(),
-                });
-                eprintln!(
-                    "[Layer Dump] Layer {} @pos{} complete (min={:.6}, max={:.6}, mean={:.6})",
-                    layer_idx + 1,
-                    pos,
-                    layers.last().unwrap().stats.min,
-                    layers.last().unwrap().stats.max,
-                    layers.last().unwrap().stats.mean
-                );
-            }
-        }
-        let _ = kv_cache.increment();
+        layers.push(LayerOutput {
+            layer_idx: state.layer_idx as usize + 1,
+            token_id: last_token_id,
+            position: last_pos,
+            stats: st,
+            hidden_states: state.hidden_states,
+        });
+        eprintln!(
+            "[Layer Dump] Layer {} @pos{} complete (min={:.6}, max={:.6}, mean={:.6})",
+            layers.last().unwrap().layer_idx,
+            last_pos,
+            layers.last().unwrap().stats.min,
+            layers.last().unwrap().stats.max,
+            layers.last().unwrap().stats.mean
+        );
     }
 
     if let Some(l) = first_nan_layer {
