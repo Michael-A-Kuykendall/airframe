@@ -398,6 +398,9 @@ pub struct LayerParams {
     pub ple_enabled: u32, // 1 = this layer runs the PLE block after FFN residual
     /// 0.0 = use 1/sqrt(head_dim); else use this (gemma-4: 1.0)
     pub attn_scale_override: f32,
+    /// Float offset into the combined RoPE table for this layer's rope base
+    /// (gemma-4 SWA layers use freq_base_swa table; 0 = native table at 0).
+    pub rope_table_base: u32,
 }
 
 /// Map a raw GGML quant type id to the B1 formula-index slot the shaders
@@ -512,6 +515,14 @@ pub struct CompiledLayerEntry {
     pub quant_ffn_down: u32,
     pub quant_ffn_gate: u32,
     pub quant_ffn_up: u32,
+    /// Per-layer attention head dimension (from `blk.N.attn_q.weight` rows /
+    /// `n_head`). Differs from `spec.head_dim` for hybrid archs where some
+    /// layers use a different head size (gemma-4: full-attn layers use 512,
+    /// SWA layers use 256). 0 = use spec.head_dim.
+    pub head_dim: u32,
+    /// Per-layer RoPE base (gemma-4 full-attn: rope_freqs proportional base;
+    /// SWA layers: freq_base_swa). 0 = use spec.rope_base.
+    pub rope_base: u32,
 }
 
 /// The Control Plane for Bindless Inference.

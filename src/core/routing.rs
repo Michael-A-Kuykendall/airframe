@@ -291,6 +291,7 @@ mod tests {
             head_dim: 64,
             gqa_ratio: 8,
             kv_dim: 256,
+            max_head_dim: 0,
             arch: ModelArch::Llama,
             file_type: GgufFileType::Q4_0,
             model_name: "unit-test-model".to_string(),

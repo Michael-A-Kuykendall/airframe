@@ -1,4 +1,4 @@
-use crate::core::spec::ModelSpec;
+use crate::core::spec::{GgufValue, ModelSpec};
 use wgpu::util::DeviceExt;
 
 /// The "Pre-Flight" deck.
@@ -27,6 +27,13 @@ pub struct PreflightResources {
     /// All 1.0 when the model has no such tensor (neutral — gated by
     /// `out_scale_enabled` in LayerParams).
     pub layer_scales_buffer: wgpu::Buffer,
+
+    /// Combined RoPE table buffer. For hybrid archs (gemma-4) it holds BOTH:
+    ///   [0 .. native_len)        native (spec.rope_base, spec.rope_dim)
+    ///   [swa_base .. swa_end)     SWA table (freq_base_swa, same dim) — for layers
+    ///                              whose compiled.rope_base != 0
+    /// For standard models the SWA region is absent and only the native table exists.
+    pub rope_table_swa_base: u32,
 }
 
 impl PreflightResources {
@@ -44,7 +51,72 @@ impl PreflightResources {
         } else {
             rope_data_ext.clone()
         };
-        let rope_buffer = Self::upload_rope_table(device, &rope_data_ext, spec.rope_scale, spec);
+
+        // Combined RoPE buffer. Standard models: single native table (base 0).
+        // gemma-4 (dense_latent): region 0 = full-attn table at the widest head
+        // dim (proportional rope_freqs factors), region 1 = SWA table
+        // (freq_base_swa, native head dim). Per-layer `rope_table_base` selects.
+        let mut combined_rope = if spec.dense_latent_layout {
+            // Region 0: full-attn proportional table at max_head_dim.
+            let factors: Option<Vec<f32>> =
+                metadata.get_tensor_offset("rope_freqs.weight").map(|off| {
+                    let start = off as usize;
+                    let count = spec.max_head_dim / 2;
+                    let mut v = Vec::with_capacity(count);
+                    for i in 0..count {
+                        let b = start + i * 4;
+                        if b + 4 <= raw_data.len() {
+                            v.push(f32::from_le_bytes([
+                                raw_data[b],
+                                raw_data[b + 1],
+                                raw_data[b + 2],
+                                raw_data[b + 3],
+                            ]));
+                        } else {
+                            v.push(1.0);
+                        }
+                    }
+                    v
+                });
+            Self::compute_rope_table_cfg(
+                spec,
+                spec.rope_scale,
+                spec.max_head_dim,
+                spec.rope_base,
+                factors.as_deref(),
+            )
+        } else {
+            rope_data_ext.clone()
+        };
+        let rope_table_swa_base: u32 = if spec.dense_latent_layout {
+            let freq_base_swa = metadata
+                .gguf_metadata
+                .iter()
+                .find(|(k, _)| k.ends_with(".rope.freq_base_swa"))
+                .and_then(|(_, v)| match v {
+                    GgufValue::F32(x) => Some(*x),
+                    GgufValue::F64(x) => Some(*x as f32),
+                    _ => None,
+                });
+            if let Some(swa_base) = freq_base_swa {
+                // Region 1: SWA table at the standard head_dim, freq_base_swa.
+                let swa_data = Self::compute_rope_table_cfg(
+                    spec,
+                    spec.rope_scale,
+                    spec.rope_dim,
+                    swa_base,
+                    None,
+                );
+                let base = combined_rope.len() as u32;
+                combined_rope.extend_from_slice(&swa_data);
+                base
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        let rope_buffer = Self::upload_rope_table_data(device, &combined_rope, spec);
         let norm_buffer = Self::build_norm_bank_from_ram(device, raw_data, metadata, spec);
 
         // Gemma-4 per-block output scale (F32 dims[1] per layer), read straight
@@ -81,6 +153,7 @@ impl PreflightResources {
             rope_data_ext,
             norm_bank_buffer: norm_buffer,
             layer_scales_buffer: scales_buffer,
+            rope_table_swa_base,
         }
     }
 
@@ -103,8 +176,19 @@ impl PreflightResources {
     ///   table[d * n_pairs * 2 + p * 2 + 0] = cos(d * effective_theta_p)
     ///   table[d * n_pairs * 2 + p * 2 + 1] = sin(d * effective_theta_p)
     fn compute_rope_table(spec: &ModelSpec, scale: f32) -> Vec<f32> {
-        let dim = spec.rope_dim;
-        let base = spec.rope_base;
+        Self::compute_rope_table_cfg(spec, scale, spec.rope_dim, spec.rope_base, None)
+    }
+
+    /// Compute a RoPE table with an explicit dim/base and optional per-pair
+    /// proportional factors (gemma-4 full-attn layers multiply each pair's
+    /// theta by `rope_freqs[p]`). `factors` length must equal `dim/2` when set.
+    fn compute_rope_table_cfg(
+        spec: &ModelSpec,
+        scale: f32,
+        dim: usize,
+        base: f32,
+        factors: Option<&[f32]>,
+    ) -> Vec<f32> {
         let n_pairs = dim / 2;
         let max_dist = spec.n_ctx;
 
@@ -117,19 +201,22 @@ impl PreflightResources {
         let beta = spec.yarn_beta;
         let use_yarn = scale < 1.0 && alpha > 0.0 && beta > alpha;
 
-        // Compute per-dimension effective theta with optional YaRN correction.
+        // Compute per-dimension effective theta with optional YaRN correction
+        // and proportional factors (rope_freqs).
         let effective_thetas: Vec<f32> = (0..n_pairs)
             .map(|i| {
                 let theta = 1.0_f32 / base.powf((2.0 * i as f32) / dim as f32);
-                if !use_yarn {
-                    return theta * scale; // plain linear or native
+                let scaled = if !use_yarn {
+                    theta * scale // plain linear or native
+                } else {
+                    let lambda = std::f32::consts::TAU / theta;
+                    let ramp = ((l_train as f32 / lambda - alpha) / (beta - alpha)).clamp(0.0, 1.0);
+                    theta * ((1.0 - ramp) * scale + ramp)
+                };
+                match factors {
+                    Some(f) if i < f.len() => scaled * f[i],
+                    _ => scaled,
                 }
-                let lambda = std::f32::consts::TAU / theta; // wavelength = 2*pi / theta
-                                                            // ramp: 1.0 at short wavelengths, 0.0 at long wavelengths.
-                                                            // Per YaRN: high-freq dims skip scaling; low-freq dims get full linear scaling.
-                                                            // Lerp: ramp drives theta toward 1.0 for high-freq, toward scale for low-freq.
-                let ramp = ((l_train as f32 / lambda - alpha) / (beta - alpha)).clamp(0.0, 1.0);
-                theta * ((1.0 - ramp) * scale + ramp)
             })
             .collect();
 
@@ -145,31 +232,21 @@ impl PreflightResources {
         table
     }
 
-    fn upload_rope_table(
+    /// Uploads an already-assembled RoPE table (native [+ SWA] combined).
+    fn upload_rope_table_data(
         device: &wgpu::Device,
         rope_floats: &[f32],
-        scale: f32,
         spec: &ModelSpec,
     ) -> wgpu::Buffer {
-        let n_pairs = spec.rope_dim / 2;
-        let max_dist = spec.n_ctx;
-        let table_len = max_dist * n_pairs * 2;
-        let use_yarn = scale < 1.0 && spec.yarn_alpha > 0.0 && spec.yarn_beta > spec.yarn_alpha;
-        let scaling_mode = if scale >= 1.0 {
-            "native"
-        } else if use_yarn {
-            "YaRN"
-        } else {
-            "linear"
-        };
         println!(
-            "[Preflight] RoPE Lookup Table: {}×{} = {} entries ({:.1} KB, Base={}, Dim={}, Scale={}, Mode={})",
-            max_dist, n_pairs, table_len,
-            (table_len * 4) as f64 / 1024.0,
-            spec.rope_base, spec.rope_dim, scale, scaling_mode
+            "[Preflight] RoPE Lookup Table (combined): {} entries ({:.1} KB, Base={}, Dim={})",
+            rope_floats.len(),
+            (rope_floats.len() * 4) as f64 / 1024.0,
+            spec.rope_base,
+            spec.rope_dim
         );
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("RoPE Cos/Sin Lookup Table"),
+            label: Some("RoPE Cos/Sin Lookup Table (combined)"),
             contents: bytemuck::cast_slice(rope_floats),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         })
@@ -309,6 +386,7 @@ mod tests {
             head_dim: 4,
             gqa_ratio: 2,
             kv_dim: 4,
+            max_head_dim: 0,
             arch: ModelArch::Llama,
             file_type: GgufFileType::Q4_0,
             model_name: "test".to_string(),

@@ -152,6 +152,51 @@ impl BindlessMetadata {
             gguf_metadata.get("general.architecture"),
             Some(GgufValue::String(v)) if v == "phi"
         );
+        // ── Per-layer attention geometry (hybrid archs) ─────────────
+        // head_dim from `blk.N.attn_q.weight` dims[1] / n_head. gemma-4
+        // full-attention layers (non-SWA) use 8×512 = 4096; SWA layers
+        // use 8×256 = 2048. rope_base: full-attn uses the standard base
+        // (with proportional rope_freqs), SWA layers use freq_base_swa.
+        // n_head comes from the architecture's `attention.head_count` key.
+        let arch_str = gguf_metadata
+            .get("general.architecture")
+            .and_then(|v| match v {
+                GgufValue::String(s) => Some(s.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let n_head_val: u32 = gguf_metadata
+            .get(&format!("{}_attention.head_count", arch_str))
+            .or_else(|| {
+                gguf_metadata
+                    .iter()
+                    .find(|(k, _)| k.ends_with(".attention.head_count"))
+                    .map(|(_, v)| v)
+            })
+            .and_then(|v| match v {
+                GgufValue::U32(n) => Some(*n),
+                GgufValue::I32(n) => Some(*n as u32),
+                GgufValue::U64(n) => Some(*n as u32),
+                _ => None,
+            })
+            .unwrap_or(1)
+            .max(1);
+        // Pre-pass: largest per-layer head_dim across the model (0 = none).
+        let max_head_dim_across = (0..)
+            .map_while(|li| tensor_dims.get(&format!("blk.{}.attn_q.weight", li)))
+            .filter_map(|d| d.get(1).copied())
+            .map(|cols| (cols / n_head_val as u64) as u32)
+            .max()
+            .unwrap_or(0);
+        let freq_base_swa: u32 = gguf_metadata
+            .iter()
+            .find(|(k, _)| k.ends_with(".rope.freq_base_swa"))
+            .and_then(|(_, v)| match v {
+                GgufValue::F32(x) => Some(*x as u32),
+                GgufValue::F64(x) => Some(*x as u32),
+                _ => None,
+            })
+            .unwrap_or(0);
         {
             let _p = |offsets: &HashMap<String, u64>, layer: usize, s: &str| -> u32 {
                 super::pipeline::pack_blob_offset(
@@ -474,6 +519,22 @@ impl BindlessMetadata {
                 } else {
                     lqt_up
                 };
+
+                // ── Per-layer attention geometry (hybrid archs) ─────────────
+                // head_dim from `blk.N.attn_q.weight` dims[1] / n_head. gemma-4
+                // full-attention layers (non-SWA) use 8×512 = 4096; SWA layers
+                // use 8×256 = 2048. rope_base: full-attn uses the standard base
+                // (with proportional rope_freqs), SWA layers use freq_base_swa.
+                let per_layer_head_dim: u32 = tensor_dims
+                    .get(&format!("blk.{}.attn_q.weight", layer_idx))
+                    .and_then(|d| d.get(1))
+                    .map(|&cols| (cols / n_head_val as u64) as u32)
+                    .unwrap_or(0);
+                // SWA layers are the ones with a SMALLER head_dim than the model max
+                // (gemma-4: 256 vs full-attn 512). They use freq_base_swa for RoPE.
+                let is_swa_layer =
+                    per_layer_head_dim != 0 && per_layer_head_dim < max_head_dim_across;
+                let per_layer_rope_base: u32 = if is_swa_layer { freq_base_swa } else { 0 };
                 compiled_layers.push(CompiledLayerEntry {
                     offsets,
                     blob_base_words,
@@ -483,6 +544,8 @@ impl BindlessMetadata {
                     quant_ffn_down: lqt_down,
                     quant_ffn_gate: lqt_gate,
                     quant_ffn_up: lqt_up,
+                    head_dim: per_layer_head_dim,
+                    rope_base: per_layer_rope_base,
                 });
                 layer_idx += 1;
             }
@@ -641,6 +704,18 @@ impl BindlessMetadata {
                     }
                 }
             }
+        }
+        // max_head_dim from compiled_layers (per-layer head_dim, hybrid archs).
+        // gemma-4 full-attn layers use 512, SWA 256; size KV + temp at the max.
+        let max_hd = self
+            .compiled_layers
+            .iter()
+            .map(|c| c.head_dim.max(spec.head_dim as u32))
+            .max()
+            .unwrap_or(spec.head_dim as u32);
+        if max_hd > spec.head_dim as u32 {
+            spec.max_head_dim = max_hd as usize;
+            spec = spec.compute_derived();
         }
         spec
     }
@@ -1245,5 +1320,34 @@ mod tests {
         let bpr = quant_type_row_bytes(12, 5120);
         assert_eq!(ff_dim * bpr, 17920 * 2880);
         assert_eq!(ff_dim * bpr, 51_609_600);
+    }
+
+    #[test]
+    fn test_per_layer_head_dim_derivation() {
+        // gemma-4 hybrid geometry: blk.0.attn_q = [2560, 2048] (8×256, SWA),
+        // blk.5.attn_q = [2560, 4096] (8×512, full-attn).
+        let mut tensor_dims = HashMap::new();
+        tensor_dims.insert("blk.0.attn_q.weight".to_string(), vec![2560, 2048]);
+        tensor_dims.insert("blk.5.attn_q.weight".to_string(), vec![2560, 4096]);
+        let n_head: u32 = 8;
+
+        let per_layer = |li: usize| -> u32 {
+            tensor_dims
+                .get(&format!("blk.{}.attn_q.weight", li))
+                .and_then(|d| d.get(1))
+                .map(|&cols| (cols / n_head as u64) as u32)
+                .unwrap_or(0)
+        };
+        assert_eq!(per_layer(0), 256);
+        assert_eq!(per_layer(5), 512);
+
+        // max across layers drives max_head_dim (KV/temp sizing).
+        let max_hd = (0..6u64)
+            .filter_map(|li| tensor_dims.get(&format!("blk.{}.attn_q.weight", li)))
+            .filter_map(|d| d.get(1).copied())
+            .map(|cols| (cols / n_head as u64) as u32)
+            .max()
+            .unwrap_or(0);
+        assert_eq!(max_hd, 512);
     }
 }

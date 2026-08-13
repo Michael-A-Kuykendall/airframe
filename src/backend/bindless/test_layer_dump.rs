@@ -122,6 +122,7 @@ mod layer_dump_tests {
             ple_latent_dim: 0,
             ple_enabled: 0,
             attn_scale_override: 0.0,
+            rope_table_base: 0,
         };
 
         // Process sequence: BOS (1), "Hello" (15043), then 1 decode step

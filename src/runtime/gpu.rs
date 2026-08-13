@@ -312,7 +312,7 @@ impl GpuRuntime {
             &device,
             spec.n_layer,
             spec.n_head_kv as u32,
-            spec.head_dim as u32,
+            spec.max_head_dim as u32,
             max_ctx,
         )));
 

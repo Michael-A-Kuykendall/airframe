@@ -115,6 +115,7 @@ struct LayerParams {
     ple_latent_dim: u32,    // latent embedding dim per layer (256 for gemma-4-E4B)
     ple_enabled: u32,       // 1 = this layer runs the PLE block after FFN residual
     attn_scale_override: f32, // 0.0 = use 1/sqrt(head_dim); else use this (gemma-4: 1.0)
+    rope_table_base: u32,     // float offset into combined RoPE table (SWA base); 0 = native
 };
 
 struct CacheParams {
@@ -723,7 +724,9 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let temp_base  = token_idx * params.temp_stride;
     let gqa_ratio  = params.head_count / params.head_count_kv;
-    let scale      = 1.0 / sqrt(f32(params.head_dim));
+    // gemma-4 uses f_attention_scale = 1.0 (override); others use 1/sqrt(head_dim).
+    let scale      = select(1.0 / sqrt(f32(params.head_dim)), params.attn_scale_override,
+                            params.attn_scale_override > 0.0);
     let head_idx   = idx / params.head_dim;
     let head_offset = idx % params.head_dim;
     let kv_head_idx = head_idx / gqa_ratio;
@@ -763,7 +766,7 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
             var cos_a = 1.0;
             var sin_a = 0.0;
             if (p < rope_pairs) {
-                let tbl = rel * rope_pairs * 2u + p * 2u;
+                let tbl = params.rope_table_base + rel * rope_pairs * 2u + p * 2u;
                 cos_a = rope_table[tbl];
                 sin_a = rope_table[tbl + 1u];
             }

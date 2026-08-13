@@ -214,6 +214,7 @@ mod parity_tests {
             ple_latent_dim: 0,
             ple_enabled: 0,
             attn_scale_override: 0.0,
+            rope_table_base: 0,
         };
 
         let (mid_vec, gpu_output) = pipeline.run_layer_stepwise_test(

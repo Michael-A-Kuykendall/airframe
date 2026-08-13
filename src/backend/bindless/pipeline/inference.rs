@@ -1037,6 +1037,7 @@ impl BindlessPipeline {
             ple_latent_dim: spec.ple_latent_dim as u32,
             ple_enabled: spec.ple_enabled as u32,
             attn_scale_override: 0.0,
+            rope_table_base: 0,
         };
 
         // Adaptive QKV micro-batch chunk size.
@@ -1217,6 +1218,25 @@ impl BindlessPipeline {
             }
             if spec.k_weight_k > 0 {
                 layer_params_i.k_weight_k = spec.k_weight_k as u32;
+            }
+            // ── Per-layer attention geometry (hybrid archs: gemma-4) ──
+            // Full-attn layers use head_dim 512, SWA layers 256. Override the
+            // layer's head_dim / rope_dim so QKV + attention kernels dispatch the
+            // right head size. KV cache is sized at spec.max_head_dim (all fit).
+            if compiled.head_dim != 0 && compiled.head_dim != layer_params_i.head_dim {
+                layer_params_i.head_dim = compiled.head_dim;
+                layer_params_i.rope_dim = compiled.head_dim; // full rotary per layer
+            }
+            // attn scale: gemma-4 uses f_attention_scale = 1.0 (no 1/sqrt(head_dim)).
+            if spec.arch == crate::core::spec::ModelArch::Gemma && spec.dense_latent_layout {
+                layer_params_i.attn_scale_override = 1.0;
+            }
+            // RoPE table: SWA layers (compiled.rope_base != 0) use the combined
+            // freq_base_swa region; full-attn/standard layers use native (base 0).
+            if compiled.rope_base != 0 {
+                if let Some(preflight) = model.preflight.as_ref() {
+                    layer_params_i.rope_table_base = preflight.rope_table_swa_base;
+                }
             }
 
             let (kv_buffer_k_ref, kv_buffer_v_ref): (&wgpu::Buffer, &wgpu::Buffer) =
@@ -1852,16 +1872,18 @@ impl BindlessPipeline {
         // matmul_f32 uses @workgroup_size(256).
         let wg_head_f32 = vocab_size.div_ceil(256);
 
-        // QKV Dispatch Calculation
+        // QKV Dispatch Calculation — base values for non-hybrid models; the
+        // layer loop recomputes per-layer l_wg_qkv/l_wg_qknorm/l_wg_attn from
+        // the layer's head_dim (hybrid archs: gemma-4 full-attn = 512).
         let q_len = params_base.head_count * params_base.head_dim;
         let kv_len = params_base.head_count_kv * params_base.head_dim;
         let attn_dim = q_len; // n_head * head_dim (Qwen3: 4096 ≠ dim 2560)
         let total_qkv = q_len + kv_len * 2;
-        let wg_qkv = total_qkv.div_ceil(256);
-        let wg_qknorm = (q_len + kv_len).div_ceil(256); // must cover all Q+K elements, not just head_dim
-                                                        // CRITICAL: attn_out writes [0..attn_dim), not [0..dim). Under-dispatch left
-                                                        // elements dim..attn_dim-1 unwritten → garbage O-proj for Qwen3.
-        let wg_attn = attn_dim.div_ceil(256);
+        let _wg_qkv_base = total_qkv.div_ceil(256);
+        let _wg_qknorm_base = (q_len + kv_len).div_ceil(256);
+        // CRITICAL: attn_out writes [0..attn_dim), not [0..dim). Under-dispatch left
+        // elements dim..attn_dim-1 unwritten → garbage O-proj for Qwen3.
+        let _wg_attn_base = attn_dim.div_ceil(256);
         let trace_prefill_layers = std::env::var("AIRFRAME_TRACE_PREFILL_LAYERS")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
@@ -1920,6 +1942,14 @@ impl BindlessPipeline {
         // Loop Layers
         for (i, bg) in layer_bind_groups.iter().enumerate() {
             let params_layer = _layer_params[i]; // per-layer quant_type + base fields
+                                                 // Per-layer attention geometry (hybrid archs): 512-head full-attn
+                                                 // layers need 2x the QKV/attn/qknorm dispatch width of 256-head SWA.
+            let l_q_len = params_layer.head_count * params_layer.head_dim;
+            let l_kv_len = params_layer.head_count_kv * params_layer.head_dim;
+            let l_total_qkv = l_q_len + l_kv_len * 2;
+            let l_wg_qkv = l_total_qkv.div_ceil(256);
+            let l_wg_qknorm = (l_q_len + l_kv_len).div_ceil(256);
+            let l_wg_attn = l_q_len.div_ceil(256);
             if trace_prefill_layers {
                 eprintln!(
                     "[PREFILL-LAYER] start layer={} batch_size={} current_pos={} seq_len={}",
@@ -2031,7 +2061,7 @@ impl BindlessPipeline {
                                 });
                         cpass.set_bind_group(0, &chunk_bgs[chunk_idx], &[]);
                         cpass.set_pipeline(pipe_qkv);
-                        cpass.dispatch_workgroups(wg_qkv, this_chunk, 1);
+                        cpass.dispatch_workgroups(l_wg_qkv, this_chunk, 1);
                     }
                     // Yield every QKV_YIELD_INTERVAL chunks for large batches to prevent TDR
                     if batch_size > 1
@@ -2112,7 +2142,7 @@ impl BindlessPipeline {
                     });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_qk_norm);
-                cpass.dispatch_workgroups(wg_qknorm, batch_size, 1);
+                cpass.dispatch_workgroups(l_wg_qknorm, batch_size, 1);
             }
             if peel_this_layer && qk_norm_on {
                 // L.S3a/S3b after in-place QK-norm
@@ -2165,7 +2195,7 @@ impl BindlessPipeline {
                     });
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_attn_out);
-                cpass.dispatch_workgroups(wg_attn, batch_size, 1);
+                cpass.dispatch_workgroups(l_wg_attn, batch_size, 1);
             }
             if peel_this_layer {
                 // L.S4 attn_ctx: temp[0..attn_dim]

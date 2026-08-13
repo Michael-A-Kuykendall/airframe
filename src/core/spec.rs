@@ -163,6 +163,11 @@ pub struct ModelSpec {
     pub head_dim: usize,  // n_embd / n_head
     pub gqa_ratio: usize, // n_head / n_head_kv
     pub kv_dim: usize,    // n_head_kv * head_dim
+    /// Maximum per-layer attention head dimension (>= head_dim). Hybrid archs
+    /// (gemma-4 full-attn layers use 512, SWA layers 256) need KV cache + temp
+    /// buffers sized to the largest head_dim so every layer fits. Computed in
+    /// `compute_derived` from `compiled_layers` via `set_max_head_dim`.
+    pub max_head_dim: usize,
 
     // Architecture metadata
     pub arch: ModelArch,
@@ -189,6 +194,10 @@ impl ModelSpec {
         self.rope_dim = self.head_dim;
         self.gqa_ratio = self.n_head / self.n_head_kv;
         self.kv_dim = self.n_head_kv * self.head_dim;
+        if self.max_head_dim == 0 {
+            self.max_head_dim = self.head_dim;
+        }
+        self.max_head_dim = self.max_head_dim.max(self.head_dim);
         // Qwen3 uses per-head Q and K RMSNorm before RoPE — derive from tensor presence (metadata.rs)
         // Only fall back to arch heuristic if not already set from GGUF tensor presence
         if !self.has_qk_norm {
@@ -206,8 +215,9 @@ impl ModelSpec {
         //   [+q_len..+kv_len]        = K vectors (n_head_kv * head_dim)
         //   [+kv_len..+kv_len]       = V vectors (n_head_kv * head_dim)
         //   [after KV..]             = attn scores or FFN gate + FFN up (ff_dim * 2)
-        let q_len = self.n_head * self.head_dim; // same as n_embd
-        let kv_len = self.n_head_kv * self.head_dim; // = kv_dim
+        // Use max_head_dim so hybrid archs' widest layers fit every layer's slice.
+        let q_len = self.n_head * self.max_head_dim;
+        let kv_len = self.n_head_kv * self.max_head_dim;
         let full_layout = self.n_embd + q_len + kv_len * 2 + self.ff_dim * 2;
         let ffn_scratch = self.ff_dim * 2 + self.n_embd;
         let min_scratch = std::cmp::max(full_layout, ffn_scratch);
@@ -216,7 +226,8 @@ impl ModelSpec {
 
         // KV cache: each layer stores K and V as F32
         // Size per K or V buffer = max_seq * kv_heads * head_dim * sizeof(f32)
-        self.kv_cache_size_per_layer = self.n_ctx * self.n_head_kv * self.head_dim * 4;
+        // Sized to max_head_dim so every layer's writes stay in-bounds.
+        self.kv_cache_size_per_layer = self.n_ctx * self.n_head_kv * self.max_head_dim * 4;
 
         self
     }
@@ -420,6 +431,7 @@ impl ModelSpec {
             head_dim: head_dim_expl.unwrap_or(0),
             gqa_ratio: 0,
             kv_dim: 0,
+            max_head_dim: 0,
             arch,
             file_type,
             model_name,
@@ -476,6 +488,7 @@ impl ModelSpec {
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
+            max_head_dim: 0,
             arch: ModelArch::Llama,
             file_type: GgufFileType::Q4_0,
             model_name: "tinyllama_tinyllama-1.1b-chat-v1.0".to_string(),
@@ -779,6 +792,7 @@ mod tests {
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
+            max_head_dim: 0,
             arch: ModelArch::Llama,
             file_type: GgufFileType::F32,
             model_name: "test".to_string(),
