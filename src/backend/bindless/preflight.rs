@@ -180,9 +180,10 @@ impl PreflightResources {
     }
 
     /// Compute a RoPE table with an explicit dim/base and optional per-pair
-    /// proportional factors (gemma-4 full-attn layers multiply each pair's
-    /// theta by `rope_freqs[p]`). `factors` length must equal `dim/2` when set.
-    fn compute_rope_table_cfg(
+    /// proportional factors (gemma-4 full-attn layers DIVIDE each pair's
+    /// theta by `rope_freqs[p]`, matching llama.cpp `ggml_rope_cache_init`).
+    /// `factors` length must equal `dim/2` when set.
+    pub fn compute_rope_table_cfg(
         spec: &ModelSpec,
         scale: f32,
         dim: usize,
@@ -214,7 +215,7 @@ impl PreflightResources {
                     theta * ((1.0 - ramp) * scale + ramp)
                 };
                 match factors {
-                    Some(f) if i < f.len() => scaled * f[i],
+                    Some(f) if i < f.len() => scaled / f[i],
                     _ => scaled,
                 }
             })
