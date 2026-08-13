@@ -715,6 +715,7 @@ fn layer_offsets_fixture(base_byte: u64, tensor_abs: &[u64]) -> (LayerOffsets, u
         ple_rope_freqs: 0,
         ple_attn_post_norm: 0,
         ple_ffn_post_norm: 0,
+        ple_post_norm: 0,
         ple_enabled: 0,
     };
 

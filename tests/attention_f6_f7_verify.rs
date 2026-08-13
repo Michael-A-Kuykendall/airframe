@@ -134,6 +134,9 @@ async fn test_f6_f7_gpu_attention_verification() -> Result<(), Box<dyn std::erro
         chunk_words: 0,
         v_plain_rms_norm: 0,
         out_scale_enabled: 0,
+        ple_latent_dim: 0,
+        ple_enabled: 0,
+        attn_scale_override: 0.0,
     };
 
     let mut kv_cache = KVCache::new(&device, 22, 4, 64, 2048);

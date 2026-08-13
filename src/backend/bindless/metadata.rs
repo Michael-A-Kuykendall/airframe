@@ -435,13 +435,37 @@ impl BindlessMetadata {
                     attn_k_bias: attn_k_bias_off,
                     attn_v_bias: attn_v_bias_off,
                     // PLE (Per-Layer Embedding) — zero for test models
-                    ple_inp_gate: 0,
-                    ple_proj: 0,
-                    ple_layer_output_scale: 0,
-                    ple_rope_freqs: 0,
-                    ple_attn_post_norm: 0,
-                    ple_ffn_post_norm: 0,
-                    ple_enabled: 0,
+                    ple_inp_gate: opt(&absolute_offsets, layer_idx, "inp_gate.weight"),
+                    ple_proj: opt(&absolute_offsets, layer_idx, "proj.weight"),
+                    ple_layer_output_scale: opt(
+                        &absolute_offsets,
+                        layer_idx,
+                        "layer_output_scale.weight",
+                    ),
+                    ple_rope_freqs: absolute_offsets
+                        .get("rope_freqs.weight")
+                        .copied()
+                        .map(|abs| {
+                            if abs == 0 {
+                                0
+                            } else {
+                                super::pipeline::relative_packed_offset(abs, base_byte)
+                                    .expect("abs underflow")
+                            }
+                        })
+                        .unwrap_or(0),
+                    ple_attn_post_norm: opt(&absolute_offsets, layer_idx, "attn_post_norm.weight"),
+                    ple_ffn_post_norm: opt(&absolute_offsets, layer_idx, "ffn_post_norm.weight"),
+                    // gemma-4 stores the PLE output norm as `blk.N.post_norm.weight`
+                    ple_post_norm: opt(&absolute_offsets, layer_idx, "post_norm.weight"),
+                    ple_enabled: if absolute_offsets
+                        .contains_key(&format!("blk.{}.inp_gate.weight", layer_idx))
+                        && absolute_offsets.contains_key(&format!("blk.{}.proj.weight", layer_idx))
+                    {
+                        1
+                    } else {
+                        0
+                    },
                 };
                 let lqt_attn_out = t(&tensor_types, layer_idx, "attn_output.weight");
                 let lqt_up = t(&tensor_types, layer_idx, "ffn_up.weight");
@@ -558,6 +582,12 @@ impl BindlessMetadata {
                 .unwrap_or(0);
             spec.ple_ffn_post_norm_offset = self
                 .get_tensor_offset("blk.0.ffn_post_norm.weight")
+                .unwrap_or(0);
+            // gemma-4 stores the PLE block's output RMSNorm weights as
+            // `blk.N.post_norm.weight` (F32 [n_embd]); the attn/ffn post-norm
+            // names above are absent on this file.
+            spec.ple_post_norm_offset = self
+                .get_tensor_offset("blk.0.post_norm.weight")
                 .unwrap_or(0);
         }
 
@@ -782,6 +812,11 @@ impl BindlessMetadata {
             ple_ffn_post_norm: rel(self
                 .tensor_offsets
                 .get(&format!("blk.{}.ffn_post_norm.weight", layer_idx))
+                .copied()
+                .unwrap_or(0)),
+            ple_post_norm: rel(self
+                .tensor_offsets
+                .get(&format!("blk.{}.post_norm.weight", layer_idx))
                 .copied()
                 .unwrap_or(0)),
             ple_enabled: if self

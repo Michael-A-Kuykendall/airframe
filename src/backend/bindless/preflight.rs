@@ -338,6 +338,7 @@ mod tests {
             ple_rope_freqs_offset: 0,
             ple_attn_post_norm_offset: 0,
             ple_ffn_post_norm_offset: 0,
+            ple_post_norm_offset: 0,
             ple_latent_dim: 0,
             ple_enabled: false,
         }

@@ -119,6 +119,9 @@ mod layer_dump_tests {
             chunk_words: 0,
             v_plain_rms_norm: 0,
             out_scale_enabled: 0,
+            ple_latent_dim: 0,
+            ple_enabled: 0,
+            attn_scale_override: 0.0,
         };
 
         // Process sequence: BOS (1), "Hello" (15043), then 1 decode step

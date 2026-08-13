@@ -780,6 +780,9 @@ impl BindlessPipeline {
             chunk_words: 0,
             v_plain_rms_norm: spec.v_plain_rms_norm as u32,
             out_scale_enabled: spec.out_scale_enabled as u32,
+            ple_latent_dim: spec.ple_latent_dim as u32,
+            ple_enabled: spec.ple_enabled as u32,
+            attn_scale_override: 0.0,
         };
 
         // Adaptive QKV micro-batch chunk size.

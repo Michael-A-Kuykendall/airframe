@@ -141,6 +141,10 @@ pub struct ModelSpec {
     pub ple_rope_freqs_offset: u64,
     pub ple_attn_post_norm_offset: u64,
     pub ple_ffn_post_norm_offset: u64,
+    /// PLE per-layer output norm (`blk.N.post_norm.weight`, F32 [n_embd]).
+    /// gemma-4 stores the PLE block's output RMSNorm weights under `post_norm`,
+    /// NOT `attn_post_norm`/`ffn_post_norm` (those names are absent). 0 = absent.
+    pub ple_post_norm_offset: u64,
     /// PLE: latent embedding dimension (256 for gemma-4-E4B). 0 when not PLE.
     pub ple_latent_dim: usize,
     /// Gemma-4-style plain per-head RMSNorm on V (no weight vector) — llama.cpp
@@ -407,6 +411,7 @@ impl ModelSpec {
             ple_rope_freqs_offset: 0,
             ple_attn_post_norm_offset: 0,
             ple_ffn_post_norm_offset: 0,
+            ple_post_norm_offset: 0,
             ple_latent_dim: 0,
             v_plain_rms_norm: false,
             out_scale_enabled: false, // set from tensor presence in metadata.rs
@@ -462,6 +467,7 @@ impl ModelSpec {
             ple_rope_freqs_offset: 0,
             ple_attn_post_norm_offset: 0,
             ple_ffn_post_norm_offset: 0,
+            ple_post_norm_offset: 0,
             ple_latent_dim: 0,
             v_plain_rms_norm: false,
             out_scale_enabled: false,
@@ -764,6 +770,7 @@ mod tests {
             ple_rope_freqs_offset: 0,
             ple_attn_post_norm_offset: 0,
             ple_ffn_post_norm_offset: 0,
+            ple_post_norm_offset: 0,
             ple_latent_dim: 0,
             v_plain_rms_norm: false,
             out_scale_enabled: false,

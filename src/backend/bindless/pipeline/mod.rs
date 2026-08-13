@@ -132,6 +132,8 @@ pub struct LayerOffsets {
     pub ple_rope_freqs: u32,
     pub ple_attn_post_norm: u32,
     pub ple_ffn_post_norm: u32,
+    /// PLE per-layer output norm (`blk.N.post_norm.weight`). 0 = absent.
+    pub ple_post_norm: u32,
     pub ple_enabled: u32,
 }
 
@@ -205,6 +207,43 @@ impl LayerOffsets {
         );
         check(
             self.attn_v_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.ple_inp_gate,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(self.ple_proj, &mut min_word, &mut max_word, &mut has_tensor);
+        check(
+            self.ple_layer_output_scale,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.ple_rope_freqs,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.ple_attn_post_norm,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.ple_ffn_post_norm,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.ple_post_norm,
             &mut min_word,
             &mut max_word,
             &mut has_tensor,
@@ -366,6 +405,11 @@ pub struct LayerParams {
     pub v_plain_rms_norm: u32,
     /// 1 = multiply the final block residual by layer_scales[layer_idx] (Gemma-4); 0 = disabled
     pub out_scale_enabled: u32,
+    /// PLE (Per-Layer Embedding) — gemma-4 dense-latent; 0 = disabled
+    pub ple_latent_dim: u32, // latent embedding dim per layer (256 for gemma-4-E4B)
+    pub ple_enabled: u32, // 1 = this layer runs the PLE block after FFN residual
+    /// 0.0 = use 1/sqrt(head_dim); else use this (gemma-4: 1.0)
+    pub attn_scale_override: f32,
 }
 
 /// Map a raw GGML quant type id to the B1 formula-index slot the shaders
