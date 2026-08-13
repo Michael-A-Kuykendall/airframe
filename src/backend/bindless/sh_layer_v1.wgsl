@@ -939,7 +939,9 @@ fn main_post_ffw_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Gemma-4 layer_output_scale: applied to the FULL block output (after all
     // residual adds incl. post norms) — llama.cpp gemma4.cpp: cur *= out_scale.
-    if (params.out_scale_enabled != 0u) {
+    // When the PLE block is active, the PLE pass applies out_scale AFTER its
+    // residual add (llama.cpp places it at the very end of the block); skip here.
+    if (params.out_scale_enabled != 0u && offsets.ple_enabled == 0u) {
         activation_in[act_base + idx] = activation_in[act_base + idx] * layer_scales[offsets.layer_idx];
     }
 }

@@ -225,18 +225,6 @@ impl LayerOffsets {
             &mut has_tensor,
         );
         check(
-            self.ple_rope_freqs,
-            &mut min_word,
-            &mut max_word,
-            &mut has_tensor,
-        );
-        check(
-            self.ple_attn_post_norm,
-            &mut min_word,
-            &mut max_word,
-            &mut has_tensor,
-        );
-        check(
             self.ple_ffn_post_norm,
             &mut min_word,
             &mut max_word,
@@ -492,6 +480,21 @@ pub struct PleInputParams {
     pub chunk_words: u32,
 }
 
+/// Uniform params for the gemma-4 PLE block residual pass (`sh_ple_block.wgsl`).
+/// Only ever bound when `spec.ple_enabled`.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PleBlockParams {
+    pub dim: u32,    // n_embd
+    pub latent: u32, // 256
+    pub temp_stride: u32,
+    pub rms_eps: f32,
+    pub out_scale_enabled: u32,
+    pub scratch_base: u32, // temp offset for the proj scratch (ffn_dim*2, dead slot)
+    pub blob_base_words: u32, // window-local base (rebase absolute -> window)
+    pub chunk_words: u32,
+}
+
 /// Pre-compiled per-layer lookup table entry.
 /// Built once at model load time from the GGUF tensor index.
 /// Eliminates per-token HashMap lookups and format! string allocations
@@ -555,6 +558,10 @@ pub struct BindlessPipeline {
     // gemma-4 dense-latent PLE per-layer input construction (only dispatched when ple_enabled).
     pub ple_input_pipeline: wgpu::ComputePipeline,
     pub ple_input_layout: wgpu::BindGroupLayout,
+
+    // gemma-4 dense-latent PLE block residual (only dispatched when ple_enabled).
+    pub ple_block_pipeline: wgpu::ComputePipeline,
+    pub ple_block_layout: wgpu::BindGroupLayout,
 }
 
 impl BindlessPipeline {
@@ -1970,6 +1977,182 @@ impl BindlessPipeline {
             cache: None,
         });
 
+        // gemma-4 dense-latent PLE block residual.
+        // Dedicated layout + pipeline; only bound/dispatched when ple_enabled.
+        let ple_block_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("PLE Block Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1, // activation (read_write)
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2, // temp (read_write)
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3, // LayerOffsets uniform
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4, // PleBlockParams uniform
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9, // CacheParams uniform
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 17, // layer_scales (read)
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 18, // ple_input (read)
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 12,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 13,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 16,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        min_binding_size: None,
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let ple_block_src = include_str!("../sh_ple_block.wgsl");
+        let ple_block_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("PLE Block Shader"),
+            source: wgpu::ShaderSource::Wgsl(ple_block_src.into()),
+        });
+        let ple_block_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("PLE Block Pipeline Layout"),
+            bind_group_layouts: &[&ple_block_layout],
+            push_constant_ranges: &[],
+        });
+        let ple_block_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("PLE Block Pipeline"),
+            layout: Some(&ple_block_pl_layout),
+            module: &ple_block_shader,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
         Self {
             pipeline,
             bind_group_layout,
@@ -2002,6 +2185,8 @@ impl BindlessPipeline {
             quantize_kv_pipeline,
             ple_input_pipeline,
             ple_input_layout,
+            ple_block_pipeline,
+            ple_block_layout,
         }
     }
 

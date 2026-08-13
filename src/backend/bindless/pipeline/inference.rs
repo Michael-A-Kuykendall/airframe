@@ -659,6 +659,88 @@ impl BindlessPipeline {
         Ok(out_buf)
     }
 
+    /// Dispatches the gemma-4 PLE block residual for ONE layer into the given
+    /// encoder. Consumes `ple_input` (built by [`run_ple_input_pass`]) and the
+    /// layer's activation/temp/offsets/params/cache/layer_scales, applying:
+    ///   gate = GELU(inp_gate^T act) * ple_input slice; proj = proj^T gate;
+    ///   RMS(post_norm); activation += proj; then out_scale.
+    /// Only called when `spec.ple_enabled` and the layer's offsets.ple_enabled != 0.
+    ///
+    /// `ple_block_params` must be a per-layer [`super::PleBlockParams`] uniform
+    /// buffer; `offsets_buf` the layer's LayerOffsets uniform; `blob_window` the
+    /// layer's window (blob slots 0 + 10..16); `activation`/`temp` the per-forward
+    /// buffers; `cache_params_buf` the shared CacheParams; `ple_input` the
+    /// per-layer-latent buffer built once per forward.
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_ple_block(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        model: &BindlessModel,
+        blob_window: Option<&crate::backend::bindless::loader::BlobWindow>,
+        activation: &wgpu::Buffer,
+        temp: &wgpu::Buffer,
+        offsets_buf: &wgpu::Buffer,
+        ple_block_params: &wgpu::Buffer,
+        cache_params_buf: &wgpu::Buffer,
+        layer_scales_buf: &wgpu::Buffer,
+        ple_input: &wgpu::Buffer,
+        batch_size: u32,
+    ) {
+        let blob_bindings = blob_bindings_for(model, blob_window);
+        let mut entries: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(14);
+        entries.push(wgpu::BindGroupEntry {
+            binding: 0,
+            resource: blob_bindings[0].clone(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 1,
+            resource: activation.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 2,
+            resource: temp.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 3,
+            resource: offsets_buf.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 4,
+            resource: ple_block_params.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 9,
+            resource: cache_params_buf.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 17,
+            resource: layer_scales_buf.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 18,
+            resource: ple_input.as_entire_binding(),
+        });
+        for (i, blob_res) in blob_bindings.iter().enumerate().skip(1) {
+            entries.push(wgpu::BindGroupEntry {
+                binding: (9 + i) as u32, // 10..16
+                resource: blob_res.clone(),
+            });
+        }
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("PLE Block BindGroup"),
+            layout: &self.ple_block_layout,
+            entries: &entries,
+        });
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("PLE Block Residual"),
+            timestamp_writes: None,
+        });
+        cpass.set_pipeline(&self.ple_block_pipeline);
+        cpass.set_bind_group(0, &bg, &[]);
+        cpass.dispatch_workgroups(1, batch_size, 1);
+    }
+
     pub fn run_full_model(
         &self,
         device: &wgpu::Device,
@@ -2273,6 +2355,45 @@ impl BindlessPipeline {
                 cpass.set_bind_group(0, bg, &[]);
                 cpass.set_pipeline(pipe_post_ffw_norm);
                 cpass.dispatch_workgroups(wg_dim, batch_size, 1);
+            }
+
+            // ── gemma-4 dense-latent PLE block residual (gated per-layer) ──
+            // Runs after the FFN residual + post-ffw norm correction, before the
+            // TDR yield. The post_ffw_norm kernel skips out_scale when ple_enabled
+            // (this pass applies it after its residual add). Only dispatched when
+            // this layer's offsets declare PLE tensors.
+            if spec.ple_enabled && model.metadata.compiled_layers[i].offsets.ple_enabled != 0 {
+                if let Some(ple_input_buf) = _ple_input_buffer.as_ref() {
+                    let ple_params_buf =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("Layer {} PLE Block Params", i)),
+                            contents: bytemuck::bytes_of(&super::PleBlockParams {
+                                dim,
+                                latent: spec.ple_latent_dim as u32,
+                                temp_stride,
+                                rms_eps: spec.rms_eps,
+                                out_scale_enabled: spec.out_scale_enabled as u32,
+                                scratch_base: ffn_dim * 2,
+                                blob_base_words: _layer_blob_base_words[i],
+                                chunk_words: model.chunk_words(),
+                            }),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                    self.dispatch_ple_block(
+                        device,
+                        &mut tdr.encoder,
+                        model,
+                        _layer_windows[i].as_ref(),
+                        &activation_buffer,
+                        &temp_buffer,
+                        &_offset_buffers[i],
+                        &ple_params_buf,
+                        &cache_params_buffer,
+                        &model.preflight.as_ref().unwrap().layer_scales_buffer,
+                        ple_input_buf,
+                        batch_size,
+                    );
+                }
             }
 
             // TDR: conditional yield at layer boundary.
