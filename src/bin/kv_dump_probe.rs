@@ -216,6 +216,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         5,
         Some((&kx, &vx)),
         &spec,
+        None,
     );
     let ka_after_a = readback_f32(&device, &queue, &kx[0], kv_bytes);
 
@@ -232,6 +233,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             6,
             Some((&kx, &vx)),
             &spec,
+            None,
         )
         .expect("decode forward failed");
     let logits_c = rc.2;
@@ -251,6 +253,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             6,
             Some((&ky, &vy)),
             &spec,
+            None,
         )
         .expect("prefill forward failed");
     let logits_b = rb.2;
@@ -388,6 +391,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 pos + n,
                 kv,
                 &spec,
+                None,
             )
             .expect("B5 forward failed")
             .2

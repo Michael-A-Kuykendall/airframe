@@ -442,17 +442,13 @@ impl BindlessMetadata {
                         layer_idx,
                         "layer_output_scale.weight",
                     ),
+                    // rope_freqs is a SHARED tensor (not per-layer); its absolute
+                    // offset may be far from (even before) a given layer base, so
+                    // it must be packed ABSOLUTE (pack_blob_offset), not rebased.
                     ple_rope_freqs: absolute_offsets
                         .get("rope_freqs.weight")
                         .copied()
-                        .map(|abs| {
-                            if abs == 0 {
-                                0
-                            } else {
-                                super::pipeline::relative_packed_offset(abs, base_byte)
-                                    .expect("abs underflow")
-                            }
-                        })
+                        .map(super::pipeline::pack_blob_offset)
                         .unwrap_or(0),
                     ple_attn_post_norm: opt(&absolute_offsets, layer_idx, "attn_post_norm.weight"),
                     ple_ffn_post_norm: opt(&absolute_offsets, layer_idx, "ffn_post_norm.weight"),
@@ -568,7 +564,23 @@ impl BindlessMetadata {
             // rope_freqs: [latent] shared
             // attn_post_norm, ffn_post_norm: [n_embd] per block
             spec.ple_enabled = true;
-            spec.ple_latent_dim = spec.latent_dim;
+            // ple_latent_dim is the PER-LAYER latent dim (n_embd_per_layer = 256);
+            // latent_dim is the TOTAL across all layers (256*42 = 10752). Prefer
+            // the GGUF embedding_length_per_layer_input key; fall back to division.
+            spec.ple_latent_dim = self
+                .gguf_metadata
+                .get("gemma4.embedding_length_per_layer_input")
+                .and_then(|v| match v {
+                    crate::backend::bindless::metadata::GgufValue::U32(n) => Some(*n as usize),
+                    crate::backend::bindless::metadata::GgufValue::I32(n) => Some(*n as usize),
+                    crate::backend::bindless::metadata::GgufValue::U64(n) => Some(*n as usize),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    spec.latent_dim
+                        .checked_div(spec.n_layer)
+                        .unwrap_or(spec.latent_dim)
+                });
             spec.ple_inp_gate_offset = self.get_tensor_offset("blk.0.inp_gate.weight").unwrap_or(0);
             spec.ple_inp_gate_quant = self.get_tensor_type("blk.0.inp_gate.weight").unwrap_or(0);
             spec.ple_proj_offset = self.get_tensor_offset("blk.0.proj.weight").unwrap_or(0);
@@ -799,11 +811,13 @@ impl BindlessMetadata {
                 .get(&format!("blk.{}.layer_output_scale.weight", layer_idx))
                 .copied()
                 .unwrap_or(0)),
-            ple_rope_freqs: rel(self
+            // rope_freqs is SHARED (not per-layer): pack ABSOLUTE, never rebase.
+            ple_rope_freqs: self
                 .tensor_offsets
                 .get("rope_freqs.weight")
                 .copied()
-                .unwrap_or(0)),
+                .map(super::pipeline::pack_blob_offset)
+                .unwrap_or(0),
             ple_attn_post_norm: rel(self
                 .tensor_offsets
                 .get(&format!("blk.{}.attn_post_norm.weight", layer_idx))

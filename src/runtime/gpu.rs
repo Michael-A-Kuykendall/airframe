@@ -571,6 +571,7 @@ impl GpuRuntime {
         // ── Closure: GPU prefill dispatch ─────────────────────────────────
         let kv_for_prefill = kv_cache_isf.clone();
         let spec_for_prefill = spec_isf.clone();
+        let prefill_tokens = prompt_tokens.clone(); // for PLE per-layer input gather (gemma-4)
         let prefill_fn: std::sync::Arc<
             dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync,
         > = std::sync::Arc::new(move |batched: Vec<f32>, _token_count: u32| {
@@ -585,6 +586,7 @@ impl GpuRuntime {
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 &spec_for_prefill,
                 prefill_chunk,
+                Some(&prefill_tokens),
             ) {
                 Ok((hidden, _l21, logits)) => (hidden, logits),
                 Err(_) => (vec![], vec![]),
@@ -647,6 +649,7 @@ impl GpuRuntime {
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 &spec_for_forward,
                 1,
+                Some(&[token_id]),
             ) {
                 Ok((hidden, _l21, logits)) => (hidden, logits),
                 Err(_) => (vec![], vec![]),

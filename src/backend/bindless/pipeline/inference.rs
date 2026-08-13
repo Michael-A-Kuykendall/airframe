@@ -499,6 +499,166 @@ pub fn emit_ptensor_capture(
 }
 
 impl BindlessPipeline {
+    /// Builds the gemma-4 dense-latent PLE per-layer latent input buffer.
+    ///
+    /// Only called when `spec.ple_enabled && token_ids.is_some()`. Computes:
+    ///   inp_per_layer = (RMS(mm(per_layer_model_proj, inp_batch)) + get_rows(
+    ///     per_layer_token_embd, tokens)) * (1/sqrt(2))
+    /// producing a buffer of `n_layer * n_tokens * latent` f32, laid out as
+    /// `ple_input[il * n_tokens * latent + t * latent + k]` so the PLE block
+    /// kernel reads slice `il` ([latent, n_tokens]) directly.
+    ///
+    /// Dispatches `sh_ple_input.wgsl` with a dedicated bind group layout that
+    /// no other model ever uses (nothing affects all models).
+    pub fn run_ple_input_pass(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        model: &BindlessModel,
+        input_embd: &[f32],
+        token_ids: &[u32],
+        spec: &ModelSpec,
+    ) -> Result<wgpu::Buffer, String> {
+        let n_tokens = token_ids.len() as u32;
+        assert_eq!(
+            input_embd.len() as u32,
+            n_tokens * spec.n_embd as u32,
+            "PLE input pass: input_embd must be exactly n_tokens x n_embd"
+        );
+
+        let latent = spec.ple_latent_dim as u32;
+        let n_layer = spec.n_layer as u32;
+        let n_embd = spec.n_embd as u32;
+
+        // ── Blob window over the PLE tensors actually read ────────────────
+        // per_layer_model_proj [n_embd, latent*n_layer] IQ4_XS (128 elems / 128 B)
+        // per_layer_proj_norm [latent] F32
+        // per_layer_token_embd [latent*n_layer, vocab] Q6_K (256 elems / 210 B) —
+        //   get_rows reads column `token`: contiguous latent*n_layer elems.
+        let model_proj_off = spec.per_layer_model_proj_offset as u32;
+        let proj_norm_off = spec.per_layer_proj_norm_offset as u32;
+        let token_embd_off = spec.per_layer_token_embd_offset as u32;
+        let model_proj_bytes = (n_embd as u64) * (latent as u64) * (n_layer as u64); // 1 B/elem IQ4_XS
+        let token_row_bytes = (latent as u64) * (n_layer as u64) * 210 / 256; // Q6_K bytes per token column
+                                                                              // All offsets below are raw GGUF blob byte offsets; convert to absolute words.
+        let start_word = (model_proj_off / 4).min(token_embd_off / 4);
+        let max_token = token_ids.iter().copied().max().unwrap_or(0) as u64;
+        let token_end_byte = (token_embd_off as u64) + (max_token + 1) * token_row_bytes;
+        let end_word = ((model_proj_off as u64 + model_proj_bytes)
+            .max(token_end_byte)
+            .max(proj_norm_off as u64 + (latent as u64) * 4)
+            .saturating_sub(1)
+            / 4) as u32;
+        let window = super::BlobWindow::for_range(
+            start_word,
+            end_word,
+            model.chunk_words(),
+            model.total_resident_chunks,
+        )?;
+        let window_base = window.window_base_words();
+
+        // ── Params (packed offsets rebased to window-local) ────────────────
+        let rel = |abs: u64| -> u32 {
+            if abs == 0 {
+                0
+            } else {
+                crate::backend::bindless::pipeline::relative_packed_offset(
+                    abs,
+                    (window_base as u64) * 4,
+                )
+                .expect("PLE tensor underflows window")
+            }
+        };
+        let params = super::PleInputParams {
+            latent,
+            n_layer,
+            n_tokens,
+            n_embd,
+            token_embd_off: rel(token_embd_off as u64),
+            token_embd_row_bytes: token_row_bytes as u32,
+            model_proj_off: rel(model_proj_off as u64),
+            proj_norm_off: rel(proj_norm_off as u64),
+            rms_eps: spec.rms_eps,
+            blob_base_words: window_base,
+            chunk_words: model.chunk_words(),
+        };
+
+        // ── Buffers ────────────────────────────────────────────────────────
+        let token_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("PLE Input Tokens"),
+            contents: bytemuck::cast_slice(token_ids),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let inp_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("PLE Input Embds"),
+            contents: bytemuck::cast_slice(input_embd),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let out_bytes = (n_layer as u64) * (n_tokens as u64) * (latent as u64) * 4;
+        let out_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("PLE Input Output"),
+            size: out_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("PLE Input Params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        // ── Bind group (window blob slots at 0 + 10..16) ───────────────────
+        let blobs = window.binding_resources(model);
+        let mut entries: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(13);
+        entries.push(wgpu::BindGroupEntry {
+            binding: 0,
+            resource: blobs[0].clone(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 1,
+            resource: token_buf.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 2,
+            resource: inp_buf.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 3,
+            resource: params_buf.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 4,
+            resource: out_buf.as_entire_binding(),
+        });
+        for (i, blob_res) in blobs.iter().enumerate().skip(1) {
+            entries.push(wgpu::BindGroupEntry {
+                binding: (9 + i) as u32, // 10..16
+                resource: blob_res.clone(),
+            });
+        }
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("PLE Input BindGroup"),
+            layout: &self.ple_input_layout,
+            entries: &entries,
+        });
+
+        // ── Dispatch: one workgroup per (token, layer); 256 threads cover the
+        //    latent slice in X. gid.x/256 = token, gid.y = layer, lid.x = k. ──
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("PLE Input Construction"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.ple_input_pipeline);
+            cpass.set_bind_group(0, &bg, &[]);
+            cpass.dispatch_workgroups(n_tokens * 256, n_layer, 1);
+        }
+        queue.submit(Some(encoder.finish()));
+        Ok(out_buf)
+    }
+
     pub fn run_full_model(
         &self,
         device: &wgpu::Device,
@@ -542,6 +702,7 @@ impl BindlessPipeline {
             seq_len,
             None,
             spec,
+            None,
         )
         .expect("GPU forward pass failed")
         .2
@@ -559,6 +720,7 @@ impl BindlessPipeline {
         kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
         spec: &ModelSpec,
         chunk_tokens: u32,
+        token_ids: Option<&[u32]>,
     ) -> InferenceResult {
         let dim = spec.n_embd;
         assert!(dim > 0, "spec.n_embd must be > 0");
@@ -567,7 +729,6 @@ impl BindlessPipeline {
             "input_embd must align to token rows"
         );
         assert!(chunk_tokens > 0, "chunk_tokens must be > 0");
-
         // Gemma-4 input embedding scale: llama.cpp gemma4.cpp applies
         // `ggml_scale(inpL, sqrtf(n_embd))` to token embeddings. RMSNorm makes
         // it invisible to normed stages, but pre-norm projections (PLE context
@@ -597,6 +758,7 @@ impl BindlessPipeline {
                 current_pos,
                 kv_state,
                 spec,
+                token_ids,
             );
             // ^ Return type is now Result, so this propagates Ok or Err correctly.
         }
@@ -617,6 +779,13 @@ impl BindlessPipeline {
                 );
             }
 
+            // Slice token_ids to this chunk's range (for the PLE gather).
+            let chunk_token_ids: Option<&[u32]> = token_ids.map(|ids| {
+                let start = processed_tokens as usize;
+                let end = (start + chunk_token_count as usize).min(ids.len());
+                &ids[start..end]
+            });
+
             last_result = Some(self.run_full_model_with_cache_state(
                 device,
                 queue,
@@ -627,6 +796,7 @@ impl BindlessPipeline {
                 chunk_seq_len,
                 kv_state,
                 spec,
+                chunk_token_ids,
             )?);
 
             if trace_chunks {
@@ -640,6 +810,7 @@ impl BindlessPipeline {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn run_full_model_with_cache_state(
         &self,
         device: &wgpu::Device,
@@ -651,6 +822,7 @@ impl BindlessPipeline {
         seq_len: u32,
         kv_state: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
         spec: &ModelSpec,
+        token_ids: Option<&[u32]>,
     ) -> InferenceResult {
         // Derive all constants from ModelSpec
         let dim = spec.n_embd as u32;
@@ -894,6 +1066,22 @@ impl BindlessPipeline {
             contents: bytemuck::bytes_of(&cache_params),
             usage: wgpu::BufferUsages::UNIFORM,
         });
+
+        // ── gemma-4 dense-latent PLE per-layer latent input (once per forward) ──
+        // Only built when ple_enabled AND token_ids are provided. The buffer is
+        // consumed by the PLE block kernel (f41.2.2); kept alive here for the
+        // whole forward. Non-PLE models never take this branch (zero behavior change).
+        // `_` prefix: consumed by the PLE block pass (f41.2.2), which binds it.
+        let _ple_input_buffer: Option<wgpu::Buffer> = if spec.ple_enabled {
+            match token_ids {
+                Some(ids) if !ids.is_empty() => {
+                    Some(self.run_ple_input_pass(device, queue, model, input_embd, ids, spec)?)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
 
         use crate::backend::bindless::loader::BlobWindow;
 

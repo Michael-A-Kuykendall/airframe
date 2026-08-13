@@ -270,6 +270,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         Some((kv_cache.get_k_buffers(), kv_cache.get_v_buffers())),
         &spec,
         512,
+        Some(&prompt_tokens),
     )?;
     std::env::remove_var("AIRFRAME_LAYER_DUMP_CAPTURE");
 

@@ -237,6 +237,7 @@ fn run_mode(
             Some((kv_ref.get_k_buffers(), kv_ref.get_v_buffers())),
             ctx.spec,
             512,
+            None,
         )?;
     let logits_ref = rb.2;
 
@@ -253,6 +254,7 @@ fn run_mode(
             Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
             ctx.spec,
             512,
+            None,
         )?;
 
     // Decode at pos 6 with 7th token embedding
@@ -268,6 +270,7 @@ fn run_mode(
             Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
             ctx.spec,
             1,
+            None,
         )?;
     let logits_dec = rd.2;
 

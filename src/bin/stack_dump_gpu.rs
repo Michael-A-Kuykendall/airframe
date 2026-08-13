@@ -214,6 +214,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None,
         &spec,
         batch.max(1),
+        None,
     )?;
     clear_stack_layer_capture_sink();
 

@@ -167,6 +167,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             Some((kv_ref.get_k_buffers(), kv_ref.get_v_buffers())),
             &spec,
             512,
+            None,
         )?;
         let logits_ref = rb_ref.2;
         let (ref_idx, ref_piece) = argmax(&logits_ref);
@@ -192,6 +193,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             Some((kv_chain.get_k_buffers(), kv_chain.get_v_buffers())),
             &spec,
             512,
+            None,
         )?;
 
         // Sequential decode using greedy argmax feedback
@@ -208,6 +210,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
                 Some((kv_chain.get_k_buffers(), kv_chain.get_v_buffers())),
                 &spec,
                 1,
+                None,
             )?;
             let (tok_idx, tok_piece) = argmax(&logits);
             let diff: f32 = logits

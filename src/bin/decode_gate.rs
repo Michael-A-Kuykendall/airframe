@@ -155,6 +155,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             Some((kv_ref.get_k_buffers(), kv_ref.get_v_buffers())),
             &spec,
             512,
+            None,
         )?;
         let logits_ref = rb.2;
 
@@ -169,6 +170,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
             &spec,
             512,
+            None,
         )?;
         let rd = pipeline.run_full_model_prefill_chunked_with_cache_state(
             &device,
@@ -180,6 +182,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             Some((kv_pf.get_k_buffers(), kv_pf.get_v_buffers())),
             &spec,
             1,
+            None,
         )?;
         let logits_dec = rd.2;
 
