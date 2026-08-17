@@ -434,6 +434,14 @@ impl BindlessMetadata {
                     attn_q_bias: attn_q_bias_off,
                     attn_k_bias: attn_k_bias_off,
                     attn_v_bias: attn_v_bias_off,
+                    // PLE (Per-Layer Embedding) — zero for test models
+                    ple_inp_gate: 0,
+                    ple_proj: 0,
+                    ple_layer_output_scale: 0,
+                    ple_rope_freqs: 0,
+                    ple_attn_post_norm: 0,
+                    ple_ffn_post_norm: 0,
+                    ple_enabled: 0,
                 };
                 let lqt_attn_out = t(&tensor_types, layer_idx, "attn_output.weight");
                 let lqt_up = t(&tensor_types, layer_idx, "ffn_up.weight");
@@ -527,6 +535,29 @@ impl BindlessMetadata {
                 .unwrap_or(0);
             spec.per_layer_proj_norm_offset = self
                 .get_tensor_offset("per_layer_proj_norm.weight")
+                .unwrap_or(0);
+
+            // PLE (Per-Layer Embedding) per-layer tensors
+            // inp_gate: [n_embd, latent] per block
+            // proj: [latent, n_embd] per block
+            // layer_output_scale: [1] per block
+            // rope_freqs: [latent] shared
+            // attn_post_norm, ffn_post_norm: [n_embd] per block
+            spec.ple_enabled = true;
+            spec.ple_latent_dim = spec.latent_dim;
+            spec.ple_inp_gate_offset = self.get_tensor_offset("blk.0.inp_gate.weight").unwrap_or(0);
+            spec.ple_inp_gate_quant = self.get_tensor_type("blk.0.inp_gate.weight").unwrap_or(0);
+            spec.ple_proj_offset = self.get_tensor_offset("blk.0.proj.weight").unwrap_or(0);
+            spec.ple_proj_quant = self.get_tensor_type("blk.0.proj.weight").unwrap_or(0);
+            spec.ple_layer_output_scale_offset = self
+                .get_tensor_offset("blk.0.layer_output_scale.weight")
+                .unwrap_or(0);
+            spec.ple_rope_freqs_offset = self.get_tensor_offset("rope_freqs.weight").unwrap_or(0);
+            spec.ple_attn_post_norm_offset = self
+                .get_tensor_offset("blk.0.attn_post_norm.weight")
+                .unwrap_or(0);
+            spec.ple_ffn_post_norm_offset = self
+                .get_tensor_offset("blk.0.ffn_post_norm.weight")
                 .unwrap_or(0);
         }
 
@@ -722,6 +753,48 @@ impl BindlessMetadata {
                 .get(&format!("blk.{}.ffn_down.weight", layer_idx))
                 .map(|&t| (t == 12) as u32)
                 .unwrap_or(0),
+            // PLE (Per-Layer Embedding) per-layer tensors (gemma-4 dense-latent)
+            ple_inp_gate: rel(self
+                .tensor_offsets
+                .get(&format!("blk.{}.inp_gate.weight", layer_idx))
+                .copied()
+                .unwrap_or(0)),
+            ple_proj: rel(self
+                .tensor_offsets
+                .get(&format!("blk.{}.proj.weight", layer_idx))
+                .copied()
+                .unwrap_or(0)),
+            ple_layer_output_scale: rel(self
+                .tensor_offsets
+                .get(&format!("blk.{}.layer_output_scale.weight", layer_idx))
+                .copied()
+                .unwrap_or(0)),
+            ple_rope_freqs: rel(self
+                .tensor_offsets
+                .get("rope_freqs.weight")
+                .copied()
+                .unwrap_or(0)),
+            ple_attn_post_norm: rel(self
+                .tensor_offsets
+                .get(&format!("blk.{}.attn_post_norm.weight", layer_idx))
+                .copied()
+                .unwrap_or(0)),
+            ple_ffn_post_norm: rel(self
+                .tensor_offsets
+                .get(&format!("blk.{}.ffn_post_norm.weight", layer_idx))
+                .copied()
+                .unwrap_or(0)),
+            ple_enabled: if self
+                .tensor_offsets
+                .contains_key(&format!("blk.{}.inp_gate.weight", layer_idx))
+                && self
+                    .tensor_offsets
+                    .contains_key(&format!("blk.{}.proj.weight", layer_idx))
+            {
+                1
+            } else {
+                0
+            },
         })
     }
 }

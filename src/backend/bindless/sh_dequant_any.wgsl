@@ -231,6 +231,21 @@ fn dequant_q6k_elem(block_pack: u32, e: u32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// IQ4_XS element dequant (128-byte superblocks, 128 elements)
+// Layout: [0..64] scales (32 fp16 = 64 bytes); [64..128] qs (128 4-bit = 64 bytes).
+// Scale per 4 elements; 4-bit signed nibbles (-8..7) packed 2 per byte.
+// ---------------------------------------------------------------------------
+fn dequant_iq4_xs_elem(block_pack: u32, e: u32) -> f32 {
+    let scale_idx = e / 4u;
+    let scale = read_f16_rel(block_pack, scale_idx * 2u);
+
+    let byte_idx = e / 2u;
+    let qs_byte = read_byte_rel(block_pack, 64u + byte_idx);
+    let nibble = select(qs_byte >> 4u, qs_byte & 0x0Fu, e % 2u == 0u);
+    return f32(i32(nibble) - 8) * scale;
+}
+
+// ---------------------------------------------------------------------------
 // F16 dequant — pack is packed absolute (byte/2)
 // ---------------------------------------------------------------------------
 fn dequant_f16_at(pack: u32) -> f32 {
@@ -249,7 +264,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let off_pack = params.offset_words;
     var val: f32;
 
-    if (slot == 7u) { // Q6_K — 256-elem superblocks, 210 bytes
+    if (slot == 8u) { // IQ4_XS — 128-elem superblocks, 128 bytes
+        let b = i / 128u;
+        let e = i % 128u;
+        val = dequant_iq4_xs_elem(add_pack(off_pack, b * 128u), e);
+    } else if (slot == 7u) { // Q6_K — 256-elem superblocks, 210 bytes
         let b = i / 256u;
         let e = i % 256u;
         val = dequant_q6k_elem(add_pack(off_pack, b * 210u), e);

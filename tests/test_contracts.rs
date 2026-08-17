@@ -709,6 +709,13 @@ fn layer_offsets_fixture(base_byte: u64, tensor_abs: &[u64]) -> (LayerOffsets, u
         attn_v_bias: 0,
         v_is_q4k: 0,
         ffn_down_is_q4k: 0,
+        ple_inp_gate: 0,
+        ple_proj: 0,
+        ple_layer_output_scale: 0,
+        ple_rope_freqs: 0,
+        ple_attn_post_norm: 0,
+        ple_ffn_post_norm: 0,
+        ple_enabled: 0,
     };
 
     let packed: Vec<u32> = tensor_abs

@@ -280,6 +280,26 @@ fn dequant_q6_k(block: &[u8], elem: usize) -> f32 {
     d * sc_raw as f32 * signed_q as f32
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// IQ4_XS (type 30) — 128 elements/superblock, 128 bytes/superblock.
+// Layout: [0..64] scales (32 fp16 = 64 bytes); [64..128] qs (128 4-bit = 64 bytes).
+// GGML: 4-bit signed integer per element (range -8..7), one fp16 scale per 4 elements.
+//       val = (nibble - 8) * scale[elem / 4].
+// ─────────────────────────────────────────────────────────────────────────────
+fn dequant_iq4_xs(block: &[u8], elem: usize) -> f32 {
+    let scale_idx = elem / 4;
+    let scale = f16_to_f32(rd_u16(block, scale_idx * 2));
+
+    let byte_idx = elem / 2;
+    let qs_byte = block[64 + byte_idx];
+    let nibble = if elem.is_multiple_of(2) {
+        qs_byte & 0x0f
+    } else {
+        qs_byte >> 4
+    };
+    (nibble as f32 - 8.0) * scale
+}
+
 /// The ordered, spec-cited registry. Array index == `FormulaSlot` discriminant.
 ///
 /// The slot is intentionally distinct from the GGML type id so the registry —
@@ -341,6 +361,13 @@ pub const QUANT_FORMULAS: &[QuantFormula] = &[
         block_bytes: 210,
         dequant: dequant_q6_k,
     },
+    QuantFormula {
+        type_id: 30,
+        name: "IQ4_XS",
+        block_elems: 128,
+        block_bytes: 128,
+        dequant: dequant_iq4_xs,
+    },
 ];
 
 /// Stable dispatch slot the shader consumes. Distinct from GGML type id so the
@@ -358,6 +385,7 @@ pub enum FormulaSlot {
     Q4_K = 5,
     Q5_K = 6,
     Q6_K = 7,
+    IQ4_XS = 8,
 }
 
 impl FormulaSlot {
@@ -378,6 +406,7 @@ pub fn slot_for_type(type_id: u32) -> Option<FormulaSlot> {
         12 => Some(FormulaSlot::Q4_K),
         13 => Some(FormulaSlot::Q5_K),
         14 => Some(FormulaSlot::Q6_K),
+        30 => Some(FormulaSlot::IQ4_XS),
         _ => None,
     }
 }

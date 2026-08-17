@@ -13,7 +13,8 @@ use airframe::backend::bindless::loader::BindlessModel;
 use airframe::backend::bindless::metadata::BindlessMetadata;
 use airframe::backend::bindless::pipeline::BindlessPipeline;
 use airframe::core::dequant::{
-    dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,
+    dequantize_iq4_xs, dequantize_q4_0, dequantize_q4_k, dequantize_q5_k, dequantize_q6_k,
+    dequantize_q8_0,
 };
 use airframe::core::model::GgufTensorInfo;
 use memmap2::Mmap;
@@ -82,6 +83,7 @@ fn main() {
 
     // --- Types to test: (ggml_type, name) ---
     let quant_types: &[(u32, &str)] = &[
+        (30, "IQ4_XS"),
         (0, "F32"),
         (1, "F16"),
         (2, "Q4_0"),
@@ -158,6 +160,11 @@ fn main() {
             14 => {
                 let t = dequantize_q6_k(&tensor_info, &mmap, meta.data_start_offset)
                     .expect("cpu q6_k failed");
+                t.data[..elems as usize].to_vec()
+            }
+            30 => {
+                let t = dequantize_iq4_xs(&tensor_info, &mmap, meta.data_start_offset)
+                    .expect("cpu iq4_xs failed");
                 t.data[..elems as usize].to_vec()
             }
             _ => unreachable!(),

@@ -125,6 +125,14 @@ pub struct LayerOffsets {
     pub attn_v_bias: u32,     // packed V bias (F32); 0 = disabled; Qwen2
     pub v_is_q4k: u32,        // 1 if attn_v uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
     pub ffn_down_is_q4k: u32, // 1 if ffn_down uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
+    // PLE (Per-Layer Embedding) per-layer tensors (gemma-4 dense-latent)
+    pub ple_inp_gate: u32,
+    pub ple_proj: u32,
+    pub ple_layer_output_scale: u32,
+    pub ple_rope_freqs: u32,
+    pub ple_attn_post_norm: u32,
+    pub ple_ffn_post_norm: u32,
+    pub ple_enabled: u32,
 }
 
 impl LayerOffsets {

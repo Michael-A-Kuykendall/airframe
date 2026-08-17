@@ -1,7 +1,8 @@
 //! Dequantization kernels for GGML quantized tensors.
 //!
-//! Converts Q4_0, Q4_K, Q5_K, Q6_K, Q8_0, and Q5_0 blocks to FP32.
+//! Converts Q4_0, Q4_K, Q5_K, Q6_K, Q8_0, Q5_0, and IQ4_XS blocks to FP32.
 
+pub mod iq4_xs;
 pub mod q4_0;
 pub mod q4_k;
 pub mod q5_0;
@@ -9,6 +10,7 @@ pub mod q5_k;
 pub mod q6_k;
 pub mod q8_0;
 
+pub use iq4_xs::dequantize_iq4_xs;
 pub use q4_0::dequantize_q4_0;
 pub use q4_k::dequantize_q4_k;
 pub use q5_0::dequantize_q5_0;

@@ -330,6 +330,16 @@ mod tests {
             v_plain_rms_norm: false,
             out_scale_enabled: false,
             scale_embeddings_by_sqrt_dim: false,
+            ple_inp_gate_offset: 0,
+            ple_inp_gate_quant: 0,
+            ple_proj_offset: 0,
+            ple_proj_quant: 0,
+            ple_layer_output_scale_offset: 0,
+            ple_rope_freqs_offset: 0,
+            ple_attn_post_norm_offset: 0,
+            ple_ffn_post_norm_offset: 0,
+            ple_latent_dim: 0,
+            ple_enabled: false,
         }
     }
 
