@@ -77,6 +77,8 @@ pub struct GpuRuntime {
     spec: ModelSpec,
     output_head_f32: wgpu::Buffer,
     kv_cache: Arc<Mutex<KVCache>>,
+    // Adapter limits for bind group validation
+    max_storage_binding: u64,
     // Precomputed constants
     embd_weight_offset: u64,
     row_bytes: u64,
@@ -117,6 +119,7 @@ impl GpuRuntime {
             spec,
             output_head_f32,
             kv_cache,
+            max_storage_binding: 0,
             embd_weight_offset,
             row_bytes,
             embd_quant_type,
@@ -138,7 +141,10 @@ impl GpuRuntime {
         let model_path_str = model_path.to_string_lossy().to_string();
 
         // GPU init
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
 
         // Enumerate adapters and prefer DiscreteGpu over IntegratedGpu.
         // Fixes multi-GPU systems (laptops with NVIDIA/AMD + Intel iGPU)
@@ -172,7 +178,11 @@ impl GpuRuntime {
         let model_file_size = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
         let max_buffer_size = adapter_limits.max_buffer_size;
         let max_binding = adapter_limits.max_storage_buffer_binding_size as u64;
-        let chunk_size = crate::backend::bindless::loader::BLOB_CHUNK_BYTES;
+
+        // Use the loader's chunk plan to respect the adapter's binding limit
+        let chunk_plan =
+            crate::backend::bindless::loader::compute_chunk_plan(model_file_size, max_binding);
+        let chunk_size = chunk_plan.effective_chunk;
 
         if model_file_size > max_buffer_size {
             return Err(format!(
@@ -372,6 +382,7 @@ impl GpuRuntime {
             spec,
             output_head_f32,
             kv_cache,
+            max_storage_binding: max_binding,
             embd_weight_offset,
             row_bytes,
             embd_quant_type,
@@ -554,18 +565,19 @@ impl GpuRuntime {
             });
 
         // For models with large untied output vocabularies (e.g. Gemma2 256K),
-        // the dequanted F32 output head can exceed the 2GB storage buffer binding
+        // the dequanted F32 output head can exceed the adapter's storage buffer binding
         // limit. When that happens, pass None — the pipeline reads the quantized
         // output.weight directly from the already-loaded blobs (line 920 of
         // inference.rs: "blob-based quantized head").
         let output_f32_bytes = spec_isf.n_embd as u64 * spec_isf.n_vocab as u64 * 4;
-        let max_binding = 2_147_483_647u64; // 2GB wgpu binding limit
+        let max_binding = self.max_storage_binding;
         let head_override: Option<&wgpu::Buffer> = if output_f32_bytes <= max_binding {
             Some(output_head_ref)
         } else {
             eprintln!(
-                "[GpuRuntime] output head F32 ({:.1} MB) exceeds 2GB binding limit — using blob-based quantized head",
-                output_f32_bytes as f64 / 1_048_576.0
+                "[GpuRuntime] output head F32 ({:.1} MB) exceeds adapter binding limit ({:.1} MB) — using blob-based quantized head",
+                output_f32_bytes as f64 / 1_048_576.0,
+                max_binding as f64 / 1_048_576.0
             );
             None
         };
