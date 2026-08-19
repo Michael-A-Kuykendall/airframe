@@ -138,7 +138,10 @@ impl GpuRuntime {
         let model_path_str = model_path.to_string_lossy().to_string();
 
         // GPU init
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
 
         // Enumerate adapters and prefer DiscreteGpu over IntegratedGpu.
         // Fixes multi-GPU systems (laptops with NVIDIA/AMD + Intel iGPU)
