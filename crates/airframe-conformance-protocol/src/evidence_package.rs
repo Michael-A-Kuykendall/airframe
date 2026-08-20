@@ -1,3 +1,7 @@
+// GLOSSARY: meaning (b) of `evidence` — EvidencePackage, the conformance
+// evidence bundle (serialized, schema-valid). NOT validation::EvidenceChecklist
+// (meaning a, in-memory slice-validation tracker in src/validation/evidence.rs).
+// See that module's glossary.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

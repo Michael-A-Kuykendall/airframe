@@ -1,3 +1,7 @@
+// GLOSSARY: meaning (a) of `evidence` — this is validation::EvidenceChecklist,
+// the in-memory name/value tracker for slice validation. NOT the conformance
+// EvidencePackage in crates/airframe-conformance-protocol (meaning b, the
+// conformance evidence bundle). See that module's glossary.
 use crate::validation::errors::{SliceValidationError, ValidationResult};
 use std::collections::HashMap;
 

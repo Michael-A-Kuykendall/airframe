@@ -1,3 +1,11 @@
+// GLOSSARY: the term `invariant` has multiple meanings in this codebase:
+//   1. THIS module — the PPT/invariant-testing framework (assert_invariant,
+//      contract_test, explore_test). Production-always semantic contracts.
+//   2. src/core/audit/invariants.rs — the SQLite smoothness-ratio checker
+//      (feature-gated "audit"; measures RMS-ratio vs reference). NOT this.
+//   3. (shimmy) shimmy_invariants: model-loading/API/discovery invariants.
+// This module is meaning (1).
+//!
 //! PPT + Invariant Testing System for Airframe
 //!
 //! Combines **Predictive Property-Based Testing (PPT)** with **runtime invariant

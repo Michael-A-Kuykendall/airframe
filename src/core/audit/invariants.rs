@@ -1,3 +1,6 @@
+// GLOSSARY: meaning (2) of `invariant` — this is the SQLite smoothness-ratio
+// checker (RMS-ratio vs reference, feature-gated "audit"), NOT the PPT
+// framework in src/invariant_ppt.rs (meaning 1). See that module's glossary.
 use rusqlite::{params, Connection};
 
 use super::db;
