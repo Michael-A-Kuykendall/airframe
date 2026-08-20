@@ -95,8 +95,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    
-    // Strict flush for rustchain 
+
     tokio::io::stdout().flush().await?;
 
     Ok(())
