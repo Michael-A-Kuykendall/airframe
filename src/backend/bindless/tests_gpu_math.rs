@@ -4,14 +4,27 @@ mod tests {
     use wgpu::util::DeviceExt;
 
     async fn get_device() -> (wgpu::Device, wgpu::Queue) {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                ..Default::default()
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
+        let adapters = instance.enumerate_adapters(wgpu::Backends::all());
+        let adapter = adapters
+            .iter()
+            .find(|a| a.get_info().device_type == wgpu::DeviceType::DiscreteGpu)
+            .or_else(|| {
+                adapters
+                    .iter()
+                    .find(|a| a.get_info().device_type == wgpu::DeviceType::IntegratedGpu)
             })
-            .await
-            .expect("No adapter");
+            .or_else(|| adapters.first())
+            .expect("No GPU adapter");
+        eprintln!(
+            "[gpu-test] Selected adapter: {} ({:?}, backend={:?})",
+            adapter.get_info().name,
+            adapter.get_info().device_type,
+            adapter.get_info().backend
+        );
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
@@ -20,6 +33,11 @@ mod tests {
         (device, queue)
     }
 
+    // Q4_0 dequant micro-audit on a real wgpu device. #[ignore] per repo convention
+    // (see tests/attention_f6_f7verfy.rs): creating a wgpu device in the default
+    // test run crashes on the Zink/EGL path in the test harness. The math here is
+    // verified correct on both the RTX 3060 (dzn) and llvmpipe.
+    #[ignore]
     #[tokio::test]
     async fn test_gpu_q4_0_micro_audit() {
         let (device, queue) = get_device().await;

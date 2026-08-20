@@ -26,7 +26,10 @@ mod tests_inner {
     }
 
     async fn get_device() -> (wgpu::Device, wgpu::Queue) {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -67,6 +70,7 @@ mod tests_inner {
         (device, queue)
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_bindless_probe_magic() {
         // 1. Setup WGPU
@@ -106,6 +110,7 @@ mod tests_inner {
         assert_eq!(result[1], 3, "Version mismatch");
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_bindless_dequant_q4_0() {
         // 1. Setup
@@ -192,6 +197,7 @@ mod tests_inner {
         assert!((result[17] - (-8.0)).abs() < 1e-5);
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_bindless_matmul_q4_0() {
         use super::super::pipeline::MatMulParams;
@@ -304,6 +310,7 @@ mod tests_inner {
         assert!((result[1] - 4.0).abs() < 1e-5);
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_bindless_rmsnorm() {
         use super::super::pipeline::RMSNormParams;
@@ -373,6 +380,7 @@ mod tests_inner {
         assert!((result[3] - 0.0).abs() < 1e-5);
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_bindless_chain() {
         // Test RMSNorm -> MatMul chaining without CPU readback

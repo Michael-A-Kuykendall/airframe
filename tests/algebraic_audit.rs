@@ -101,6 +101,7 @@ fn approx_eq(a: f32, b: f32) -> bool {
     diff < 1e-2 || diff <= (a.abs().max(b.abs()) * 1e-3)
 }
 
+#[ignore]
 #[tokio::test]
 async fn algebraic_audit_dequant_shader_vs_spec() {
     // 1. Acquire GPU (the gate runs on hardware; skip gracefully if none).

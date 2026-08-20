@@ -562,9 +562,13 @@ mod tests {
     use super::*;
     use pollster::block_on;
 
+    #[ignore]
     #[test]
     fn test_helical_gpu_shift_pure_copy() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .expect("No GPU adapter");
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
@@ -684,9 +688,13 @@ mod tests {
     /// Source [5,15] and destination [2,12] overlap at [5,12] — 8 collisions.
     /// Without scratch buffers this would corrupt data.
     /// Pure copy: both K and V must be bit-identical to the original source data.
+    #[ignore]
     #[test]
     fn test_helical_gpu_shift_overlapping() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .expect("No GPU adapter");
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))

@@ -18,6 +18,7 @@
 // - Masking broken → future tokens leak information
 // - Buffer layout wrong → GPU reads garbage
 
+#[ignore]
 #[test]
 fn spike_two_position_kv_cache() {
     use pollster::FutureExt;

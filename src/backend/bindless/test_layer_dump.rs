@@ -12,7 +12,10 @@ mod layer_dump_tests {
     use std::path::PathBuf;
 
     async fn get_device() -> (wgpu::Device, wgpu::Queue) {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -42,6 +45,7 @@ mod layer_dump_tests {
         (device, queue)
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_dump_gpu_layers_for_notebook() {
         println!("\n=== GPU Layer Dump for Notebook Analysis ===\n");

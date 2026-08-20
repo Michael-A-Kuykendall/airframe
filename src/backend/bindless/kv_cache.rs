@@ -379,6 +379,10 @@ mod tests {
     /// - Correct buffer count (22 K + 22 V = 44 buffers)
     /// - Correct VRAM usage (88 MB total for GQA with 4 KV heads)
     /// - Buffer indexing works
+    // GPU-venue test (creates a wgpu device); #[ignore] per repo convention.
+    // Run explicitly with WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1
+    // MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    #[ignore]
     #[test]
     fn test_kv_cache_allocation() {
         // TinyLlama 1.1B specs
@@ -388,7 +392,10 @@ mod tests {
         let max_seq_len = 2048;
 
         // Create GPU instance for testing
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
@@ -453,9 +460,16 @@ mod tests {
     }
 
     /// Test sequence length management
+    // GPU-venue test (creates a wgpu device); #[ignore] per repo convention.
+    // Run explicitly with WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1
+    // MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    #[ignore]
     #[test]
     fn test_sequence_management() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .expect("No GPU adapter");
@@ -477,9 +491,16 @@ mod tests {
     }
 
     /// Test offset calculation for cache indexing
+    // GPU-venue test (creates a wgpu device); #[ignore] per repo convention.
+    // Run explicitly with WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1
+    // MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    #[ignore]
     #[test]
     fn test_offset_calculation() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .expect("No GPU adapter");
@@ -506,10 +527,17 @@ mod tests {
     }
 
     /// Test cache overflow detection
+    // GPU-venue test (creates a wgpu device); #[ignore] per repo convention.
+    // Run explicitly with WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1
+    // MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    #[ignore]
     #[test]
     #[should_panic(expected = "KV cache overflow")]
     fn test_overflow_panic() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .expect("No GPU adapter");

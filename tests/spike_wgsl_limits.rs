@@ -46,6 +46,7 @@ fn test_large_local_array() {
 }
 "#;
 
+#[ignore]
 #[tokio::test]
 async fn spike_wgsl_array_limits() {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());

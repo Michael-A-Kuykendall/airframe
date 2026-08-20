@@ -1,6 +1,7 @@
 // SPIKE 1: Query actual GPU limits before assuming anything
 // This tells us what we can ACTUALLY do, not what we hope
 
+#[ignore]
 #[tokio::test]
 async fn spike_query_gpu_limits() {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
