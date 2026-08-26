@@ -57,16 +57,20 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
     let mut l0_file_bytes = [0u8; 40]; // 10 * 4 bytes
     file.read_exact(&mut l0_file_bytes)?;
     let l0_file_floats: Vec<f32> = l0_file_bytes
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
         .collect();
 
     file.seek(SeekFrom::Start(l1_norm_offset))?;
     let mut l1_file_bytes = [0u8; 40];
     file.read_exact(&mut l1_file_bytes)?;
     let l1_file_floats: Vec<f32> = l1_file_bytes
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
         .collect();
 
     println!("File Data (Ground Truth):");
@@ -120,14 +124,18 @@ fn test_norm_bank_extraction_algebraic() -> Result<(), Box<dyn std::error::Error
 
     // 5. Read extracted values from norm bank
     let l0_bank_floats: Vec<f32> = norm_bank[0..40]
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
         .collect();
 
     let l1_bank_offset = 4 * block_size;
     let l1_bank_floats: Vec<f32> = norm_bank[l1_bank_offset..l1_bank_offset + 40]
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
         .collect();
 
     println!("Norm Bank Extracted Data:");
