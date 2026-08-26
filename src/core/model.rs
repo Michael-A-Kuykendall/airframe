@@ -1352,8 +1352,8 @@ fn load_tensor_by_type(
 
             let mut out = Vec::with_capacity(total_elements);
             let bytes = &mmap[data_start..data_end];
-            for chunk in bytes.chunks_exact(4) {
-                out.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+            for chunk in bytes.as_chunks::<4>().0 {
+                out.push(f32::from_le_bytes(*chunk));
             }
             Tensor::new(out, tensor_info.dimensions.clone())
         }
@@ -1380,8 +1380,10 @@ fn load_tensor_by_type(
             );
             let bytes = &mmap[data_start..data_end];
             let out: Vec<f32> = bytes
-                .chunks_exact(2)
-                .map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32())
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| f16::from_le_bytes(*c).to_f32())
                 .collect();
             Tensor::new(out, tensor_info.dimensions.clone())
         }
