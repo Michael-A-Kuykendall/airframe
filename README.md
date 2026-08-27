@@ -36,7 +36,7 @@ Airframe is the GPU inference core powering [Shimmy](https://github.com/Michael-
 
 ```toml
 [dependencies]
-airframe = "0.2"
+airframe = "0.4"
 ```
 
 > **Patent Notice**: The Fused Semantic Execution (FSE) subsystem (`crates/libfse`) is covered by a pending US patent. The WebGPU inference runtime (attention, GGUF loader, quantization) is unencumbered MIT. See [license section](#license) for full terms.
@@ -97,7 +97,7 @@ See [`examples/`](examples/) for tokenizer and GPU probe examples, and the full 
 
 See [docs/SUPPORTED_MODELS.md in shimmy](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/SUPPORTED_MODELS.md) for the full certified-model matrix.
 
-> **Note on large models:** We support models up to 8B+ parameters and >4GiB GGUF files. However, not all supported models can be run locally for certification — very large models may exceed available GPU memory or test infrastructure. Certification coverage is prioritized by model popularity and quant type importance. See the [certification methodology](docs/CERT_REGIMEN.md) for details.
+> **Note on large models:** We support models up to 8B+ parameters and >4GiB GGUF files. However, not all supported models can be certified locally — models above ~8 GiB are blocked on the `airframe-dgd` epic (`pack_blob_offset` / >8 GiB tensor-scatter fix). Certification coverage is prioritized by model popularity and quant type importance. See the [certification methodology](docs/CERT_REGIMEN.md) for details.
 
 ## Supported Quantization
 
@@ -135,38 +135,23 @@ Given the same model file, seed, and sampling parameters, Airframe produces iden
 ## Design Diagrams
 
 ```
-┌─────────────────────────────────────────────┐
-│                airframe crate               │
-│                                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │   core/  │  │ family/  │  │  ops/    │  │
-│  │ GGUF load│  │  Llama   │  │ attn/FFN │  │
-│  │ tensors  │  │  forward │  │ RoPE/RMS │  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
-│       └─────────────┼─────────────┘         │
-│                     ▼                        │
-│  ┌──────────────────────────────────────┐    │
-│  │           runtime/                   │    │
-│  │   engine · KV cache · sampler        │    │
-│  └─────────────────┬────────────────────┘    │
-│                    ▼                         │
-│  ┌──────────────────────────────────────┐    │
-│  │       backend/bindless/ (WebGPU)     │    │
-│  │   14 WGSL compute shaders            │    │
-│  │   dequant · matmul · RoPE · attn     │    │
-│  └──────────────────────────────────────┘    │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │   crates/libfse  (FSE policy engine) │    │
-│  │   Patent Pending — see LICENSE note  │    │
-│  └──────────────────────────────────────┘    │
-└─────────────────────────────────────────────┘
-         ▲ used by
-┌────────┴──────────────────┐
-│  Shimmy GPU Server binary  │
-│  shimmy_server_gpu         │
-│  HTTP · job queue · eval   │
-└───────────────────────────┘
+Airframe crate (crates.io: airframe)
+│
+├── core/      — GGUF loading, tensor management
+├── family/    — per-architecture forward passes (Llama, Qwen, …)
+├── ops/       — attention / FFN, RoPE, RMSNorm
+│
+├── runtime/   — engine · KV cache · sampler
+│
+├── backend/bindless/  — WebGPU / WGSL (14 compute shaders:
+│                         dequant · matmul · RoPE · attention)
+│
+└── crates/libfse      — Fused Semantic Execution policy engine
+                         (Patent Pending — see LICENSE note)
+
+        ▲ used by
+Shimmy (shimmy repo) — OpenAI-compatible server
+HTTP · chat · completions
 ```
 
 Full architecture reference: [`docs/architecture-map.md`](docs/architecture-map.md)
@@ -180,13 +165,11 @@ TurboShimmy is Airframe's on-GPU INT4 KV-cache compression system. It squeezes t
 **One env var. ~7× less KV VRAM. Same output quality. Pure Rust, pure GPU.**
 
 ```bash
-# Enable TurboShimmy
-SHIMMY_KV_QUANT=int4 LIBSHIMMY_MODEL_PATH=/path/to/model.gguf \
-  cargo run --bin shimmy_server_gpu --release
+# Enable TurboShimmy (in the Shimmy server)
+SHIMMY_KV_QUANT=int4 SHIMMY_MAX_CTX=8192 /path/to/shimmy serve
 
 # Or with the prefill-chunk flag (prevents Windows TDR resets on long prompts)
-SHIMMY_KV_QUANT=int4 SHIMMY_PREFILL_CHUNK=8 LIBSHIMMY_MODEL_PATH=/path/to/model.gguf \
-  cargo run --bin shimmy_server_gpu --release
+SHIMMY_KV_QUANT=int4 SHIMMY_PREFILL_CHUNK=8 SHIMMY_MAX_CTX=8192 /path/to/shimmy serve
 ```
 
 **Why it matters** — TurboShimmy changes what fits on consumer GPUs:
@@ -213,8 +196,8 @@ SHIMMY_KV_QUANT=int4 SHIMMY_PREFILL_CHUNK=8 LIBSHIMMY_MODEL_PATH=/path/to/model.
 
 | Variable | Default | Description |
 |---|---|---|
-| `LIBSHIMMY_MODEL_PATH` | *(required)* | Path to `.gguf` model file |
-| `SHIMMY_PORT` | `8080` | HTTP listener port |
+| `SHIMMY_BASE_GGUF` | *(required)* | Path to `.gguf` model file |
+| `SHIMMY_PORT` | `11435` | HTTP listener port |
 | `SHIMMY_MAX_CTX` | `2048` | Maximum context window (tokens) |
 | `SHIMMY_PREFILL_CHUNK` | `64` | Prefill batch size; reduce to `8` if you see TDR crashes on Windows |
 | `SHIMMY_KV_QUANT` | `f32` | KV cache mode: `f32` or `int4` (TurboShimmy) |
@@ -232,8 +215,8 @@ To run performance baselines:
 
 ```bash
 cargo bench
-# or with a model:
-LIBSHIMMY_MODEL_PATH=/path/to/model.gguf cargo run --bin shimmy_server_gpu --release
+# or with a model (via Shimmy):
+/path/to/shimmy generate --model-path /path/to/model.gguf --prompt "Hello"
 ```
 
 ---
