@@ -138,7 +138,10 @@ impl GpuRuntime {
         let model_path_str = model_path.to_string_lossy().to_string();
 
         // GPU init
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
 
         // Enumerate adapters and prefer DiscreteGpu over IntegratedGpu.
         // Fixes multi-GPU systems (laptops with NVIDIA/AMD + Intel iGPU)
@@ -172,7 +175,6 @@ impl GpuRuntime {
         let model_file_size = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
         let max_buffer_size = adapter_limits.max_buffer_size;
         let max_binding = adapter_limits.max_storage_buffer_binding_size as u64;
-        let chunk_size = crate::backend::bindless::loader::BLOB_CHUNK_BYTES;
 
         if model_file_size > max_buffer_size {
             return Err(format!(
@@ -184,15 +186,17 @@ impl GpuRuntime {
             .into());
         }
 
-        if chunk_size > max_binding {
-            return Err(format!(
-                "GPU storage buffer binding limit ({:.0} MB) is too small for the \
-                 bindless chunk size ({:.0} MB). Update your GPU drivers.",
-                max_binding as f64 / 1_048_576.0,
-                chunk_size as f64 / 1_048_576.0,
-            )
-            .into());
-        }
+        // The bindless loader splits the model into buffers of effective_chunk
+        // bytes each, where effective_chunk is capped to the adapter's REAL
+        // storage-buffer binding limit (see loader::compute_chunk_plan:
+        // BLOB_CHUNK_BYTES.min(adapter_limit)). Use the same capped value here so
+        // adapters with a binding limit below the 2 GB constant (e.g. integrated
+        // GPUs at 1024 MB) are NOT rejected — the loader will simply use smaller
+        // chunks. Reject only when a model genuinely cannot fit, which
+        // compute_chunk_plan's MAX_CHUNKS check already enforces on load.
+        let chunk_size =
+            crate::backend::bindless::loader::compute_chunk_plan(model_file_size, max_binding)
+                .effective_chunk;
 
         // Log if using multi-chunk mode for large models
         if model_file_size > chunk_size {
@@ -556,18 +560,24 @@ impl GpuRuntime {
             });
 
         // For models with large untied output vocabularies (e.g. Gemma2 256K),
-        // the dequanted F32 output head can exceed the 2GB storage buffer binding
+        // the dequanted F32 output head can exceed the storage buffer binding
         // limit. When that happens, pass None — the pipeline reads the quantized
         // output.weight directly from the already-loaded blobs (line 920 of
         // inference.rs: "blob-based quantized head").
+        //
+        // NOTE: use the adapter's REAL max_storage_buffer_binding_size, NOT a
+        // hardcoded 2 GB ceiling. On integrated GPUs / WSL2 this is much lower
+        // (e.g. 128 MB), so even a small output head can exceed it — same class
+        // of bug as the bindless chunk pre-flight (#214).
         let output_f32_bytes = spec_isf.n_embd as u64 * spec_isf.n_vocab as u64 * 4;
-        let max_binding = 2_147_483_647u64; // 2GB wgpu binding limit
+        let max_binding = self.device.limits().max_storage_buffer_binding_size as u64;
         let head_override: Option<&wgpu::Buffer> = if output_f32_bytes <= max_binding {
             Some(output_head_ref)
         } else {
             eprintln!(
-                "[GpuRuntime] output head F32 ({:.1} MB) exceeds 2GB binding limit — using blob-based quantized head",
-                output_f32_bytes as f64 / 1_048_576.0
+                "[GpuRuntime] output head F32 ({:.1} MB) exceeds adapter binding limit ({:.1} MB) — using blob-based quantized head",
+                output_f32_bytes as f64 / 1_048_576.0,
+                max_binding as f64 / 1_048_576.0
             );
             None
         };

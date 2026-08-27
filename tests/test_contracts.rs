@@ -138,6 +138,28 @@ fn loader_chunk_plan_contract() {
     assert!(plan3.effective_chunk <= (1u64 << 30));
     assert_eq!(plan3.effective_chunk % REQUIRED_ALIGNMENT, 0);
 
+    // #214 repro: a 0.8B model (~700 MB) on an integrated GPU whose
+    // max_storage_buffer_binding_size is 1024 MB must yield a valid plan
+    // (smaller effective_chunk capped to the adapter limit) and NOT be
+    // rejected — this is the exact case the gpu.rs pre-flight previously
+    // blocked by comparing the raw 2 GB constant.
+    let igpu_limit: u64 = 1024 * 1024 * 1024; // 1024 MB, Intel Arc iGPU
+    let tiny_model_bytes: u64 = 700 * 1024 * 1024; // ~0.8B Q4 model
+    let plan_igpu = compute_chunk_plan(tiny_model_bytes, igpu_limit);
+    assert!(
+        plan_igpu.effective_chunk <= igpu_limit,
+        "iGPU effective_chunk must be capped at the 1024 MB binding limit"
+    );
+    assert_eq!(
+        plan_igpu.effective_chunk % REQUIRED_ALIGNMENT,
+        0,
+        "iGPU effective_chunk must stay 256-byte aligned"
+    );
+    assert!(
+        plan_igpu.num_chunks >= 1,
+        "a 0.8B model must be loadable in at least one chunk"
+    );
+
     contract_test(
         "loader_chunk_plan",
         &[
