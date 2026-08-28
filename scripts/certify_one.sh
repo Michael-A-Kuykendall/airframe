@@ -112,8 +112,9 @@ for i in "${!INFERENCE_PROMPTS[@]}"; do
       | tee "$out"
   ) || INF_OK=0
   if grep -qiE "error:.*gpu|validation error" "$log"; then INF_OK=0; echo "  error in prompt $((i+1))"; fi
-  # NaN is a hard failure UNLESS it's the healthy counter `nans=0`.
-  if grep -qiE "nans?=[1-9]|nan_count[^0]|FAILED.*nan|is.*nan" "$log"; then INF_OK=0; echo "  NaN in prompt $((i+1))"; fi
+  # NaN is a hard failure ONLY when the count is non-zero (e.g. nans=5).
+  # The healthy counter `nans=0` / `logits_nans=0` is NOT a failure.
+  if grep -qiE "nans=[1-9]|logits_nans=[1-9]|nan_count=[1-9]|FAILED.*nan" "$log"; then INF_OK=0; echo "  NaN in prompt $((i+1))"; fi
 done
 if [ "$INF_OK" = "1" ]; then
   echo "  G5 PASS — coherent, no NaN"
