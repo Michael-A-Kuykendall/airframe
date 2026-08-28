@@ -123,6 +123,10 @@ required-features = ["isf"]
 [[bin]]
 name = "window_boundary_probe"
 path = "src/bin/window_boundary_probe.rs"
+
+[[bin]]
+name = "dump_template"
+path = "src/bin/dump_template.rs"
 required-features = ["isf"]
 
 [[test]]

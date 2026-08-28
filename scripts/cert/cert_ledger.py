@@ -3,6 +3,7 @@
 
 Uses DuckDB if importable, else SQLite at cert/ledger.sqlite.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -68,6 +69,20 @@ def init_schema(con, backend: str) -> None:
         )
         """
     )
+    # The advertised-models table (what generate_models_table.py reads). One row
+    # per certified model/quant combo. This is the schema the model-matrix reader
+    # depends on; keep in sync with query in generate_models_table.py.
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS math_runs (
+            model_id VARCHAR,
+            family VARCHAR,
+            quant VARCHAR,
+            certified INTEGER,
+            ts VARCHAR
+        )
+        """
+    )
     try:
         con.commit()
     except Exception:
@@ -110,6 +125,19 @@ def record_run(
             "INSERT INTO reds (run_id, code, detail) VALUES (?, ?, ?)",
             [rid, code, detail],
         )
+    # Advertised-model row: parse family_id "qwen3-0.6b-q4-k-m" into
+    # (family=qwen3, model=qwen3-0.6b, quant=q4-k-m). Certifiable = math green.
+    # naive split: drop the trailing quant segment if it looks like qXY/k.
+    parts = family_id.split("-")
+    quant = ""
+    if len(parts) >= 2 and parts[-1][0:1] in ("q", "Q") and "." not in parts[-1]:
+        quant = parts[-1]
+    model_id = "-".join(parts[:-1]) if quant else family_id
+    family = parts[0] if parts else family_id
+    con.execute(
+        "INSERT INTO math_runs (model_id, family, quant, certified, ts) VALUES (?, ?, ?, ?, ?)",
+        [model_id, family, quant, 1 if math_ok else 0, ts],
+    )
     try:
         con.commit()
     except Exception:
@@ -119,9 +147,10 @@ def record_run(
 
 
 def list_status(db_path: Path) -> None:
-    if not db_path.with_suffix(".duckdb").exists() and not db_path.with_suffix(
-        ".sqlite"
-    ).exists():
+    if (
+        not db_path.with_suffix(".duckdb").exists()
+        and not db_path.with_suffix(".sqlite").exists()
+    ):
         # try both via connect
         pass
     con, backend = _connect(db_path)
@@ -155,7 +184,9 @@ def main(argv: list[str] | None = None) -> int:
     rec.add_argument("--family-id", required=True)
     rec.add_argument("--reds-json", type=Path, required=True)
     rec.add_argument("--report", type=Path, default=None)
-    rec.add_argument("--chat-ok", choices=["true", "false", "unknown"], default="unknown")
+    rec.add_argument(
+        "--chat-ok", choices=["true", "false", "unknown"], default="unknown"
+    )
     rec.add_argument("--git-sha", default="")
 
     sub.add_parser("status")

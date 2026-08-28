@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the README Supported Models table from the certification ledger.
 
-Reads certified entries from cert/math_ledger.duckdb (or ledger.sqlite fallback)
+Reads certified entries from cert/ledger.duckdb (or ledger.sqlite fallback)
 and prints the exact markdown table used in the shimmy README. This is the
 single source of truth for what models Shimmy advertises as certified.
 
@@ -215,8 +215,8 @@ def main() -> int:
     parser.add_argument(
         "--ledger",
         type=Path,
-        default=WS_ROOT / "cert" / "math_ledger.duckdb",
-        help="path to math ledger (duckdb or sqlite)",
+        default=Path(__file__).resolve().parents[1] / "cert" / "ledger.duckdb",
+        help="path to cert ledger (duckdb or sqlite; unified with cert_ledger.py)",
     )
     parser.add_argument(
         "--write-shimmy",
