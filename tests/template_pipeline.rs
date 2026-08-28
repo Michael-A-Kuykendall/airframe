@@ -1,7 +1,7 @@
 //! Template pipeline integration tests.
 //!
-//! These tests exercise the same code path as `make_prompt_renderer()` in
-//! `shimmy_server_gpu.rs`:
+//! These tests exercise the same template-pipeline path as shimmy's
+//! `prompt_render` (GGUF chat_template + bos/eos + shimmyjinja):
 //!
 //!   1. Load `shimmytok::Tokenizer` from a real GGUF file.
 //!   2. Extract `bos_token` / `eos_token` strings via `token_to_piece`.
@@ -16,9 +16,9 @@
 //!
 //! | Key                            | Type   | Consumer                 |
 //! |--------------------------------|--------|--------------------------|
-//! | `tokenizer.chat_template`      | string | `make_prompt_renderer`   |
-//! | `tokenizer.ggml.bos_token_id`  | u32    | `make_prompt_renderer`   |
-//! | `tokenizer.ggml.eos_token_id`  | u32    | `make_prompt_renderer`   |
+//! | `tokenizer.chat_template`      | string | `prompt_render`   |
+//! | `tokenizer.ggml.bos_token_id`  | u32    | `prompt_render`   |
+//! | `tokenizer.ggml.eos_token_id`  | u32    | `prompt_render`   |
 //! | `tokenizer.ggml.tokens`        | array  | `spec.rs` (vocab size)   |
 //! | `{arch}.embedding_length`      | u32    | `spec.rs`                |
 //! | `{arch}.block_count`           | u32    | `spec.rs`                |
@@ -163,7 +163,7 @@ macro_rules! skip_if_missing {
 }
 
 /// Build a shimmyjinja context using real token-piece strings from shimmytok,
-/// mirroring the `make_prompt_renderer` logic in `shimmy_server_gpu.rs`.
+/// mirroring the shimmy `prompt_render` path.
 fn build_context_from_gguf(path: &Path, add_gen_prompt: bool) -> Option<(String, RenderContext)> {
     let info = read_tokenizer_info(path)?;
     let template = info.chat_template?;

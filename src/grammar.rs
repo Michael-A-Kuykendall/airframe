@@ -1,8 +1,8 @@
 //! Grammar-constrained decoding helpers (engine level).
 //!
 //! This is the single source of truth for grammar enforcement. Every caller
-//! (the `shimmy generate`/`serve` adapter, the `shimmy_server_gpu` dev server)
-//! builds its hooks from here so the behavior cannot diverge between paths.
+//! (the `shimmy generate`/`serve` adapter) builds its hooks from here so the
+//! behavior cannot diverge between paths.
 //!
 //! The pre-sample mask and the post-sample control share ONE
 //! `Arc<Mutex<GrammarState>>`: the mask reads the state, the control advances

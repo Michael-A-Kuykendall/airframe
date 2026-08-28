@@ -111,11 +111,6 @@ path = "src/bin/probe_tokens.rs"
 required-features = ["isf"]
 
 [[bin]]
-name = "shimmy_server_gpu"
-path = "src/bin/shimmy_server_gpu.rs"
-required-features = ["isf"]
-
-[[bin]]
 name = "vault_generator"
 path = "src/bin/vault_generator.rs"
 required-features = ["isf"]
