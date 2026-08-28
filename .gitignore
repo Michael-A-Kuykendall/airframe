@@ -124,3 +124,6 @@ beads.db
 .agents/
 .serena/
 .cargo/
+
+# Certification evidence / ledger (dev, kept on develop only)
+cert/
