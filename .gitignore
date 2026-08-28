@@ -118,3 +118,9 @@ crates/candle_probe/target/
 *.duckdb-shm
 *.duckdb-wal
 beads.db
+
+# Local dev tooling / AI settings (never commit)
+.opencode/
+.agents/
+.serena/
+.cargo/
