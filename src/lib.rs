@@ -12,8 +12,6 @@ pub mod grammar;
 pub mod runtime;
 pub mod validation;
 
-pub mod adapter;
-
 // Re-export diagnostic control
 pub mod backend;
 pub mod fse_control;

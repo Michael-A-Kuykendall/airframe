@@ -34,7 +34,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         PathBuf::from("decode_gate.json")
     };
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        flags: wgpu::InstanceFlags::default().with_env(),
+        ..Default::default()
+    });
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -46,7 +49,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter_limits = adapter.limits();
     let mut limits = wgpu::Limits::downlevel_defaults();
     limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
-    limits.max_buffer_size = adapter_limits.max_storage_buffer_binding_size as u64;
+    limits.max_buffer_size = adapter_limits.max_buffer_size;
     limits.max_storage_buffers_per_shader_stage =
         adapter_limits.max_storage_buffers_per_shader_stage;
     limits.max_compute_invocations_per_workgroup = 256;
@@ -68,7 +71,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let gpu_model = BindlessModel::load_from_disk(&device, &PathBuf::from(model_path), Some(&spec));
     let pipeline = BindlessPipeline::new(&device);
 
-    let f32_head = GpuRuntime::load_output_head_f32(model_path, &gpu_model, &device, &spec).ok();
+    let f32_head = GpuRuntime::load_output_head_f32(model_path, &gpu_model, &device, &spec)
+        .ok()
+        .flatten();
 
     let n_layers = gpu_model.metadata.compiled_layers.len();
     let n_head_kv = spec.n_head_kv as u32;

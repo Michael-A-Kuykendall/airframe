@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Compile FSE Policy
     // Rule: If we see the HIGH_ENTROPY signal, REJECT immediately.
     let rules = vec![Rule::new(
-        &[SIGNAL_HIGH_ENTROPY],
+        [SIGNAL_HIGH_ENTROPY],
         FseOpcode::Reject(RULE_HIGH_ENTROPY),
     )];
     let map = FseMap::compile(rules)?;

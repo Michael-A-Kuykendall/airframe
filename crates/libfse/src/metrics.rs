@@ -92,7 +92,7 @@ mod tests {
         // logits [0.0, 0.0] -> probs [0.5, 0.5]
         let logits = vec![0.0, 0.0];
         let h = shannon_entropy_from_logits(&logits);
-        assert!((h - 0.693147).abs() < 1e-4);
+        assert!((h - std::f32::consts::LN_2).abs() < 1e-4);
     }
 
     #[test]

@@ -13,6 +13,10 @@ use wgpu::util::DeviceExt;
 /// 2 GB storage-buffer binding limit, and 256-byte aligned.
 pub const BLOB_CHUNK_BYTES: u64 = 2_000_000_000;
 
+/// Fixed number of blob binding slots in the shader layout (bindings 0..7).
+/// This is the shader-layout width and does NOT limit resident chunk count.
+pub const BLOB_BINDING_SLOTS: usize = 8;
+
 /// The multi-buffer plan for a loaded model.
 ///
 /// Produced by [`compute_chunk_plan`] (which embeds the PPT invariants) so a
@@ -44,9 +48,10 @@ impl ChunkPlan {
 /// - `effective_chunk` is capped at [`BLOB_CHUNK_BYTES`], floored to the adapter's
 ///   real limit, then 256-byte aligned (asserted).
 /// - `effective_chunk` must not exceed the wgpu 2 GB binding limit (asserted).
-/// - `num_chunks` is `ceil(file_size / effective_chunk)` and is capped at
-///   `MAX_CHUNKS`; models needing more buffers are **rejected here**, not silently
-///   split.
+/// - `num_chunks` is `ceil(file_size / effective_chunk)` and represents the
+///   total **resident** chunk count. There is no cap here — the loader allocates
+///   all resident chunks. The shader binding limit (`BLOB_BINDING_SLOTS`) is
+///   enforced at dispatch time via [`BlobWindow`], not at load time.
 pub fn compute_chunk_plan(file_size: u64, adapter_limit: u64) -> ChunkPlan {
     let cap = BLOB_CHUNK_BYTES.min(adapter_limit);
     let effective_chunk = (cap / REQUIRED_ALIGNMENT) * REQUIRED_ALIGNMENT;
@@ -54,11 +59,208 @@ pub fn compute_chunk_plan(file_size: u64, adapter_limit: u64) -> ChunkPlan {
     assert_buffer_within_limit(effective_chunk, "loader::compute_chunk_plan");
 
     let num_chunks = file_size.div_ceil(effective_chunk) as usize;
-    assert_chunk_count_within_limit(num_chunks, "loader::compute_chunk_plan");
 
     ChunkPlan {
         effective_chunk,
         num_chunks,
+    }
+}
+
+/// Returns `(block_elems, block_bytes)` for a GGML quant type.
+///
+/// Under `isf` this defers to `airframe_observe::quant_formula`, the GGUF spec
+/// registry and single source of truth; otherwise it mirrors the same values so
+/// the always-built loader stays consistent. Mirrors the arrangement used by
+/// `pipeline::formula_index_for_ggml`.
+#[cfg(feature = "isf")]
+fn quant_block_geometry(type_id: u32) -> Option<(usize, usize)> {
+    let elems = airframe_observe::quant_formula::block_elems(type_id)?;
+    let bytes = airframe_observe::quant_formula::block_bytes(type_id)?;
+    Some((elems, bytes))
+}
+
+#[cfg(not(feature = "isf"))]
+fn quant_block_geometry(type_id: u32) -> Option<(usize, usize)> {
+    match type_id {
+        0 => Some((1, 4)),      // F32
+        1 => Some((1, 2)),      // F16
+        2 => Some((32, 18)),    // Q4_0
+        6 => Some((32, 22)),    // Q5_0
+        8 => Some((32, 34)),    // Q8_0
+        12 => Some((256, 144)), // Q4_K
+        13 => Some((256, 176)), // Q5_K
+        14 => Some((256, 210)), // Q6_K
+        _ => None,
+    }
+}
+
+/// A sliding window over resident blob chunks for a single GPU dispatch.
+///
+/// The shader layout has a fixed `BLOB_BINDING_SLOTS` (8) blob bindings.
+/// A model may have more resident chunks than binding slots. `BlobWindow`
+/// selects a consecutive range of `slot_count` resident chunks (default 8)
+/// starting at `start_chunk` and maps absolute word indices to window-local
+/// `(slot_index, word_offset)` pairs. Out-of-window accesses are rejected
+/// before dispatch.
+///
+/// The window is defined by:
+/// - `start_chunk`: index of the first resident chunk bound to slot 0
+/// - `slot_count`: number of slots to bind (≤ `BLOB_BINDING_SLOTS`, default 8)
+/// - `chunk_words`: words per chunk (`effective_chunk / 4`)
+/// - `total_resident_chunks`: total number of resident chunks in the model
+///
+/// For a dispatch covering tensors in resident chunks `start_chunk..start_chunk+slot_count`,
+/// the host subtracts `start_chunk * chunk_words` from all absolute word indices
+/// passed to the shader (via `blob_base_words` and tensor offsets), so the shader
+/// sees a contiguous window starting at word 0.
+#[derive(Debug, Clone, Copy)]
+pub struct BlobWindow {
+    pub start_chunk: usize,
+    pub slot_count: usize,
+    pub chunk_words: u32,
+    pub total_resident_chunks: usize,
+}
+
+impl BlobWindow {
+    /// Creates a new window covering `slot_count` chunks starting at `start_chunk`.
+    ///
+    /// Fails if:
+    /// - `start_chunk >= total_resident_chunks`
+    /// - `slot_count == 0` or `slot_count > BLOB_BINDING_SLOTS`
+    /// - `start_chunk + slot_count > total_resident_chunks` (window extends past resident chunks)
+    pub fn new(
+        start_chunk: usize,
+        slot_count: usize,
+        chunk_words: u32,
+        total_resident_chunks: usize,
+    ) -> Result<Self, String> {
+        if start_chunk >= total_resident_chunks {
+            return Err(format!(
+                "window start_chunk {} >= total_resident_chunks {}",
+                start_chunk, total_resident_chunks
+            ));
+        }
+        if slot_count == 0 || slot_count > BLOB_BINDING_SLOTS {
+            return Err(format!(
+                "slot_count {} must be in [1, BLOB_BINDING_SLOTS={}]",
+                slot_count, BLOB_BINDING_SLOTS
+            ));
+        }
+        if start_chunk + slot_count > total_resident_chunks {
+            return Err(format!(
+                "window [{}, {}) exceeds total_resident_chunks {}",
+                start_chunk,
+                start_chunk + slot_count,
+                total_resident_chunks
+            ));
+        }
+        Ok(Self {
+            start_chunk,
+            slot_count,
+            chunk_words,
+            total_resident_chunks,
+        })
+    }
+
+    /// Creates the narrowest window covering the absolute word range
+    /// `[start_word, end_word]`.
+    ///
+    /// Fails if the range spans more than `BLOB_BINDING_SLOTS` chunks, or
+    /// extends past the resident chunk count. Model-free so the algebra is
+    /// exercised by the CPU-only PPT contract suite.
+    pub fn for_range(
+        start_word: u32,
+        end_word: u32,
+        chunk_words: u32,
+        total_resident_chunks: usize,
+    ) -> Result<Self, String> {
+        let start_chunk = (start_word / chunk_words) as usize;
+        let end_chunk = (end_word / chunk_words) as usize;
+        Self::new(
+            start_chunk,
+            end_chunk - start_chunk + 1,
+            chunk_words,
+            total_resident_chunks,
+        )
+    }
+
+    /// Creates a window covering exactly `BLOB_BINDING_SLOTS` chunks (8) starting at `start_chunk`.
+    /// This is the normal dispatch window for layer shaders.
+    pub fn full(
+        start_chunk: usize,
+        chunk_words: u32,
+        total_resident_chunks: usize,
+    ) -> Result<Self, String> {
+        Self::new(
+            start_chunk,
+            BLOB_BINDING_SLOTS,
+            chunk_words,
+            total_resident_chunks,
+        )
+    }
+
+    /// Returns the word offset of the window's start in the absolute GGUF space.
+    pub fn window_base_words(&self) -> u32 {
+        (self.start_chunk as u32) * self.chunk_words
+    }
+
+    /// Maps an absolute word index to `(slot_index, local_word_offset)` within this window.
+    ///
+    /// Returns an error if the word is not covered by this window (before start or at/after end).
+    pub fn absolute_to_local(&self, absolute_word: u32) -> Result<(usize, u32), String> {
+        let base = self.window_base_words();
+        let end = base + (self.slot_count as u32) * self.chunk_words;
+
+        if absolute_word < base {
+            return Err(format!(
+                "word {} before window base {}",
+                absolute_word, base
+            ));
+        }
+        if absolute_word >= end {
+            return Err(format!(
+                "word {} at/after window end {} (slot_count={}, chunk_words={})",
+                absolute_word, end, self.slot_count, self.chunk_words
+            ));
+        }
+
+        let rel = absolute_word - base;
+        let slot = (rel / self.chunk_words) as usize;
+        let offset = rel % self.chunk_words;
+
+        // Exercise the word-index invariant for the local offset within the slot's chunk.
+        assert_word_index_in_range(offset, self.chunk_words, "BlobWindow::absolute_to_local");
+        Ok((slot, offset))
+    }
+
+    /// Reconstructs an absolute word index from a window-local `(slot_index, local_word)`.
+    pub fn local_to_absolute(&self, slot_index: usize, local_word: u32) -> u32 {
+        let base = self.window_base_words();
+        base + (slot_index as u32) * self.chunk_words + local_word
+    }
+
+    /// Checks if an absolute word index is covered by this window.
+    pub fn contains(&self, absolute_word: u32) -> bool {
+        let base = self.window_base_words();
+        let end = base + (self.slot_count as u32) * self.chunk_words;
+        absolute_word >= base && absolute_word < end
+    }
+
+    /// Returns the binding resources for this window's slots.
+    /// Slot `i` binds resident chunk `start_chunk + i` (or dummy_buf if missing).
+    pub fn binding_resources<'a>(
+        &self,
+        model: &'a BindlessModel,
+    ) -> [wgpu::BindingResource<'a>; BLOB_BINDING_SLOTS] {
+        std::array::from_fn(|i| {
+            if i < self.slot_count {
+                let chunk_idx = self.start_chunk + i;
+                if chunk_idx < model.gpu_buffers.len() {
+                    return model.gpu_buffers[chunk_idx].as_entire_binding();
+                }
+            }
+            model.dummy_buf.as_entire_binding()
+        })
     }
 }
 
@@ -79,6 +281,10 @@ pub struct BindlessModel {
 
     /// Size of each blob buffer in bytes (256-aligned, ≤ binding limit).
     pub effective_chunk: u64,
+
+    /// Total number of resident chunks (may exceed BLOB_BINDING_SLOTS).
+    /// Determined by file_size / effective_chunk at load time.
+    pub total_resident_chunks: usize,
 
     /// A minimal 4-byte dummy STORAGE buffer used to pad unused blob bindings
     /// in the fixed bind-group layouts (e.g. a 2-chunk model still exposes a
@@ -195,6 +401,115 @@ impl BindlessModel {
             self.gpu_buffers.len()
         );
         (buffer_index, word_idx % chunk_words)
+    }
+
+    /// Creates a full window (8 slots) starting at `start_chunk` for layer dispatches.
+    /// Used by normal layer, prefill, and decode bind groups.
+    pub fn layer_window(&self, start_chunk: usize) -> Result<BlobWindow, String> {
+        BlobWindow::full(start_chunk, self.chunk_words(), self.total_resident_chunks)
+    }
+
+    /// Creates a window covering the exact chunks needed for a tensor range.
+    /// Fails if the range spans more than BLOB_BINDING_SLOTS chunks.
+    pub fn window_for_range(&self, start_word: u32, end_word: u32) -> Result<BlobWindow, String> {
+        BlobWindow::for_range(
+            start_word,
+            end_word,
+            self.chunk_words(),
+            self.total_resident_chunks,
+        )
+    }
+
+    /// Creates a window covering a dequant dispatch's `count` elements starting
+    /// at absolute word `offset_words`.
+    ///
+    /// The byte span is derived from the quant type via the GGUF spec registry,
+    /// NOT assumed to be one word per element: `count` counts ELEMENTS, and a
+    /// Q4_K element is ~0.56 bytes, not 4. Treating elements as words overstates
+    /// a quantized span ~7x, which can push the window past the resident chunk
+    /// count and fail a dispatch that is actually bindable.
+    pub fn dequant_window(
+        &self,
+        offset_words: u32,
+        count: u32,
+        quant_type: u32,
+    ) -> Result<BlobWindow, String> {
+        let (block_elems, block_bytes) = quant_block_geometry(quant_type)
+            .ok_or_else(|| format!("unknown quant type {} for dequant window", quant_type))?;
+
+        // Partial trailing blocks still read a whole block from the file.
+        let blocks = (count as u64).div_ceil(block_elems as u64);
+        let span_bytes = blocks * block_bytes as u64;
+        let last_word = (offset_words as u64) + span_bytes.saturating_sub(1) / 4;
+
+        BlobWindow::for_range(
+            offset_words,
+            last_word as u32,
+            self.chunk_words(),
+            self.total_resident_chunks,
+        )
+    }
+
+    /// Creates a window for RMSNorm covering the full weight (and bias) span.
+    ///
+    /// `count` is the element count of the norm tensor: the shader reads
+    /// `weight_offset .. weight_offset + count`, so the window must cover the
+    /// whole run, not just the word the tensor starts at.
+    pub fn rmsnorm_window(
+        &self,
+        weight_offset: u32,
+        bias_offset: Option<u32>,
+        count: u32,
+    ) -> Result<BlobWindow, String> {
+        let last = count.saturating_sub(1);
+        let start_word = weight_offset.min(bias_offset.unwrap_or(weight_offset));
+        let end_word = weight_offset
+            .saturating_add(last)
+            .max(bias_offset.map_or(0, |b| b.saturating_add(last)));
+        BlobWindow::for_range(
+            start_word,
+            end_word,
+            self.chunk_words(),
+            self.total_resident_chunks,
+        )
+    }
+
+    /// Creates a window covering the LM-head weight rows `base_row..base_row+rows`.
+    ///
+    /// Row stride is derived from the head tensor's quant type via the GGUF
+    /// spec registry (`block_bytes / block_elems`), NOT assumed to be 4 bytes
+    /// per element — a Q4_K head is ~4.5 bits/element, so a f32 assumption
+    /// overstates the span by ~7x and yields a window that cannot be bound.
+    ///
+    /// Falls back to `token_embd.weight` when the model ties its head weights,
+    /// matching the tensor the dispatch actually reads.
+    pub fn lm_head_window(&self, base_row: u32, rows: u32, dim: u32) -> Result<BlobWindow, String> {
+        let name = if self.metadata.get_tensor_type("output.weight").is_some() {
+            "output.weight"
+        } else {
+            "token_embd.weight"
+        };
+        let weight_bytes = self.metadata.get_tensor_offset(name).unwrap_or(0);
+        let quant_type = self.metadata.get_tensor_type(name).unwrap_or(0);
+
+        let (block_elems, block_bytes) = quant_block_geometry(quant_type)
+            .ok_or_else(|| format!("unknown quant type {} for {}", quant_type, name))?;
+        if !(dim as usize).is_multiple_of(block_elems) {
+            return Err(format!(
+                "{} row dim {} is not a multiple of block_elems {} for quant type {}",
+                name, dim, block_elems, quant_type
+            ));
+        }
+        let row_bytes = (dim as u64 / block_elems as u64) * block_bytes as u64;
+
+        let start_byte = weight_bytes + (base_row as u64) * row_bytes;
+        // Last byte actually read, not the exclusive end: an exclusive end that
+        // lands on a chunk boundary would pull in a slot the dispatch never
+        // touches, and can push the window past the resident chunk count.
+        let end_byte = weight_bytes + ((base_row as u64) + (rows as u64)) * row_bytes
+            - if rows == 0 { 0 } else { 1 };
+
+        self.window_for_range((start_byte / 4) as u32, (end_byte / 4) as u32)
     }
 }
 
@@ -318,6 +633,7 @@ impl BindlessModel {
             gpu_buffers,
             size,
             effective_chunk,
+            total_resident_chunks: num_chunks,
             dummy_buf,
             metadata,
             preflight,

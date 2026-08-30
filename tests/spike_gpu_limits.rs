@@ -3,7 +3,10 @@
 
 #[tokio::test]
 async fn spike_query_gpu_limits() {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        flags: wgpu::InstanceFlags::default().with_env(),
+        ..Default::default()
+    });
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -12,6 +15,10 @@ async fn spike_query_gpu_limits() {
         })
         .await
         .expect("No adapter");
+    // Leak the adapter at teardown: dzn crashes in Vulkan object destruction
+    // when dropped from the test harness (SIGSEGV after asserts pass). See
+    // src/backend/bindless/tests.rs get_device() for the full rationale.
+    std::mem::forget(adapter.clone());
 
     let info = adapter.get_info();
     let limits = adapter.limits();

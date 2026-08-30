@@ -26,7 +26,10 @@ mod tests_inner {
     }
 
     async fn get_device() -> (wgpu::Device, wgpu::Queue) {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -63,6 +66,14 @@ mod tests_inner {
             "[BindlessTest] Allocated Device Limits: Max Storage Buffer = {} MB",
             device.limits().max_storage_buffer_binding_size / 1024 / 1024
         );
+
+        // Leak the device+queue at test teardown: the dzn (Mesa Dozen) Vulkan
+        // driver crashes nondeterministically in vkDestroyDevice when the
+        // device is dropped from the test harness (SIGSEGV after all asserts
+        // pass — verified: math is bit-correct on both dzn and llvmpipe).
+        // Leaking skips only the destructor; every assertion still runs and
+        // the OS reclaims the memory at process exit.
+        std::mem::forget((device.clone(), queue.clone()));
 
         (device, queue)
     }
@@ -158,6 +169,7 @@ mod tests_inner {
             gpu_buffers: vec![gpu_buffer],
             size: block_bytes.len() as u64,
             effective_chunk: block_bytes.len() as u64,
+            total_resident_chunks: 1,
             dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
@@ -259,8 +271,9 @@ mod tests_inner {
         });
         let model = BindlessModel {
             gpu_buffers: vec![gpu_buffer],
-            size: 72,
-            effective_chunk: 72,
+            size: block_bytes.len() as u64,
+            effective_chunk: block_bytes.len() as u64,
+            total_resident_chunks: 1,
             dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
@@ -336,6 +349,7 @@ mod tests_inner {
             gpu_buffers: vec![gpu_buffer],
             size: block_bytes.len() as u64,
             effective_chunk: block_bytes.len() as u64,
+            total_resident_chunks: 1,
             dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,
@@ -413,6 +427,7 @@ mod tests_inner {
             gpu_buffers: vec![gpu_buffer],
             size: block_bytes.len() as u64,
             effective_chunk: block_bytes.len() as u64,
+            total_resident_chunks: 1,
             dummy_buf,
             metadata: dummy_metadata(),
             preflight: None,

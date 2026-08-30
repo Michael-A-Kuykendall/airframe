@@ -1306,10 +1306,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sample"
-version = "0.1.0"
-
-[[package]]
 name = "schoolmarm"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

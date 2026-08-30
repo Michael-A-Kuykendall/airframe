@@ -28,7 +28,10 @@ fn spike_two_position_kv_cache() {
     println!();
 
     // Setup GPU
-    let instance = wgpu::Instance::default();
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        flags: wgpu::InstanceFlags::default().with_env(),
+        ..Default::default()
+    });
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
         .block_on()
@@ -38,6 +41,10 @@ fn spike_two_position_kv_cache() {
         .request_device(&wgpu::DeviceDescriptor::default())
         .block_on()
         .expect("Failed to create device");
+    // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+    // dropped from the test harness (SIGSEGV after asserts pass). See
+    // src/backend/bindless/tests.rs get_device() for the full rationale.
+    std::mem::forget((device.clone(), queue.clone()));
 
     println!("Using GPU: {}", adapter.get_info().name);
     println!();

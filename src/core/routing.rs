@@ -266,6 +266,8 @@ mod tests {
             final_logit_softcap: 0.0,
             has_qk_norm: false,
             post_norm_enabled: false,
+            q_weight_k: 0,
+            k_weight_k: 0,
             head_dim: 64,
             gqa_ratio: 8,
             kv_dim: 256,

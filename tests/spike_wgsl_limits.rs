@@ -48,7 +48,10 @@ fn test_large_local_array() {
 
 #[tokio::test]
 async fn spike_wgsl_array_limits() {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        flags: wgpu::InstanceFlags::default().with_env(),
+        ..Default::default()
+    });
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -66,6 +69,10 @@ async fn spike_wgsl_array_limits() {
         })
         .await
         .expect("No device");
+    // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+    // dropped from the test harness (SIGSEGV after asserts pass). See
+    // src/backend/bindless/tests.rs get_device() for the full rationale.
+    std::mem::forget((device.clone(), queue.clone()));
 
     println!("\n=== WGSL COMPILATION TEST ===");
     println!("Testing shader with:");

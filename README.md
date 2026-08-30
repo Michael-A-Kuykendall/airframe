@@ -3,7 +3,7 @@
 
   ### Pure-Rust WebGPU Inference Engine for GGUF Models
 
-  [![Crates.io](https://img.shields.io/crates/v/airframe.svg)](https://crates.io/crates/airframe) [![Trans rights](https://pride-badges.pony.workers.dev/static/v1?label=trans%20rights&stripeWidth=6&stripeColors=5BCEFA,F5A9B8,FFFFFF,F5A9B8,5BCEFA)](https://translifeline.org/) [![LGBTQ+ friendly](https://pride-badges.pony.workers.dev/static/v1?label=lgbtq%2B%20friendly&stripeWidth=6&stripeColors=E40303,FF8C00,FFED00,008026,24408E,732982)](https://www.thetrevorproject.org/)
+  [![Crates.io](https://img.shields.io/crates/v/airframe.svg)](https://crates.io/crates/airframe)
   [![CI](https://github.com/Michael-A-Kuykendall/airframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Michael-A-Kuykendall/airframe/actions/workflows/ci.yml)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
   [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://rustup.rs/)
@@ -13,26 +13,13 @@
   **No C++ toolchain. No Python. No llama.cpp. Just Rust and your GPU.**
 </div>
 
----
-
-### 💝 Support Airframe
-
-🚀 **If Airframe helps you, consider [sponsoring](https://github.com/sponsors/Michael-A-Kuykendall) — 100% of support goes to keeping it free forever.**
-
-- **$5/month**: Coffee Hero ☕ — Eternal gratitude + name in [SPONSORS.md](SPONSORS.md)
-- **$25/month**: Developer Supporter 🐛 — Priority bug response + roadmap influence
-- **$100/month**: Corporate Backer 🏢 — Logo in README + release-note recognition
-- **$500/month**: Enterprise Partner 🚀 — Prominent logo + monthly office hours + roadmap input
-
-[**🎯 Become a Sponsor**](https://github.com/sponsors/Michael-A-Kuykendall) | See our amazing [sponsors](SPONSORS.md) 🙏
-
-**Thank you to our sponsors:** [ZephyrCloudIO](https://github.com/ZephyrCloudIO) (Corporate Backer) · alistairheath (Coffee Hero)
+Airframe is independently maintained and free forever. [Sponsorship](https://github.com/sponsors/Michael-A-Kuykendall) funds certification, compatibility work, and releases.
 
 ---
 
-Airframe is the GPU inference core powering [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy). It runs full transformer inference directly on the GPU via WGSL compute shaders — works on NVIDIA, AMD, Intel, and Apple Silicon.
+Airframe is the GPU inference core powering [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy). It runs full transformer inference directly on the GPU via WGSL compute shaders — works on NVIDIA, AMD, Intel, integrated GPUs, and Apple Silicon.
 
-**What's new:** GPU gibberish root cause fixed (dequant front-padding in `run_dequant_any_blob`), f16→f32 dequant corrected on RTX 3060, `Q5_0` quant slot, WGSL if/else dispatch ladder retired for a fabric `TensorFact→DispatchFact` rule, Qwen3 decode-collapse fix, and per-layer golden-vault certification (25 model/quant combos across 11 families). See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+**What's new:** Certification pipeline consolidated into a clean 3-box regimen (MATH + INFERENCE + DETERMINISM) with 26 model/quant combos across 12 families, metadata-driven architecture (norm/gating derived from GGUF tensor presence, not arch strings), TurboShimmy `TURBO_KV=int4` opt-in for large models, and window-aware bind groups enabling >8-slot tensor spans. See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ```toml
 [dependencies]
@@ -50,9 +37,9 @@ Most Rust LLM inference libraries are thin wrappers around llama.cpp — they re
 | | Airframe | llama.cpp bindings |
 |---|---|---|
 | Build toolchain | `cargo build` | C++ compiler required |
-| GPU backend | WebGPU (wgpu) — any GPU | CUDA / Metal / Vulkan |
+| GPU backend | WebGPU (wgpu) — NVIDIA, AMD, Intel, integrated | CUDA / Metal / Vulkan |
 | Cross-compilation | Native Rust | Complex |
-| Determinism | Guaranteed | Platform-dependent |
+| Determinism | Guaranteed per-configuration | Platform-dependent |
 | Dependency count | Minimal | Large C++ dep tree |
 | `cargo publish` friendly | ✅ | ❌ |
 
@@ -82,10 +69,10 @@ See [`examples/`](examples/) for tokenizer and GPU probe examples, and the full 
 
 | Architecture | Models | Status |
 |---|---|---|
-| **Llama** | Llama 3.2, Llama 3, Llama 2, TinyLlama, DeepSeek | ✅ Certified |
-| **Mistral** | Mistral 7B, Mixtral (dense layers) | ✅ Supported |
+| **Llama** | Llama 3.2, Llama 3.1, Llama 3, Llama 2, TinyLlama, DeepSeek | ✅ Certified |
+| **Mistral** | Mistral 7B, Ministral-3-14B, Mixtral (dense layers) | ✅ Certified |
 | **Phi** | Phi-3.5, Phi-3-mini, Phi-2 | ✅ Certified |
-| **Qwen2** | Qwen2 0.5B–7B | ✅ Certified |
+| **Qwen2** | Qwen2 0.5B, 1.5B, 7B | ✅ Certified |
 | **Qwen3** | Qwen3 0.6B–8B + 4B-Thinking | ✅ Certified (QK-norm, head_dim=128) |
 | **Qwen3.5** | Qwen3.5-9B | ✅ Certified |
 | **Gemma2** | Gemma-2 2B, 9B | ✅ Certified |
@@ -97,13 +84,13 @@ See [`examples/`](examples/) for tokenizer and GPU probe examples, and the full 
 
 See [docs/SUPPORTED_MODELS.md in shimmy](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/SUPPORTED_MODELS.md) for the full certified-model matrix.
 
-> **Note on large models:** We support models up to 8B+ parameters and >4GiB GGUF files. However, not all supported models can be certified locally — models above ~8 GiB are blocked on the `airframe-dgd` epic (`pack_blob_offset` / >8 GiB tensor-scatter fix). Certification coverage is prioritized by model popularity and quant type importance. See the [certification methodology](docs/CERT_REGIMEN.md) for details.
+> **Note on large models:** We support models up to 8B+ parameters and >4GiB GGUF files. However, not all supported models can be certified locally — very large models may exceed available GPU memory or require the `plan_layer_half_windows` tensor-scatter fix (the `dgd` epic, coming in v0.5.0). Certification coverage is prioritized by model popularity and quant type importance.
 
 ## Supported Quantization
 
 `F32` · `F16` · `Q4_0` · `Q5_0` · `Q8_0` · `Q4_K` · `Q5_K` · `Q6_K`
 
-All quantization types are implemented in both GPU shader and CPU reference paths, validated by `quant_verify` (GPU/CPU dequant consistency) and per-layer golden-vault certification — the same model produces numerically consistent output on CPU and GPU, within numerical tolerance.
+All quantization types are implemented in both GPU shader and CPU reference paths, validated by `quant_verify` (GPU/CPU dequant consistency) and per-layer certification — the same model produces numerically consistent output on CPU and GPU, within numerical tolerance.
 
 ---
 
@@ -128,30 +115,45 @@ See [`crates/libfse/README.md`](crates/libfse/README.md) for the full technical 
 
 ### 3. Deterministic Sampling
 
-Given the same model file, seed, and sampling parameters, Airframe produces identical output on every run — across restarts, machines, and GPU vendors. This makes it suitable for reproducible evaluation pipelines.
+Given the same model file, seed, sampling parameters, and GPU/configuration, Airframe produces identical output on every run — across restarts and machines. This makes it suitable for reproducible evaluation pipelines.
 
 ---
 
 ## Design Diagrams
 
-```
-Airframe crate (crates.io: airframe)
-│
-├── core/      — GGUF loading, tensor management
-├── family/    — per-architecture forward passes (Llama, Qwen, …)
-├── ops/       — attention / FFN, RoPE, RMSNorm
-│
-├── runtime/   — engine · KV cache · sampler
-│
-├── backend/bindless/  — WebGPU / WGSL (14 compute shaders:
-│                         dequant · matmul · RoPE · attention)
-│
-└── crates/libfse      — Fused Semantic Execution policy engine
-                         (Patent Pending — see LICENSE note)
+```mermaid
+graph TD
+    S["Shimmy<br/>(OpenAI-compatible server)"] --> A["airframe crate"]
 
-        ▲ used by
-Shimmy (shimmy repo) — OpenAI-compatible server
-HTTP · chat · completions
+    subgraph A["airframe crate"]
+        direction TB
+        core["core/<br/>GGUF loader + tensors"]
+        spec["spec/<br/>metadata-driven arch"]
+        runtime["runtime/<br/>engine · KV cache · sampler"]
+        backend["backend/bindless/<br/>WebGPU WGSL shaders<br/>dequant · matmul · RoPE · attn<br/>window-aware bind groups"]
+        fse["crates/libfse/<br/>FSE policy engine<br/>Patent Pending"]
+
+        core --> backend
+        spec --> backend
+        runtime --> backend
+    end
+```
+
+**Text version:**
+
+```
+Shimmy (server) → airframe (engine)
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+   core/ (GGUF)        spec/ (metadata)     runtime/ (engine)
+          │                   │                   │
+          └───────────────────┴───────────────────┘
+                              ▼
+              backend/bindless/ (WebGPU shaders)
+                              │
+                              ▼
+                crates/libfse/ (FSE policy)
 ```
 
 Full architecture reference: [`docs/architecture-map.md`](docs/architecture-map.md)
@@ -245,6 +247,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. See [CHANGELOG.md](CHANGE
 
 ---
 
+## Sponsor Airframe
+
+- **$5/month**: Coffee tier ☕ — Sponsor badge + name in [SPONSORS.md](SPONSORS.md)
+- **$25/month**: Supporter 🐛 — Priority support + name in [SPONSORS.md](SPONSORS.md)
+- **$100/month**: Corporate backer 🏢 — Logo placement + release recognition
+- **$500/month**: Enterprise partner 🚀 — Office hours + roadmap consultation
+
+**Current sponsors:** [ZephyrCloudIO](https://github.com/ZephyrCloudIO) · [gqf2008](https://github.com/gqf2008) · [alistairheath](https://github.com/alistairheath)
+
+[**🎯 Become a Sponsor**](https://github.com/sponsors/Michael-A-Kuykendall)
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
@@ -253,13 +268,6 @@ MIT — see [LICENSE](LICENSE).
 
 **FSE subsystem** (`crates/libfse`): MIT for non-commercial use. The Fail-Closed Policy Fusion and Execution Kernel methods are covered by a pending US patent. Commercial embedding requires a separate license — contact michaelallenkuykendall@gmail.com.
 
-## Support
+---
 
-This project is a safe space. Trans rights are human rights.
-
-If you or someone you love needs support:
-
-- [The Trevor Project](https://www.thetrevorproject.org/) — 24/7 for LGBTQ+ young people. Call 1-866-488-7386 or text START to 678-678
-- [Trans Lifeline](https://translifeline.org/) — peer support run by and for trans people. US: 877-565-8860
-- [988 Suicide & Crisis Lifeline](https://988lifeline.org/) — call or text 988
-
+<sup>Trans rights are human rights. Airframe is built by and for everyone — discrimination has no place in our community or our code.</sup>

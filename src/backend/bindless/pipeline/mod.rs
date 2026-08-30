@@ -7,6 +7,7 @@ pub(super) mod layer;
 pub(super) mod matmul;
 
 //       pipeline/kv_cache.rs, pipeline/dispatch.rs — see C3 architectural debt.
+use super::loader::{BindlessModel, BlobWindow, BLOB_BINDING_SLOTS};
 use crate::core::spec::ModelSpec;
 
 #[repr(C)]
@@ -124,6 +125,291 @@ pub struct LayerOffsets {
     pub attn_v_bias: u32,     // packed V bias (F32); 0 = disabled; Qwen2
     pub v_is_q4k: u32,        // 1 if attn_v uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
     pub ffn_down_is_q4k: u32, // 1 if ffn_down uses Q4_K, 0 if Q6_K (for Q4_K_M mixed quantization)
+}
+
+impl LayerOffsets {
+    /// Returns the minimum and maximum absolute word index covered by this layer's tensors.
+    /// Absolute word = (packed_offset / 2) + blob_base_words.
+    /// Only considers non-zero (present) tensors.
+    pub fn word_span(&self, blob_base_words: u32) -> Option<(u32, u32)> {
+        let mut min_word = u32::MAX;
+        let mut max_word = 0;
+        let mut has_tensor = false;
+
+        let check = |packed: u32, min_word: &mut u32, max_word: &mut u32, has_tensor: &mut bool| {
+            if packed != 0 {
+                *has_tensor = true;
+                let word = (packed / 2) + blob_base_words;
+                *min_word = (*min_word).min(word);
+                *max_word = (*max_word).max(word);
+            }
+        };
+
+        check(
+            self.attn_norm,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_norm_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(self.attn_q, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.attn_k, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.attn_v, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.attn_out, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.ffn_norm, &mut min_word, &mut max_word, &mut has_tensor);
+        check(
+            self.ffn_norm_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(self.ffn_gate, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.ffn_down, &mut min_word, &mut max_word, &mut has_tensor);
+        check(self.ffn_up, &mut min_word, &mut max_word, &mut has_tensor);
+        check(
+            self.attn_q_norm,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_k_norm,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_q_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_k_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+        check(
+            self.attn_v_bias,
+            &mut min_word,
+            &mut max_word,
+            &mut has_tensor,
+        );
+
+        if has_tensor {
+            Some((min_word, max_word))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the minimum and maximum absolute word index covered by this layer's
+    /// ATTENTION-side tensors only (attn norms, Q/K/V, attn_out, Q/K norms, biases).
+    ///
+    /// This is the seam for `airframe-eyn`: a layer whose FULL tensor span exceeds
+    /// `BLOB_BINDING_SLOTS` chunks can still dispatch its attention and FFN halves
+    /// with separate windows, each covering only the tensors that half actually reads.
+    pub fn word_span_attention(&self, blob_base_words: u32) -> Option<(u32, u32)> {
+        let mut min_word = u32::MAX;
+        let mut max_word = 0;
+        let mut has = false;
+        let mut check = |packed: u32| {
+            if packed != 0 {
+                has = true;
+                let word = (packed / 2) + blob_base_words;
+                min_word = min_word.min(word);
+                max_word = max_word.max(word);
+            }
+        };
+        check(self.attn_norm);
+        check(self.attn_norm_bias);
+        check(self.attn_q);
+        check(self.attn_k);
+        check(self.attn_v);
+        check(self.attn_out);
+        check(self.attn_q_norm);
+        check(self.attn_k_norm);
+        check(self.attn_q_bias);
+        check(self.attn_k_bias);
+        check(self.attn_v_bias);
+        if has {
+            Some((min_word, max_word))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the minimum and maximum absolute word index covered by this layer's
+    /// FFN-side tensors only (ffn norm, gate, up, down, ffn_norm_bias).
+    pub fn word_span_ffn(&self, blob_base_words: u32) -> Option<(u32, u32)> {
+        let mut min_word = u32::MAX;
+        let mut max_word = 0;
+        let mut has = false;
+        let mut check = |packed: u32| {
+            if packed != 0 {
+                has = true;
+                let word = (packed / 2) + blob_base_words;
+                min_word = min_word.min(word);
+                max_word = max_word.max(word);
+            }
+        };
+        check(self.ffn_norm);
+        check(self.ffn_norm_bias);
+        check(self.ffn_gate);
+        check(self.ffn_up);
+        check(self.ffn_down);
+        if has {
+            Some((min_word, max_word))
+        } else {
+            None
+        }
+    }
+}
+
+/// Pure window algebra for a layer dispatch: given the layer's packed tensor
+/// offsets and the loaded chunk plan, returns the [`BlobWindow`] to bind and
+/// the window-local `blob_base_words` the shader must receive.
+///
+/// The shader's `read_blob` resolves `word_idx` against the eight bound blob
+/// slots, so every absolute word index a dispatch touches must be rebased to
+/// the window start. `blob_base_words` is the only host-supplied base the
+/// shader adds to packed offsets, so subtracting `window_base_words()` from it
+/// rebases the whole layer in one place.
+///
+/// Returns `Ok((None, blob_base_words))` unchanged when the layer declares no
+/// tensors (window algebra is a no-op in that case), and `Err` when the span
+/// cannot be covered by `BLOB_BINDING_SLOTS` consecutive resident chunks.
+///
+/// Kept free of `BindlessModel` so the algebra is exercised by the CPU-only
+/// PPT contract suite, not just on a live adapter.
+pub fn plan_layer_window(
+    offsets: &LayerOffsets,
+    blob_base_words: u32,
+    chunk_words: u32,
+    total_resident_chunks: usize,
+) -> Result<(Option<BlobWindow>, u32), String> {
+    let Some((min_word, max_word)) = offsets.word_span(blob_base_words) else {
+        return Ok((None, blob_base_words));
+    };
+    let window = BlobWindow::for_range(min_word, max_word, chunk_words, total_resident_chunks)?;
+    let adjusted = blob_base_words.saturating_sub(window.window_base_words());
+    Ok((Some(window), adjusted))
+}
+
+/// Model-bound wrapper around [`plan_layer_window`] for dispatch sites.
+///
+/// # Panics
+/// Panics if the layer's tensor span cannot be covered by
+/// `BLOB_BINDING_SLOTS` consecutive resident chunks — a silent wrong-chunk read
+/// is far worse than a dispatch-time abort.
+pub fn resolve_layer_window(
+    model: &BindlessModel,
+    offsets: &LayerOffsets,
+    blob_base_words: u32,
+    layer_idx: usize,
+) -> (Option<BlobWindow>, u32) {
+    plan_layer_window(
+        offsets,
+        blob_base_words,
+        model.chunk_words(),
+        model.total_resident_chunks,
+    )
+    .unwrap_or_else(|e| panic!("layer {} window planning failed: {}", layer_idx, e))
+}
+
+/// One half-window result: `Some((window, window_local_base_words))` when that
+/// half declares tensors, `None` when it has none.
+pub type HalfLayerWindow = Option<(BlobWindow, u32)>;
+
+/// Plans SEPARATE attention and FFN windows for a layer dispatch (airframe-eyn).
+///
+/// A layer whose full tensor span exceeds `BLOB_BINDING_SLOTS` consecutive
+/// chunks cannot use one window, but its attention and FFN halves are dispatched
+/// by separate pipeline stages reading disjoint tensor subsets. When both halves
+/// independently fit within `BLOB_BINDING_SLOTS`, this returns two windows and
+/// their window-local `blob_base_words` values; the caller binds the attention
+/// window for the attention stages and the FFN window for the FFN stages.
+///
+/// Returns `(attn, ffn)` where each is `Some((window, adjusted_base_words))` when
+/// that half has tensors, or `None` when that half declares no tensors. Errors if
+/// either present half's span cannot be covered by `BLOB_BINDING_SLOTS` chunks.
+/// Model-free (CPU-only), so the algebra is exercised by the PPT contract suite.
+pub fn plan_layer_half_windows(
+    offsets: &LayerOffsets,
+    blob_base_words: u32,
+    chunk_words: u32,
+    total_resident_chunks: usize,
+) -> Result<(HalfLayerWindow, HalfLayerWindow), String> {
+    let attn = if let Some((lo, hi)) = offsets.word_span_attention(blob_base_words) {
+        let w = BlobWindow::for_range(lo, hi, chunk_words, total_resident_chunks)?;
+        // Wrapping subtraction is REQUIRED here: a half-window can start at a
+        // higher chunk than the layer base (e.g. the FFN half of a wide layer),
+        // making `blob_base_words - window_base_words()` negative. The WGSL
+        // shader adds `params.blob_base_words` in u32, which wraps modulo 2^32
+        // (same convention as `rebase_head_weight_off`), so the wrapped base
+        // reconstructs the true window-local word. `saturating_sub` would
+        // silently zero it and read the wrong chunk.
+        let adjusted = blob_base_words.wrapping_sub(w.window_base_words());
+        Some((w, adjusted))
+    } else {
+        None
+    };
+    let ffn = if let Some((lo, hi)) = offsets.word_span_ffn(blob_base_words) {
+        let w = BlobWindow::for_range(lo, hi, chunk_words, total_resident_chunks)?;
+        let adjusted = blob_base_words.wrapping_sub(w.window_base_words());
+        Some((w, adjusted))
+    } else {
+        None
+    };
+    Ok((attn, ffn))
+}
+
+/// Rebases an LM-head `weight_off` (absolute word index of the weight tensor)
+/// onto a bound [`BlobWindow`].
+///
+/// sh_head_blob.wgsl reads `weight_off + rel_word`, where `rel_word` is an
+/// offset from the start of the weight tensor. For a tile whose rows begin well
+/// past the tensor start, the window base can exceed `weight_off`, so the
+/// rebased base is mathematically negative.
+///
+/// That is fine, and is why this returns a wrapped `u32`: WGSL `u32` addition
+/// wraps modulo 2^32, so `wrap(weight_off - window_base) + rel_word` evaluates
+/// to the true window-local word for every `rel_word` the dispatch actually
+/// reads (all of which satisfy `weight_off + rel_word >= window_base`).
+/// Callers must therefore only use it for reads inside `window`.
+pub fn rebase_head_weight_off(weight_off: u32, window: &BlobWindow) -> u32 {
+    weight_off.wrapping_sub(window.window_base_words())
+}
+
+/// Returns the eight blob binding resources for a dispatch.
+///
+/// With a window, slot `i` binds resident chunk `window.start_chunk + i`.
+/// Without one (no tensors / legacy single-window models) it falls back to the
+/// identity mapping `blob_binding_0..7`, which is what a window starting at
+/// chunk 0 would produce anyway.
+pub fn blob_bindings_for<'a>(
+    model: &'a BindlessModel,
+    window: Option<&BlobWindow>,
+) -> [wgpu::BindingResource<'a>; BLOB_BINDING_SLOTS] {
+    match window {
+        Some(w) => w.binding_resources(model),
+        None => [
+            model.blob_binding_0(),
+            model.blob_binding_1(),
+            model.blob_binding_2(),
+            model.blob_binding_3(),
+            model.blob_binding_4(),
+            model.blob_binding_5(),
+            model.blob_binding_6(),
+            model.blob_binding_7(),
+        ],
+    }
 }
 
 #[repr(C)]

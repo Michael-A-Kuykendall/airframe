@@ -170,7 +170,7 @@ impl BindlessMetadata {
 
             let mut layer_idx = 0usize;
             while absolute_offsets.contains_key(&format!("blk.{}.attn_norm.weight", layer_idx)) {
-                // Per-layer base byte: min of ALL tensor offsets for this layer, rounded down to 4.
+                // Per-layer base byte: one word before the aligned minimum tensor offset.
                 let min_offset = absolute_offsets
                     .keys()
                     .filter(|k| k.starts_with(&format!("blk.{}.", layer_idx)))
@@ -178,7 +178,9 @@ impl BindlessMetadata {
                     .filter(|&o| o > 0)
                     .min()
                     .unwrap_or(0);
-                let base_byte = min_offset & !3u64;
+                // Packed offset zero is reserved as the "tensor missing" sentinel.
+                // Keep the first present tensor one word above the layer base.
+                let base_byte = (min_offset & !3u64).saturating_sub(4);
                 let blob_base_words = (base_byte / 4) as u32;
                 // Shadow outer _p with per-layer relative offsets
                 let p = |offsets: &HashMap<String, u64>, layer: usize, s: &str| -> u32 {
@@ -477,6 +479,32 @@ impl BindlessMetadata {
     /// Construct ModelSpec from the parsed GGUF metadata
     pub fn to_model_spec(&self) -> ModelSpec {
         let mut spec = ModelSpec::from_gguf_metadata(&self.gguf_metadata);
+        // Derive has_qk_norm from tensor presence (Qwen3: blk.0.attn_q_norm.weight / attn_k_norm.weight)
+        let has_qk_norm = self.tensor_dims.contains_key("blk.0.attn_q_norm.weight")
+            && self.tensor_dims.contains_key("blk.0.attn_k_norm.weight");
+        // Derive post_norm_enabled from tensor presence (Gemma-2: blk.0.post_attention_norm.weight / post_ffw_norm.weight)
+        let post_norm_enabled = self
+            .tensor_dims
+            .contains_key("blk.0.post_attention_norm.weight")
+            && self.tensor_dims.contains_key("blk.0.post_ffw_norm.weight");
+        // Set before compute_derived so arch-based fallback doesn't override
+        spec.has_qk_norm = has_qk_norm;
+        spec.post_norm_enabled = post_norm_enabled;
+
+        // Derive packed-K stride from actual tensor shapes (not arch string).
+        // For packed formats (Qwen3), attn_q/attn_k column counts differ from n_embd;
+        // for standard models dims[1] == n_embd, so these equal the shader default (dim).
+        if let Some(dims) = self.tensor_dims.get("blk.0.attn_q.weight") {
+            if dims.len() >= 2 {
+                spec.q_weight_k = dims[1] as usize;
+            }
+        }
+        if let Some(dims) = self.tensor_dims.get("blk.0.attn_k.weight") {
+            if dims.len() >= 2 {
+                spec.k_weight_k = dims[1] as usize;
+            }
+        }
+
         // If head_dim was not in GGUF metadata (e.g. Qwen3 omits attention.key_length),
         // infer it from the Q weight shape: blk.0.attn_q.weight dims = [n_embd, n_head * head_dim]
         if spec.n_head.checked_div(spec.n_head).is_some() {
@@ -520,7 +548,7 @@ impl BindlessMetadata {
     ) -> Option<super::pipeline::LayerOffsets> {
         // e.g., "blk.0.attn_norm.weight"
 
-        // Per-layer base byte: min of all tensor offsets, rounded down to 4.
+        // Per-layer base byte: one word before the aligned minimum tensor offset.
         // Mirrors the compiled_layers loop so both paths produce base-relative
         // packed offsets that the shader reconstructs via blob_base_words.
         let min_offset = [
@@ -550,7 +578,9 @@ impl BindlessMetadata {
         .filter(|&o| o > 0)
         .min()
         .unwrap_or(0);
-        let base_byte = min_offset & !3u64;
+        // Packed offset zero is reserved as the "tensor missing" sentinel.
+        // Keep the first present tensor one word above the layer base.
+        let base_byte = (min_offset & !3u64).saturating_sub(4);
 
         let rel = |abs: u64| -> u32 {
             if abs == 0 {
@@ -963,14 +993,15 @@ mod tests {
     fn test_get_layer_offsets_separate_qkv() {
         let mut tensor_offsets = HashMap::new();
         for (suffix, off) in [
-            ("attn_norm.weight", 100u64),
-            ("attn_q.weight", 200u64),
-            ("attn_k.weight", 300u64),
-            ("attn_v.weight", 400u64),
-            ("attn_output.weight", 500u64),
-            ("ffn_norm.weight", 600u64),
-            ("ffn_down.weight", 700u64),
-            ("ffn_up.weight", 800u64),
+            ("ffn_gate.weight", 100u64),
+            ("attn_norm.weight", 200u64),
+            ("attn_q.weight", 300u64),
+            ("attn_k.weight", 400u64),
+            ("attn_v.weight", 500u64),
+            ("attn_output.weight", 600u64),
+            ("ffn_norm.weight", 700u64),
+            ("ffn_down.weight", 800u64),
+            ("ffn_up.weight", 900u64),
         ] {
             tensor_offsets.insert(format!("blk.0.{suffix}"), off);
         }
@@ -981,7 +1012,7 @@ mod tests {
 
         let meta = BindlessMetadata {
             version: 3,
-            tensor_count: 8,
+            tensor_count: 9,
             tensor_offsets,
             tensor_types,
             tensor_dims: HashMap::new(),
@@ -990,24 +1021,33 @@ mod tests {
             compiled_layers: vec![],
         };
         let offs = meta.get_layer_offsets(0, "llama").expect("layer 0 exists");
-        // Offsets are packed base-relative: the min tensor offset (100) is the
-        // layer base, and every sub-tensor is packed(offset - base).
-        assert_eq!(offs.attn_norm, 0);
+        // The base is one aligned word before the minimum tensor offset so a
+        // present ffn_gate never collides with the zero/missing sentinel.
+        let base = 96;
+        assert_eq!(
+            offs.ffn_gate,
+            super::super::pipeline::relative_packed_offset(100, base).unwrap()
+        );
+        assert_ne!(offs.ffn_gate, 0);
+        assert_eq!(
+            offs.attn_norm,
+            super::super::pipeline::relative_packed_offset(200, base).unwrap()
+        );
         assert_eq!(
             offs.attn_q,
-            super::super::pipeline::relative_packed_offset(200, 100).unwrap()
+            super::super::pipeline::relative_packed_offset(300, base).unwrap()
         );
         assert_eq!(
             offs.attn_k,
-            super::super::pipeline::relative_packed_offset(300, 100).unwrap()
+            super::super::pipeline::relative_packed_offset(400, base).unwrap()
         );
         assert_eq!(
             offs.attn_v,
-            super::super::pipeline::relative_packed_offset(400, 100).unwrap()
+            super::super::pipeline::relative_packed_offset(500, base).unwrap()
         );
         assert_eq!(
             offs.ffn_down,
-            super::super::pipeline::relative_packed_offset(700, 100).unwrap()
+            super::super::pipeline::relative_packed_offset(800, base).unwrap()
         );
         assert_eq!(offs.v_is_q4k, 0);
         assert_eq!(offs.ffn_down_is_q4k, 1);

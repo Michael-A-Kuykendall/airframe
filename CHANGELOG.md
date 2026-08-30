@@ -5,6 +5,58 @@ All notable changes to Airframe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-08-26 — Certification Consolidation + 26 Models + Metadata-Driven Architecture
+
+### 🏆 Certified — 12 Families · 26 Model/Quant Combinations
+
+Airframe's certification pipeline has been **consolidated from the old 5-gate + CHAT regime into a clean 3-box regimen** (MATH + INFERENCE + DETERMINISM). This isn't a reduction in rigor — it's the removal of a regression-causing chat box that produced false REDs on working models, replaced with a deterministic 5-prompt ×2 inference battery that actually proves output quality.
+
+**The 3-box certification regimen:**
+1. **MATH** — `math_cert_one.sh`: quant_verify dequant audit, stack_dump_gpu structural peel, plan-vs-peel reds judgment, dual-peel numerical self-consistency, DuckDB ledger record
+2. **INFERENCE** — `inference_exam.sh`: 5-prompt battery (factual / creative / arithmetic / kv_cache / dev_question) on real GPU, 48 tokens each
+3. **DETERMINISM** — two identical runs must produce identical text; any divergence = FAIL
+
+**One command** runs the full pipeline: `bash scripts/math_cert_one.sh <model_id> <gguf> [family] [quant] [discover_name]`. Exit code 0 = certified.
+
+### New Certified Models (since v0.3.0)
+
+| Family | Models | Quants |
+|--------|--------|--------|
+| **llama** | llama-3.1-8b-instruct | Q4_K_M |
+| **qwen2** | qwen2-7b-instruct | Q4_K_M |
+| **gemma2** | gemma-2-2b-it | Q4_K_M |
+
+Plus re-certification of all 23 prior models under the new 3-box regimen. **26 total certified model/quant combinations.**
+
+### Highlights
+
+- **Metadata-driven architecture** — `has_qk_norm`, `post_norm_enabled`, packed-K stride, and head_dim are now derived from **GGUF tensor presence and shapes**, not hardcoded per-arch string matching. One source of truth: the model's own metadata.
+- **mistral3 → Mistral mapping** — Ministral-3-14B's GGUF reports `general.architecture = "mistral3"`, which previously fell through to `ModelArch::Other`. Now correctly routed to Mistral family handling.
+- **TurboShimmy `TURBO_KV=int4` opt-in** — Environment-variable toggle for INT4 KV-cache compression. Cuts KV VRAM ~60% for large models on consumer GPUs. f32 remains the default; int4 engages only on opt-in.
+- **Build provenance emission** — `emit_build_provenance.py` records git SHA, airframe/shimmy versions, and toolchain state per cert run.
+- **Plan generator bug fixed** — Pre-relocation tooling forced `qk_norm=True` for ALL models, producing false MATH REDs on non-Qwen3 architectures. Current `cert_plan.py` correctly derives from stack config.
+
+### Removals
+
+- **`shimmy_server_gpu` binary deleted** (1834 lines) — Shimmy server now lives in the shimmy repo, not airframe
+- **`audit.rs.broken` + `core/audit/` deleted** (~840 lines) — superseded by the DuckDB certification ledger
+- **Candle probe removed from public tree** — cross-validation tooling stays private
+
+### Bug Fixes
+
+- **Plan-vs-peel false REDs** — Non-Qwen3/Gemma models (qwen2-7b, qwen2-0.5b, qwen2-1.5b, gemma-2-2b) were showing MATH RED due to the plan generator requiring QK-norm stages. Root cause was stale pre-relocation tooling; fixed by re-running with current `cert_plan.py`.
+- **Window-aware bind groups** — `plan_layer_half_windows` + PPT proof for >8-slot span resolution (dgd epic). Enables future support for models whose per-layer tensor span exceeds `BLOB_BINDING_SLOTS=8`.
+- **Numerous metadata-derivation fixes** — packed-K stride (863.5/863.6), has_qk_norm/post_norm from tensor presence (863.3/863.4), dequant offset encoding (2z6-kqa), window-aware LM head (2z6-djk), RMSNorm offset rebase (2z6-8r3).
+
+### Infrastructure
+
+- **Beads issue tracking initialized** — `.beads/` Dolt-backed board for durable task tracking
+- **Cert regimen relocated to airframe** — Canonical cert tooling (`math_cert_one.sh`, `inference_exam.sh`, `cert/*.py`) now lives in the engine repo per `CERT_REGIMEN.md`; workspace-root copies scrubbed
+- **`ISF` remains default** — No feature flag needed for full functionality
+
+### Commits
+30 commits since v0.3.0 — see git log `v0.3.0..HEAD` for full list.
+
 ## [0.2.14] — 2026-08-01 — Hotfix: UINT16 metadata support, CI fixes, docs cleanup
 
 ### Fixed

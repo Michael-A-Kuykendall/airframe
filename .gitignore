@@ -1,4 +1,17 @@
 /target
+crates/devkit/
+.agents/
+.beads/
+.beads
+.claude/
+.opencode/
+.serena/
+.serena
+.vscode/
+.vscode
+AGENTS.md
+bin/
+recovery/
 .mcp/
 /*.py
 /*.sh
@@ -24,9 +37,24 @@ vendor/human-eval/
 # Local environment
 .venv/
 
-# bd / beads issue tracker (local-only, never committed)
-.beads/
-AGENTS.md
+# bd / beads issue tracker — local Dolt DB stays LOCAL (sync via bd dolt push/pull
+# to the private remote); only .beads/config.yaml + .beads/metadata.json are tracked.
+.beads/embeddeddolt/
+.beads/backup/
+.beads/bodyfix/
+.beads/plans/
+.beads/reference/
+.beads/daemon-error
+.beads/export-state/
+.beads/*.jsonl
+.beads/*.db
+.beads/*.meta.json
+.beads/daemon.*
+.beads/.auto-import-issues.jsonl
+.beads/.local_version
+.beads/interactions.jsonl
+.beads/last-touched
+.beads/sync-state.json
 
 # Smoke test run artifacts (timestamped CSVs and logs)
 artifacts/model_smoke/smoke_*.csv
@@ -119,11 +147,19 @@ crates/candle_probe/target/
 *.duckdb-wal
 beads.db
 
-# Local dev tooling / AI settings (never commit)
-.opencode/
-.agents/
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+
+# Dev-only / local-only (guarded from public pushes by pre-push hook)
 .serena/
 .cargo/
+*.bak
+docs/SPIKE_*.md
+SPIKE_*.md
 
-# Certification evidence / ledger (dev, kept on develop only)
-cert/
+# AI-assisted development files — private side only, never push to public
+.github/copilot-instructions.md
+.github/instructions/

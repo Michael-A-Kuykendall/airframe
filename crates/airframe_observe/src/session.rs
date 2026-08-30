@@ -427,7 +427,7 @@ mod tests {
         let mut session = ObservationSession::new();
         session.register_vault_oracle();
 
-        session.emit_layer_output(0, 1, &vec![0.5f32; 32]);
+        session.emit_layer_output(0, 1, &[0.5f32; 32]);
         let result = session.saturate();
         assert!(result.saturated);
 
@@ -501,7 +501,7 @@ mod tests {
             expected_rms_bits: 0.5f32.to_bits(),
             checksum: 7,
         });
-        session.emit_layer_output(2, 1, &vec![1.0f32; 8]);
+        session.emit_layer_output(2, 1, &[1.0f32; 8]);
         assert!(session.saturate().saturated);
 
         let results = session.certification().unwrap().drain();
@@ -523,7 +523,7 @@ mod tests {
             expected_rms_bits: 0.5f32.to_bits(),
             checksum: 999,
         });
-        session.emit_layer_output(5, 1, &vec![2.0f32; 16]);
+        session.emit_layer_output(5, 1, &[2.0f32; 16]);
 
         let result = session.saturate();
         assert!(result.saturated);
@@ -563,7 +563,7 @@ mod tests {
             expected_rms_bits: 1.0f32.to_bits(),
             checksum: 42,
         });
-        session.emit_final_logits(1, &vec![4.0f32; 8]);
+        session.emit_final_logits(1, &[4.0f32; 8]);
         assert!(session.saturate().saturated);
 
         let results = session.certification().unwrap().drain();
@@ -582,7 +582,7 @@ mod tests {
         session.register_certification_default();
 
         // No oracle for layer 3 → no certification fact, no result.
-        session.emit_layer_output(3, 1, &vec![0.5f32; 32]);
+        session.emit_layer_output(3, 1, &[0.5f32; 32]);
         let result = session.saturate();
         assert!(result.saturated);
 
@@ -594,8 +594,8 @@ mod tests {
         let mut session = ObservationSession::new();
         session.register_vault_oracle();
 
-        session.emit_layer_output(0, 1, &vec![1.0f32; 4]);
-        session.emit_layer_output(1, 1, &vec![1.0f32; 4]);
+        session.emit_layer_output(0, 1, &[1.0f32; 4]);
+        session.emit_layer_output(1, 1, &[1.0f32; 4]);
         session.saturate();
 
         // 2 LayerOutput + 2 WriteOracleRow + 2 LayerOutputStable = 6 facts

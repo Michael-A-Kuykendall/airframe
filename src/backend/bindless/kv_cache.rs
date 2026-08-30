@@ -388,7 +388,10 @@ mod tests {
         let max_seq_len = 2048;
 
         // Create GPU instance for testing
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
@@ -402,6 +405,10 @@ mod tests {
                 ..Default::default()
             }))
             .expect("Failed to create device");
+        // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+        // dropped from the test harness (SIGSEGV after asserts pass). See
+        // tests.rs get_device() for the full rationale.
+        std::mem::forget((device.clone(), _queue.clone()));
 
         // Create cache
         let cache = KVCache::new(&device, n_layers, n_head_kv, head_dim, max_seq_len);
@@ -455,12 +462,19 @@ mod tests {
     /// Test sequence length management
     #[test]
     fn test_sequence_management() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .expect("No GPU adapter");
         let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default()))
             .expect("Failed to create device");
+        // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+        // dropped from the test harness (SIGSEGV after asserts pass). See
+        // tests.rs get_device() for the full rationale.
+        std::mem::forget((device.clone(), _queue.clone()));
 
         let mut cache = KVCache::new(&device, 22, 4, 64, 2048);
 
@@ -479,12 +493,19 @@ mod tests {
     /// Test offset calculation for cache indexing
     #[test]
     fn test_offset_calculation() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .expect("No GPU adapter");
         let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default()))
             .expect("Failed to create device");
+        // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+        // dropped from the test harness (SIGSEGV after asserts pass). See
+        // tests.rs get_device() for the full rationale.
+        std::mem::forget((device.clone(), _queue.clone()));
 
         let cache = KVCache::new(&device, 22, 4, 64, 2048);
 
@@ -509,12 +530,19 @@ mod tests {
     #[test]
     #[should_panic(expected = "KV cache overflow")]
     fn test_overflow_panic() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .expect("No GPU adapter");
         let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default()))
             .expect("Failed to create device");
+        // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+        // dropped from the test harness (SIGSEGV after asserts pass). See
+        // tests.rs get_device() for the full rationale.
+        std::mem::forget((device.clone(), _queue.clone()));
 
         let mut cache = KVCache::new(&device, 22, 4, 64, 8); // Small context for test
 

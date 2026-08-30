@@ -180,6 +180,11 @@ impl BindlessPipeline {
     }
 
     /// Run Dequant Test (or get embedding)
+    ///
+    /// Q4_0-only legacy path. `dequant_layout` declares a single blob binding
+    /// (0..2, no 10..16), so this reads chunk 0 ONLY and cannot address a tensor
+    /// past `effective_chunk`. Use [`Self::run_dequant_any_hot`] for anything
+    /// that must work on a multi-chunk model.
     pub fn run_dequant_request(
         &self,
         device: &wgpu::Device,
@@ -285,39 +290,137 @@ impl BindlessPipeline {
         count: u32,
         quant_type: u32,
     ) -> Vec<f32> {
-        // The model is uploaded to VRAM as word-granular blob buffers; the
-        // shader reads absolute word indices, so the bytes backing blob_0 are
-        // the raw GGUF bytes for the model's first chunk.
-        let blob = {
-            let buf = &model.gpu_buffers[0];
-            let size = buf.size();
-            let staging = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("DequantAny Hot Staging"),
-                size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            encoder.copy_buffer_to_buffer(buf, 0, &staging, 0, size);
-            queue.submit(Some(encoder.finish()));
-            let slice = staging.slice(..);
-            let (tx, rx) = std::sync::mpsc::channel();
-            slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
-            loop {
-                device.poll(wgpu::PollType::Poll).ok();
-                if let Ok(res) = rx.try_recv() {
-                    res.expect("DequantAny hot staging map failed");
-                    break;
-                }
-            }
-            let data = slice.get_mapped_range();
-            let bytes: Vec<u8> = data.to_vec();
-            drop(data);
-            staging.unmap();
-            bytes
+        // Window over the tensor's byte span, so a row living past resident
+        // chunk 7 is actually bound. Replaces the old chunk-0-only staging.
+        let offset_words = offset_bytes / 4;
+        let window = model
+            .dequant_window(offset_words, count, quant_type)
+            .expect("dequant tensor span exceeds window capacity");
+
+        // sh_dequant_any.wgsl resolves an element as
+        //   word = off_pack/2 + blob_base_words
+        // where off_pack is a *packed* (byte/2) offset. The single-blob and
+        // one-shot paths therefore encode the tensor start entirely in
+        // blob_base_words and leave offset_words at 0; do the same here, but
+        // rebased so the shader's index is window-local rather than absolute.
+        let params = DequantAnyParams {
+            blob_base_words: offset_words - window.window_base_words(),
+            offset_words: 0,
+            formula_index: formula_index_for_ggml(quant_type),
+            count,
+            chunk_words: model.chunk_words(),
         };
-        self.run_dequant_any_blob(device, queue, &blob, offset_bytes, count, quant_type)
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("DequantAny Params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let output_size = (count as usize * 4) as u64;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("DequantAny Output"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        // Create blob bindings from window
+        let blob_bindings = window.binding_resources(model);
+        let b0 = blob_bindings[0].clone();
+        let b1 = blob_bindings[1].clone();
+        let b2 = blob_bindings[2].clone();
+        let b3 = blob_bindings[3].clone();
+        let b4 = blob_bindings[4].clone();
+        let b5 = blob_bindings[5].clone();
+        let b6 = blob_bindings[6].clone();
+        let b7 = blob_bindings[7].clone();
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("DequantAny BindGroup"),
+            layout: &self.dequant_any_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b0,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: b1,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: b2,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: b3,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: b4,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: b5,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: b6,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: b7,
+                },
+            ],
+        });
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("DequantAny Hot"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.dequant_any_pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = count.div_ceil(64);
+            cpass.dispatch_workgroups(workgroups, 1, 1);
+        }
+
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("DequantAny Staging"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_size);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+        loop {
+            device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("GPU device lost during readback poll");
+            if let Ok(res) = rx.try_recv() {
+                res.expect("DequantAny hot staging map failed");
+                break;
+            }
+        }
+        let data = slice.get_mapped_range();
+        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging_buffer.unmap();
+        result
     }
 
     /// Dequantize a tensor directly from raw GGUF blob bytes on the GPU.
@@ -474,8 +577,17 @@ impl BindlessPipeline {
         count: u32,
         quant_type: u32,
     ) -> Vec<f32> {
+        // Window over the tensor's byte span so rows past resident chunk 7 are
+        // bound; blob_base_words is rebased onto it, matching the hot path.
+        let offset_words = (offset_bytes as u64 / 4) as u32;
+        let window = model
+            .dequant_window(offset_words, count, quant_type)
+            .expect("dequant tensor span exceeds window capacity");
+        let [blob0, blob1, blob2, blob3, blob4, blob5, blob6, blob7] =
+            blob_bindings_for(model, Some(&window));
+
         let params = DequantAnyParams {
-            blob_base_words: (offset_bytes as u64 / 4) as u32,
+            blob_base_words: offset_words - window.window_base_words(),
             offset_words: 0,
             formula_index: formula_index_for_ggml(quant_type),
             count,
@@ -627,7 +739,7 @@ impl BindlessPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: model.blob_binding_0(),
+                    resource: blob0,
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -639,31 +751,31 @@ impl BindlessPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: model.blob_binding_1(),
+                    resource: blob1,
                 },
                 wgpu::BindGroupEntry {
                     binding: 11,
-                    resource: model.blob_binding_2(),
+                    resource: blob2,
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
-                    resource: model.blob_binding_3(),
+                    resource: blob3,
                 },
                 wgpu::BindGroupEntry {
                     binding: 13,
-                    resource: model.blob_binding_4(),
+                    resource: blob4,
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: model.blob_binding_5(),
+                    resource: blob5,
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
-                    resource: model.blob_binding_6(),
+                    resource: blob6,
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: model.blob_binding_7(),
+                    resource: blob7,
                 },
             ],
         });

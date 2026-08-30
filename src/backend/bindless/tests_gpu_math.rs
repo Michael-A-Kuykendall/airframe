@@ -4,7 +4,10 @@ mod tests {
     use wgpu::util::DeviceExt;
 
     async fn get_device() -> (wgpu::Device, wgpu::Queue) {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -17,6 +20,12 @@ mod tests {
             .request_device(&wgpu::DeviceDescriptor::default())
             .await
             .unwrap();
+        // Leak the device+queue at test teardown: dzn (Mesa Dozen) crashes
+        // nondeterministically in vkDestroyDevice when dropped from the test
+        // harness (SIGSEGV after all asserts pass; math verified bit-correct
+        // on dzn and llvmpipe). Leaking skips only the destructor.
+        std::mem::forget((device.clone(), queue.clone()));
+
         (device, queue)
     }
 

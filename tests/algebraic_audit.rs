@@ -104,7 +104,10 @@ fn approx_eq(a: f32, b: f32) -> bool {
 #[tokio::test]
 async fn algebraic_audit_dequant_shader_vs_spec() {
     // 1. Acquire GPU (the gate runs on hardware; skip gracefully if none).
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        flags: wgpu::InstanceFlags::default().with_env(),
+        ..Default::default()
+    });
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -126,6 +129,10 @@ async fn algebraic_audit_dequant_shader_vs_spec() {
         })
         .await
         .expect("device request failed");
+    // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+    // dropped from the test harness (SIGSEGV after asserts pass). See
+    // src/backend/bindless/tests.rs get_device() for the full rationale.
+    std::mem::forget((device.clone(), queue.clone()));
 
     let pipeline = BindlessPipeline::new(&device);
 

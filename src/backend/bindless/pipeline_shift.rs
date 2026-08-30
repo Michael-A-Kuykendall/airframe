@@ -564,11 +564,18 @@ mod tests {
 
     #[test]
     fn test_helical_gpu_shift_pure_copy() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .expect("No GPU adapter");
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
             .expect("Failed to create device");
+        // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+        // dropped from the test harness (SIGSEGV after asserts pass). See
+        // tests.rs get_device() for the full rationale.
+        std::mem::forget((device.clone(), queue.clone()));
 
         let pipeline = RopeShiftPipeline::new(&device);
 
@@ -686,11 +693,18 @@ mod tests {
     /// Pure copy: both K and V must be bit-identical to the original source data.
     #[test]
     fn test_helical_gpu_shift_overlapping() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            flags: wgpu::InstanceFlags::default().with_env(),
+            ..Default::default()
+        });
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .expect("No GPU adapter");
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
             .expect("Failed to create device");
+        // Leak device+queue at teardown: dzn crashes in vkDestroyDevice when
+        // dropped from the test harness (SIGSEGV after asserts pass). See
+        // tests.rs get_device() for the full rationale.
+        std::mem::forget((device.clone(), queue.clone()));
 
         let pipeline = RopeShiftPipeline::new(&device);
 

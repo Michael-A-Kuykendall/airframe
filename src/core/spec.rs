@@ -73,7 +73,7 @@ impl From<&str> for ModelArch {
     fn from(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "llama" => Self::Llama,
-            "mistral" => Self::Mistral,
+            "mistral" | "mistral3" => Self::Mistral,
             "phi" | "phi2" | "phi3" => Self::Phi,
             "gemma" | "gemma2" | "gemma4" | "gemma6" => Self::Gemma,
             "qwen2" => Self::Qwen2,
@@ -115,6 +115,10 @@ pub struct ModelSpec {
     pub has_qk_norm: bool,
     /// Gemma-2 has post-attention and post-FFW norms. False for others.
     pub post_norm_enabled: bool,
+    /// Packed-K stride hint for attn_q.weight (0 = use n_embd; for Qwen3 packed format)
+    pub q_weight_k: usize,
+    /// Packed-K stride hint for attn_k.weight (0 = use n_embd; for Qwen3 packed format)
+    pub k_weight_k: usize,
 
     // Derived dimensions (computed once, used everywhere)
     pub head_dim: usize,  // n_embd / n_head
@@ -146,10 +150,16 @@ impl ModelSpec {
         self.rope_dim = self.head_dim;
         self.gqa_ratio = self.n_head / self.n_head_kv;
         self.kv_dim = self.n_head_kv * self.head_dim;
-        // Qwen3 uses per-head Q and K RMSNorm before RoPE
-        self.has_qk_norm = matches!(self.arch, ModelArch::Qwen3);
-        // Gemma-2 has post-attention and post-FFW norms
-        self.post_norm_enabled = matches!(self.arch, ModelArch::Gemma);
+        // Qwen3 uses per-head Q and K RMSNorm before RoPE — derive from tensor presence (metadata.rs)
+        // Only fall back to arch heuristic if not already set from GGUF tensor presence
+        if !self.has_qk_norm {
+            self.has_qk_norm = matches!(self.arch, ModelArch::Qwen3);
+        }
+        // Gemma-2 has post-attention and post-FFW norms — derive from tensor presence (metadata.rs)
+        // Only fall back to arch heuristic if not already set from GGUF tensor presence
+        if !self.post_norm_enabled {
+            self.post_norm_enabled = matches!(self.arch, ModelArch::Gemma);
+        }
 
         // Temp buffer layout (must fit ALL intermediates at once):
         //   [0..n_embd]              = attn_norm output / activation copy
@@ -346,6 +356,8 @@ impl ModelSpec {
             final_logit_softcap: final_softcap.unwrap_or(0.0),
             has_qk_norm: false,       // set in compute_derived() from arch
             post_norm_enabled: false, // set in compute_derived() from arch
+            q_weight_k: 0,            // set from tensor shape in metadata.rs
+            k_weight_k: 0,            // set from tensor shape in metadata.rs
             head_dim: head_dim_expl.unwrap_or(0),
             gqa_ratio: 0,
             kv_dim: 0,
@@ -380,6 +392,8 @@ impl ModelSpec {
             final_logit_softcap: 0.0,
             has_qk_norm: false,
             post_norm_enabled: false,
+            q_weight_k: 0,
+            k_weight_k: 0,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,
@@ -661,6 +675,8 @@ mod tests {
             final_logit_softcap: 0.0,
             has_qk_norm: false,
             post_norm_enabled: false,
+            q_weight_k: 0,
+            k_weight_k: 0,
             head_dim: 0,
             gqa_ratio: 0,
             kv_dim: 0,

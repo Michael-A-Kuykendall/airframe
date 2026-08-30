@@ -426,9 +426,7 @@ mod tests {
         block[208] = 0x00;
         block[209] = 0x3c;
         // scales = 1
-        for i in 192..208 {
-            block[i] = 1;
-        }
+        block[192..208].fill(1);
         // ql/qh all zero -> q6 = 0 -> signed_q = -32
         let f = formula_for_type(14).expect("Q6_K registered");
         for e in 0..256 {
@@ -447,9 +445,7 @@ mod tests {
         let mut block = vec![0u8; 210];
         block[208] = 0x00;
         block[209] = 0x3c; // d = 1.0
-        for i in 192..208 {
-            block[i] = 1;
-        }
+        block[192..208].fill(1);
         block[192] = 2; // scale for (half0, quarter0, l0) group
         block[0] = 0x01; // ql[0]: low nibble = 1
         let f = formula_for_type(14).expect("Q6_K registered");
@@ -467,10 +463,10 @@ mod tests {
 
     #[test]
     fn f32_roundtrip() {
-        let mut block = 3.14159f32.to_le_bytes().to_vec();
+        let mut block = std::f32::consts::PI.to_le_bytes().to_vec();
         block.resize(4, 0);
         let v = dequant_elem(0, &block, 0).unwrap();
-        assert!((v - 3.14159).abs() < 1e-6);
+        assert!((v - std::f32::consts::PI).abs() < 1e-6);
     }
 
     #[test]
