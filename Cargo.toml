@@ -1,7 +1,7 @@
 [workspace]
-# All checked-in crates are workspace members. Deferred/private crates are kept
-# off this public branch until they are intentionally wired into the product.
-members = ["crates/*"]
+# Only the shipped library crates are workspace members. Console is deferred to
+# its own product line, and devkit/candle_probe remain private tooling.
+members = ["crates/libfse", "crates/airframe_observe"]
 
 [package]
 name = "airframe"
