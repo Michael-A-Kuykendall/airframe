@@ -156,8 +156,6 @@ Shimmy (server) → airframe (engine)
                 crates/libfse/ (FSE policy)
 ```
 
-Full architecture reference: [`docs/architecture-map.md`](docs/architecture-map.md)
-
 ---
 
 ## ⚡ TurboShimmy INT4 KV Cache

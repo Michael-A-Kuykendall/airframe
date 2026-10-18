@@ -37,24 +37,21 @@ vendor/human-eval/
 # Local environment
 .venv/
 
-# bd / beads issue tracker — local Dolt DB stays LOCAL (sync via bd dolt push/pull
-# to the private remote); only .beads/config.yaml + .beads/metadata.json are tracked.
-.beads/embeddeddolt/
-.beads/backup/
-.beads/bodyfix/
-.beads/plans/
-.beads/reference/
-.beads/daemon-error
-.beads/export-state/
-.beads/*.jsonl
-.beads/*.db
-.beads/*.meta.json
-.beads/daemon.*
-.beads/.auto-import-issues.jsonl
-.beads/.local_version
-.beads/interactions.jsonl
-.beads/last-touched
-.beads/sync-state.json
+# Machine-local development state and private working documentation
+.beads/
+.beads.gate.lock
+.openstate/
+.agents/
+.opencode/
+AGENTS.md
+AGENTS.override.md
+BEADS-SETUP.md
+STABILIZATION.md
+WORKSPACE-AUDIT.md
+RELEASE-PLAN.md
+.github/prompts/
+docs/architecture-map.md
+docs/bindless-fse-throughput-architecture.md
 
 # Smoke test run artifacts (timestamped CSVs and logs)
 artifacts/model_smoke/smoke_*.csv
