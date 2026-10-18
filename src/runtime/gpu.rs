@@ -399,6 +399,19 @@ impl GpuRuntime {
         modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
         trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        self.generate_with_metadata(prompt, params, on_token, control, modify_logits, trace_cb)
+            .map(|output| output.text)
+    }
+
+    pub fn generate_with_metadata(
+        &self,
+        prompt: &str,
+        params: &SamplingParams,
+        on_token: Option<Box<dyn FnMut(&str) + Send>>,
+        control: Option<Box<dyn InferenceControl + Send + Sync>>,
+        modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
+        trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
+    ) -> Result<super::generation::GenerationOutput, Box<dyn std::error::Error + Send + Sync>> {
         use airframe_observe::facts::InferenceFact;
         use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
 
@@ -431,6 +444,14 @@ impl GpuRuntime {
             },
         )?;
         append_log(&format!("tokenized: {} tokens", prompt_tokens.len()));
+        if params.max_tokens == 0 {
+            return Ok(super::generation::GenerationOutput {
+                text: String::new(),
+                prompt_tokens: prompt_tokens.len(),
+                completion_tokens: 0,
+                finish_reason: super::generation::FinishReason::Length,
+            });
+        }
         let dim = self.spec.n_embd as u32;
         let prompt_len = prompt_tokens.len() as u32;
 
@@ -787,7 +808,19 @@ impl GpuRuntime {
         if let Some(reason) = &s.block_reason {
             return Err(format!("Blocked by control hook: {reason}").into());
         }
-        Ok(s.generated_text.clone())
+        let finish_reason = match s.halt {
+            Some(airframe_observe::facts::HaltReason::MaxTokensReached) => {
+                super::generation::FinishReason::Length
+            }
+            Some(_) => super::generation::FinishReason::Stop,
+            None => return Err("Generation ended without a terminal reason".into()),
+        };
+        Ok(super::generation::GenerationOutput {
+            text: s.generated_text.clone(),
+            prompt_tokens: prompt_tokens.len(),
+            completion_tokens: s.all_token_ids.len().saturating_sub(prompt_tokens.len()),
+            finish_reason,
+        })
     }
 
     /// Generate text via the Inference Saturation Fabric (ISF) dispatch path.

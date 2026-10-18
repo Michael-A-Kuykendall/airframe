@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] — 2026-10-18
+
 ### Fixed
 
+- Preserve exact generation token counts and terminal reasons; stop at the
+  requested output budget without sampling an extra token.
+- Count sampled EOS/stop IDs consistently and surface empty-forward failures.
 - Parse chat-template control markers and explicit stop markers as special
   tokens during generation.
 - Select split-half (NeoX) rotary coordinate pairs for Qwen2 and Qwen3 in both
@@ -20,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Require `shimmytok` 0.8.4, including tokenizer-type-aware BOS defaults.
+- Add `GpuRuntime::generate_with_metadata`, retaining the text-only API.
+- Require `airframe-observe` 0.1.3 for terminal-state accounting fixes.
 
 ## [0.4.0] — 2026-08-26 — Certification Consolidation + 26 Models + Metadata-Driven Architecture
 

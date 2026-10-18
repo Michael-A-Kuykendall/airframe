@@ -483,10 +483,14 @@ impl InferenceSaturationFabric {
                     logits_len, logits_max, logits_nans, token_id, halt);
 
                 if halt {
-                    eprintln!("[ISF-R4] HALT at first token (EOS/stop token)");
-                    return vec![InferenceFact::GenerationHalt {
-                        reason: HaltReason::EosToken,
-                    }];
+                    let mut s = state_ref.lock().unwrap();
+                    let reason = if token_id == s.eos_token {
+                        HaltReason::EosToken
+                    } else {
+                        HaltReason::ExtraStopToken
+                    };
+                    s.halt = Some(reason.clone());
+                    return vec![InferenceFact::GenerationHalt { reason }];
                 }
 
                  let piece = decode(token_id);
@@ -537,6 +541,13 @@ impl InferenceSaturationFabric {
             let decode = decode_fn.clone();
             program.register(AlphaKey(KEY_DECODE_STEP), move |fact, _store| {
                 if let InferenceFact::DecodeStep { step, token_id, position } = fact {
+                    {
+                        let mut s = state_ref.lock().unwrap();
+                        if *step + 1 >= s.max_tokens {
+                            s.halt = Some(HaltReason::MaxTokensReached);
+                            return vec![InferenceFact::GenerationHalt { reason: HaltReason::MaxTokensReached }];
+                        }
+                    }
                     let t_decode = std::time::Instant::now();
 
                     // Dequant embedding for this token — forward pass
@@ -554,7 +565,10 @@ impl InferenceSaturationFabric {
 
                     if is_empty {
                         eprintln!("[ISF-DECODE] step={} EMPTY LOGITS — forward pass failed, halting", step);
-                        return vec![InferenceFact::GenerationHalt { reason: HaltReason::MaxTokensReached }];
+                        let mut s = state_ref.lock().unwrap();
+                        s.block_reason = Some("GPU forward pass returned empty logits".into());
+                        s.halt = Some(HaltReason::ControlHalt);
+                        return vec![InferenceFact::GenerationHalt { reason: HaltReason::ControlHalt }];
                     }
 
                     // Pre-sample mask (grammar) + trace, then sample.
@@ -611,17 +625,19 @@ impl InferenceSaturationFabric {
                         let s = state_ref.lock().unwrap();
                         let is_eos = next_token == s.eos_token;
                         let is_stop = s.extra_stop_ids.contains(&next_token);
-                        let is_max = (*step + 1) >= s.max_tokens;
-                        if is_eos || is_stop {
+                        if is_eos {
                             (true, HaltReason::EosToken)
-                        } else if is_max {
-                            (true, HaltReason::MaxTokensReached)
+                        } else if is_stop {
+                            (true, HaltReason::ExtraStopToken)
                         } else {
                             (false, HaltReason::EosToken) // unused
                         }
                     };
 
                     if halt {
+                        let mut s = state_ref.lock().unwrap();
+                        s.all_token_ids.push(next_token);
+                        s.halt = Some(halt_reason.clone());
                         return vec![InferenceFact::GenerationHalt { reason: halt_reason }];
                     }
 
