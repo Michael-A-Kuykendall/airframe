@@ -733,6 +733,10 @@ impl BindlessPipeline {
             head_count_kv: spec.n_head_kv as u32,
             head_dim: spec.head_dim as u32,
             rope_dim: spec.rope_dim as u32,
+            rope_neox: matches!(
+                spec.arch,
+                crate::core::spec::ModelArch::Qwen2 | crate::core::spec::ModelArch::Qwen3
+            ) as u32,
             rms_eps: spec.rms_eps,
             ffn_dim,
             temp_stride,

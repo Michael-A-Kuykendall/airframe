@@ -48,6 +48,15 @@ fn f16_to_f32(bits: u32) -> f32 {
 // Constants
 const BLOCK_SIZE: u32 = 32u; // Q4_0 Block Size
 
+// Qwen GGUF projections use split-half (NeoX) rotary coordinates.
+// Dimensions outside a partial rotary subspace retain adjacent identity pairs.
+fn rope_pair_indices(p: u32) -> vec2<u32> {
+    if (params.rope_neox != 0u && p < params.rope_dim / 2u) {
+        return vec2<u32>(p, p + params.rope_dim / 2u);
+    }
+    return vec2<u32>(p * 2u, p * 2u + 1u);
+}
+
 struct LayerOffsets {
     attn_norm: u32,
     attn_norm_bias: u32,
@@ -73,7 +82,8 @@ struct LayerParams {
     head_count: u32,    // 32
     head_count_kv: u32, // 4 (GQA)
     head_dim: u32,      // 64
-    rope_dim: u32,      // rotary sub-dimension (may be < head_dim for partial RoPE)
+    rope_dim: u32,
+    rope_neox: u32, // Split-half rotary coordinate layout
     rms_eps: f32,       // 1e-5
     ffn_dim: u32,       // Feed-forward intermediate dim (e.g. 5632)
     temp_stride: u32,   // Per-token temp buffer stride in floats (e.g. 16384)
@@ -697,11 +707,11 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 cos_a = rope_table[tbl];
                 sin_a = rope_table[tbl + 1u];
             }
-            let doff  = p * 2u;
-            let q_re  = temp_state[q_base + doff];
-            let q_im  = temp_state[q_base + doff + 1u];
-            let k_re  = kv_cache_k[k_base + doff];
-            let k_im  = kv_cache_k[k_base + doff + 1u];
+            let pair = rope_pair_indices(p);
+            let q_re  = temp_state[q_base + pair.x];
+            let q_im  = temp_state[q_base + pair.y];
+            let k_re  = kv_cache_k[k_base + pair.x];
+            let k_im  = kv_cache_k[k_base + pair.y];
             dot_qk += (q_re * k_re + q_im * k_im) * cos_a
                     + (q_re * k_im - q_im * k_re) * sin_a;
         }
@@ -1095,18 +1105,18 @@ fn main_attn_out_int4(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 cos_a = rope_table[tbl];
                 sin_a = rope_table[tbl + 1u];
             }
-            let doff  = p * 2u;
-            let q_re  = temp_state[q_base + doff];
-            let q_im  = temp_state[q_base + doff + 1u];
+            let pair = rope_pair_indices(p);
+            let q_re  = temp_state[q_base + pair.x];
+            let q_im  = temp_state[q_base + pair.y];
 
             // Dequant k_re
-            let ci_re   = k_flat_base + doff;
+            let ci_re   = k_flat_base + pair.x;
             let k_pack_re = kv_cache_k_packed[ci_re / 8u];
             let k_nib_re  = (k_pack_re >> ((ci_re % 8u) * 4u)) & 0xFu;
             let k_re      = (f32(k_nib_re) - 8.0) * k_scale;
 
             // Dequant k_im
-            let ci_im   = k_flat_base + doff + 1u;
+            let ci_im   = k_flat_base + pair.y;
             let k_pack_im = kv_cache_k_packed[ci_im / 8u];
             let k_nib_im  = (k_pack_im >> ((ci_im % 8u) * 4u)) & 0xFu;
             let k_im      = (f32(k_nib_im) - 8.0) * k_scale;

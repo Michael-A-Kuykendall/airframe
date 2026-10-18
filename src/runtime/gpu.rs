@@ -421,7 +421,15 @@ impl GpuRuntime {
         };
 
         append_log(&format!("generate called, prompt_len={}", prompt.len()));
-        let prompt_tokens = self.tokenizer.encode(prompt, true)?;
+        // Chat templates contain tokenizer-owned control markers. Parse them as
+        // special tokens rather than feeding their literal spelling to the model.
+        let prompt_tokens = self.tokenizer.encode_with_options(
+            prompt,
+            &shimmytok::EncodeOptions {
+                add_special_tokens: true,
+                parse_special: true,
+            },
+        )?;
         append_log(&format!("tokenized: {} tokens", prompt_tokens.len()));
         let dim = self.spec.n_embd as u32;
         let prompt_len = prompt_tokens.len() as u32;
@@ -437,13 +445,16 @@ impl GpuRuntime {
             .extra_stop_tokens
             .iter()
             .filter_map(|s| {
-                self.tokenizer.encode(s, false).ok().and_then(|v| {
-                    if v.len() == 1 {
-                        Some(v[0])
-                    } else {
-                        None
-                    }
-                })
+                self.tokenizer
+                    .encode_with_options(
+                        s,
+                        &shimmytok::EncodeOptions {
+                            add_special_tokens: false,
+                            parse_special: true,
+                        },
+                    )
+                    .ok()
+                    .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None })
             })
             .collect();
 
@@ -963,7 +974,9 @@ impl GpuRuntime {
                 let n_elements = spec.n_vocab * spec.n_embd;
                 let bytes = &mmap[byte_offset as usize..(byte_offset as usize + n_elements * 4)];
                 let floats: Vec<f32> = bytes
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                     .collect();
                 Tensor {

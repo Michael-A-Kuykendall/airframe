@@ -191,6 +191,7 @@ mod parity_tests {
             head_count_kv: 4,
             head_dim: 64,
             rope_dim: 64,
+            rope_neox: 0,
             rms_eps: 1e-5,
             ffn_dim: 5632,
             temp_stride: 16384,

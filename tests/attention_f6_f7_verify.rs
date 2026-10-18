@@ -105,6 +105,10 @@ async fn test_f6_f7_gpu_attention_verification() -> Result<(), Box<dyn std::erro
         head_count_kv: spec.n_head_kv as u32,
         head_dim: (spec.n_embd / spec.n_head) as u32,
         rope_dim: spec.rope_dim as u32,
+        rope_neox: matches!(
+            spec.arch,
+            airframe::core::spec::ModelArch::Qwen2 | airframe::core::spec::ModelArch::Qwen3
+        ) as u32,
         rms_eps: spec.rms_eps,
         ffn_dim: 5632,
         temp_stride: 16384,

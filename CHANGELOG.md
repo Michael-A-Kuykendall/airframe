@@ -5,6 +5,22 @@ All notable changes to Airframe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Parse chat-template control markers and explicit stop markers as special
+  tokens during generation.
+- Select split-half (NeoX) rotary coordinate pairs for Qwen2 and Qwen3 in both
+  F32 and INT4 attention shaders; retain adjacent pairing for existing routes.
+- Keep Rust and WGSL layer-parameter layouts synchronized and add production
+  shader validation plus GPU pair-layout regression coverage.
+- Resolve the current stable Clippy lint in F32 output-head loading.
+
+### Changed
+
+- Require `shimmytok` 0.8.4, including tokenizer-type-aware BOS defaults.
+
 ## [0.4.0] — 2026-08-26 — Certification Consolidation + 26 Models + Metadata-Driven Architecture
 
 ### 🏆 Certified — 12 Families · 26 Model/Quant Combinations
