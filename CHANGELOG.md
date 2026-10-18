@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require `shimmytok` 0.8.4, including tokenizer-type-aware BOS defaults.
 - Add `GpuRuntime::generate_with_metadata`, retaining the text-only API.
 - Require `airframe-observe` 0.1.3 for terminal-state accounting fixes.
+- Gate publication on native Linux x86-64/ARM64, Windows and macOS CPU tests;
+  hardware-only GPU tests remain a separate validation requirement.
 
 ## [0.4.0] — 2026-08-26 — Certification Consolidation + 26 Models + Metadata-Driven Architecture
 
