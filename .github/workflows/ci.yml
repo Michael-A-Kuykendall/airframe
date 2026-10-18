@@ -12,8 +12,15 @@ env:
 
 jobs:
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04-arm, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
     - uses: actions/checkout@v4
     - name: Install Rust
@@ -35,7 +42,7 @@ jobs:
     - name: Build
       run: cargo build --all-features
     - name: Test (no GPU required)
-      run: cargo test -p libfse
+      run: cargo test --workspace --lib -- --test-threads=1 --skip backend::bindless::kv_cache::tests --skip backend::bindless::pipeline_shift::tests --skip backend::bindless::test_int4_parity::int4_parity_tests --skip backend::bindless::tests::tests_inner --skip backend::bindless::tests_gpu_math::tests
 
     - name: PPT Contract Tests (no GPU required)
       # --test-threads=1: the invariant log is a process-global static, so
@@ -45,12 +52,15 @@ jobs:
     - name: Observe tests (no GPU required)
       run: cargo test -p airframe-observe
 
+    - name: Generation accounting contracts
+      run: cargo test -p airframe-observe --test generation_accounting -- --test-threads=1
+
     - name: Build with ISF features
       run: cargo build
 
   publish:
     name: Publish to crates.io
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.repository == 'Michael-A-Kuykendall/airframe' && startsWith(github.ref, 'refs/tags/v')
     needs: [test]
     runs-on: ubuntu-latest
     steps:
