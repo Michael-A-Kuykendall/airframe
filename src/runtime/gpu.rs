@@ -403,6 +403,7 @@ impl GpuRuntime {
             .map(|output| output.text)
     }
 
+    #[cfg(feature = "isf")]
     pub fn generate_with_metadata(
         &self,
         prompt: &str,
