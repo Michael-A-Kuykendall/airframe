@@ -252,7 +252,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. See [CHANGELOG.md](CHANGE
 - **$100/month**: Corporate backer 🏢 — Logo placement + release recognition
 - **$500/month**: Enterprise partner 🚀 — Office hours + roadmap consultation
 
-**Current sponsors:** [ZephyrCloudIO](https://github.com/ZephyrCloudIO) · [gqf2008](https://github.com/gqf2008) · [alistairheath](https://github.com/alistairheath)
 
 [**🎯 Become a Sponsor**](https://github.com/sponsors/Michael-A-Kuykendall)
 
