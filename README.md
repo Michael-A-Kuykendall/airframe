@@ -144,11 +144,11 @@ graph TD
 ```
 Shimmy (server) → airframe (engine)
                               │
-          ┌───────────────────┼───────────────────┐
+          ┌────────────────────┬────────────────────┐
           ▼                   ▼                   ▼
    core/ (GGUF)        spec/ (metadata)     runtime/ (engine)
           │                   │                   │
-          └───────────────────┴───────────────────┘
+          └────────────────────┴────────────────────┘
                               ▼
               backend/bindless/ (WebGPU shaders)
                               │
@@ -245,15 +245,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. See [CHANGELOG.md](CHANGE
 
 ---
 
-## Sponsor Airframe
+## Support
 
-- **$5/month**: Coffee tier ☕ — Sponsor badge + name in [SPONSORS.md](SPONSORS.md)
-- **$25/month**: Supporter 🐛 — Priority support + name in [SPONSORS.md](SPONSORS.md)
-- **$100/month**: Corporate backer 🏢 — Logo placement + release recognition
-- **$500/month**: Enterprise partner 🚀 — Office hours + roadmap consultation
+This project is independently maintained and free forever. Sponsorship helps fund ongoing development, certification, compatibility work, and releases.
 
+[Sponsor on GitHub](https://github.com/sponsors/Michael-A-Kuykendall) · [Buy Me a Coffee](https://www.buymeacoffee.com/michaelakuykendall)
 
-[**🎯 Become a Sponsor**](https://github.com/sponsors/Michael-A-Kuykendall)
+Any amount is appreciated. Suggested tiers:
+
+- **$5/month** — Thanks
+- **$15/month** — Supporter
+- **$50/month** — Backer
+- **Custom** — [Email for invoicing](mailto:michaelallenkuykendall@gmail.com)
 
 ---
 
