@@ -8,12 +8,7 @@
 </div>
 
 Airframe is the engine behind [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy).
-**Default dependency licensing:** Shimmy → Airframe → libfse. Airframe depends
-on libfse 0.1.4 under the FSE Noncommercial Evaluation License. Commercial use
-or embedding of the default distribution requires separate permission for
-libfse, as do derivative works under its terms. Airframe's MIT license does
-not waive those restrictions; the complete default distribution is not
-unrestricted open source. See [libfse licensing](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE).
+**Default dependency licensing:** Shimmy → Airframe → libfse. Shimmy is Apache-2.0; Airframe and airframe-observe are MIT; ShimmyTok is MIT OR Apache-2.0. The [libfse 0.1.4 additional Apache-2.0 grant](https://github.com/Michael-A-Kuykendall/airframe/blob/8efb1e7a830b0822cfc5ac1b121e149948d5ffe3/crates/libfse/LICENSE-GRANT-0.1.4.md) permits commercial use, modification, redistribution and incorporation into products without separate commercial permission. The original crates.io archive and metadata remain unchanged. Preserve component and third-party notices; see [stack licensing](LICENSING.md).
 
 The runtime uses Rust, wgpu and WGSL. A backend API being portable does not mean
 a model, operating system, driver or GPU has passed numerical certification.
@@ -130,12 +125,7 @@ without explicit maintainer approval.
 
 ## Ecosystem and licensing
 
-Runtime: MIT, see [LICENSE](LICENSE).
-The **separately licensed libfse** uses the
-[FSE Noncommercial Evaluation License](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE); commercial use,
-embedding in products and derivative works require separate permission.
-Its patent and third-party notices remain intact. airframe-observe is MIT with
-its separate pending-patent notice. This README does not waive either notice.
+Runtime: MIT, see [LICENSE](LICENSE). Observe is MIT; libfse is available under the [additional Apache-2.0 grant](https://github.com/Michael-A-Kuykendall/airframe/blob/8efb1e7a830b0822cfc5ac1b121e149948d5ffe3/crates/libfse/LICENSE-GRANT-0.1.4.md). These licenses permit commercial use subject to their terms. Preserve attribution and third-party licenses; see [stack licensing](LICENSING.md).
 
 - [libfse policy scanner](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/README.md)
 - [airframe-observe facts and observers](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/airframe_observe/README.md)
@@ -163,7 +153,7 @@ Runtime MIT — see [LICENSE](LICENSE).
 
 **Inference runtime** (attention kernels, GGUF loader, quantization, WebGPU backend): MIT; see LICENSE and the separate component terms above.
 
-**FSE subsystem** (`crates/libfse`): separately licensed under [its own terms](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE), not covered by the runtime's MIT grant. Commercial use, embedding in products, or creation of derivative works requires a separate commercial license — contact michaelallenkuykendall@gmail.com. The existing pending-patent notice remains in that crate.
+**FSE subsystem** (`crates/libfse`): [Apache-2.0](crates/libfse/LICENSE), including the [additional grant for the existing 0.1.4 archive](https://github.com/Michael-A-Kuykendall/airframe/blob/8efb1e7a830b0822cfc5ac1b121e149948d5ffe3/crates/libfse/LICENSE-GRANT-0.1.4.md). No separate commercial permission is required; third-party rights and applicable notices remain.
 
 ---
 

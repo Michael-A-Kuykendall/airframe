@@ -12,7 +12,7 @@ The Cargo requirement is dzero = "0.1"; this coordinated candidate resolves **Dz
 
 These APIs do not implement GPU matrix arithmetic, validate model metadata, certify logits, fix driver failures or guarantee latency. Registered callbacks and fact processing have costs; observer count is not a universal constant-cost promise. Numerical certification requires a separately executed engine/reference comparison on exact fixtures and configurations.
 
-libfse performs byte-pattern policy scanning and returns violations; it has separate noncommercial licensing. This crate coordinates inference facts and observers using Dzero. Their responsibilities and licenses are distinct.
+libfse performs byte-pattern policy scanning and returns violations; its [additional Apache-2.0 grant](https://github.com/Michael-A-Kuykendall/airframe/blob/8efb1e7a830b0822cfc5ac1b121e149948d5ffe3/crates/libfse/LICENSE-GRANT-0.1.4.md) permits commercial use without separate permission. This crate coordinates inference facts and observers using Dzero. Their responsibilities and licenses are distinct.
 
 ```toml
 [dependencies]
@@ -31,4 +31,4 @@ Contact: michaelallenkuykendall@gmail.com
 
 ## License
 
-MIT
+[MIT](LICENSE). See [stack licensing](../../LICENSING.md) for the distinct component licenses, third-party obligations and immutable archive/additional-grant boundary.

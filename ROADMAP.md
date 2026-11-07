@@ -55,10 +55,7 @@ consolidation; no consolidation or new inference capability is delivered here.
 **Boundaries:** callers must invoke the scanner and honor violations before
 acting on rejected data. Byte-pattern matching is not general semantic
 understanding, inference certification or a universal security guarantee.
-The FSE Noncommercial Evaluation License requires separate permission for
-commercial use, embedding in products and derivative works; see the
-[license](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE).
-No rights are expanded by this roadmap.
+libfse 0.1.4 is covered by the [additional Apache-2.0 grant](https://github.com/Michael-A-Kuykendall/airframe/blob/8efb1e7a830b0822cfc5ac1b121e149948d5ffe3/crates/libfse/LICENSE-GRANT-0.1.4.md), including commercial use, modification and redistribution without separate permission. The original archive remains unchanged. See [stack licensing](LICENSING.md).
 
 ## airframe-observe 0.1.4
 

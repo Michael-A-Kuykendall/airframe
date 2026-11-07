@@ -29,8 +29,4 @@ release workflows to debug locally reproducible failures.
 
 ## License boundaries
 
-The inference runtime is MIT; see [LICENSE](LICENSE). libfse has its
-[FSE Noncommercial Evaluation License](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE), including separate
-permission for commercial use, product embedding and derivatives. Contact the
-owner before contributing to it. Existing patent and attribution notices must
-be preserved. Observe is MIT with its own pending-patent notice.
+The inference runtime and Observe are MIT. libfse is Apache-2.0, including the [additional grant for the existing 0.1.4 archive](https://github.com/Michael-A-Kuykendall/airframe/blob/8efb1e7a830b0822cfc5ac1b121e149948d5ffe3/crates/libfse/LICENSE-GRANT-0.1.4.md). Commercial use, embedding, modification and redistribution are permitted subject to the applicable terms, without separate commercial permission. Preserve third-party attribution and applicable copyright/patent notices; see [stack licensing](LICENSING.md). Contributor admission and maintainer approval requirements above remain unchanged.

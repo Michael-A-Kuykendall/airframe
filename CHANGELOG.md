@@ -1,5 +1,10 @@
 # Changelog
 
+## Postpublication licensing correction — 2026-11-07
+
+- libfse 0.1.4 has a public [additional Apache-2.0 grant](https://github.com/Michael-A-Kuykendall/airframe/blob/8efb1e7a830b0822cfc5ac1b121e149948d5ffe3/crates/libfse/LICENSE-GRANT-0.1.4.md) for the exact existing archive, permitting commercial use, modification and redistribution. Original crate bytes, metadata and tags remain unchanged. See [stack licensing](LICENSING.md).
+
+
 ## [0.4.5] — 2026-11-06
 
 - Exclude development housekeeping files and internal tracker references from crate archives; preserve runtime behavior and existing license rights.
@@ -9,7 +14,7 @@
 - Documentation errata: separate validated F32/reference dense fixtures from structural parsing, experimental kernels and INT4; remove unsupported deterministic, throughput and portability guarantees. Correct runtime API and profiling examples, broken report links, dependency prose and maintainer contribution policy. No inference or dependency changes.
 
 - Update the pinned Tokio to Tokio 1.53.3 for the AsyncFd unsoundness correction without unrelated dependency changes.
-- Package the MIT license document and distinguish the separately licensed FSE Noncommercial Evaluation License; its existing commercial and derivative-work restrictions remain.
+- Historical archive metadata: the original libfse package used the FSE Noncommercial Evaluation License. Those earlier restrictions are superseded for the licensor's rights by the additional grant above; the Airframe runtime remains MIT.
 
 
 - Coordinate ShimmyTok 0.8.5, Observe 0.1.4 and libfse 0.1.4 so registry packages represent the tested source.
