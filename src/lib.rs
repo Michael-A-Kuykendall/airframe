@@ -7,8 +7,10 @@ pub mod conformance;
 pub mod control;
 pub mod core;
 pub mod debug_trace;
+pub mod execution;
 pub mod fixtures;
 pub mod grammar;
+pub mod model_descriptor;
 pub mod runtime;
 pub mod validation;
 

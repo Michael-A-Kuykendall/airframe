@@ -5,6 +5,7 @@ pub mod pipeline;
 pub mod pool_encoder;
 pub mod pool_timestamp;
 pub mod preflight;
+pub(crate) mod profiling;
 
 pub mod pipeline_shift;
 #[cfg(test)]

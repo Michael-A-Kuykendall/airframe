@@ -27,6 +27,47 @@ pub fn d0_run_budget() -> RunBudget {
     RunBudget::default()
 }
 
+/// Failure to complete the finite inference fact graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsfRunError {
+    BudgetOverflow,
+    BudgetExhausted,
+    MissingTerminalReason,
+}
+impl std::fmt::Display for IsfRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::BudgetOverflow => "ISF request work bound exceeds u32",
+            Self::BudgetExhausted => "ISF request work budget exhausted",
+            Self::MissingTerminalReason => "ISF saturated without a terminal reason",
+        })
+    }
+}
+impl std::error::Error for IsfRunError {}
+
+/// Finite bound for the current graph: at most five facts per prompt position
+/// (token, unique request/ready, KV advance/written), sixteen per output token
+/// including dispatch/yield bookkeeping, and two per pre-existing tensor fact.
+/// Slack covers prefill, terminal and fixed structural facts. Rounds count facts
+/// in dzero 0.1, so both limits must scale with the admitted request.
+pub fn request_run_budget(
+    prompt_tokens: usize,
+    max_tokens: usize,
+    existing_facts: usize,
+) -> Result<RunBudget, IsfRunError> {
+    let work = prompt_tokens
+        .checked_mul(6)
+        .and_then(|n| max_tokens.checked_mul(16).and_then(|g| n.checked_add(g)))
+        .and_then(|n| existing_facts.checked_mul(2).and_then(|t| n.checked_add(t)))
+        .and_then(|n| n.checked_add(64))
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or(IsfRunError::BudgetOverflow)?;
+    Ok(RunBudget {
+        max_facts: work,
+        max_rounds: work,
+    })
+}
+
 /// Decision returned by an `IsfControlHook`.
 ///
 /// Mirrors airframe's `ControlDecision` so the fabric (which must NOT depend on
@@ -579,7 +620,7 @@ impl InferenceSaturationFabric {
                         }
                         if let Some(trace) = &s.trace {
                             if let Ok(mut t) = trace.lock() {
-                                t(*step as usize, &logits, elapsed_ms as f64);
+                                t(s.all_token_ids.len().saturating_sub(s.prompt_len as usize), &logits, elapsed_ms as f64);
                             }
                         }
                     }
@@ -599,7 +640,7 @@ impl InferenceSaturationFabric {
                     let decision = {
                         let s = state_ref.lock().unwrap();
                         s.control.as_ref().map(|c| {
-                            c(next_token as usize, &s.generated_text, *step as usize, &s.all_token_ids, (s.prompt_len + *step) as usize)
+                            c(next_token as usize, &s.generated_text, s.all_token_ids.len().saturating_sub(s.prompt_len as usize), &s.all_token_ids, s.all_token_ids.len())
                         })
                     };
                     if let Some(d) = decision {
@@ -777,30 +818,35 @@ impl InferenceSaturationFabric {
     /// Assert all prompt tokens and run to fixpoint.
     /// Returns the complete generated text.
     pub fn generate(&mut self, token_ids: &[u32]) -> GenerateOutput {
-        // Assert all prompt tokens — Tier 1 structural facts
+        self.try_generate(token_ids)
+            .expect("ISF generation failed; use try_generate to handle scheduler errors")
+    }
+    pub fn try_generate(&mut self, token_ids: &[u32]) -> Result<GenerateOutput, IsfRunError> {
+        let max_tokens = self.state.lock().unwrap().max_tokens as usize;
+        let budget = request_run_budget(token_ids.len(), max_tokens, self.fabric.fact_count())?;
         for (pos, &id) in token_ids.iter().enumerate() {
             self.fabric.assert(InferenceFact::PromptToken {
                 position: pos as u32,
                 token_id: id,
             });
         }
-
-        // Run to fixpoint — the fabric drives everything from here
-        self.fabric.run_to_fixpoint(RunBudget::default());
-
-        // Extract results
-        let state = self.state.lock().unwrap();
-        let halt_reason = state.halt.clone().unwrap_or(HaltReason::MaxTokensReached);
-        let tokens_generated = state
-            .all_token_ids
-            .len()
-            .saturating_sub(state.prompt_len as usize);
-
-        GenerateOutput {
-            text: state.generated_text.clone(),
-            tokens_generated,
-            halt_reason,
+        let run = self.fabric.run_to_fixpoint(budget);
+        if !run.saturated {
+            return Err(IsfRunError::BudgetExhausted);
         }
+        let state = self.state.lock().unwrap();
+        let halt_reason = state
+            .halt
+            .clone()
+            .ok_or(IsfRunError::MissingTerminalReason)?;
+        Ok(GenerateOutput {
+            text: state.generated_text.clone(),
+            tokens_generated: state
+                .all_token_ids
+                .len()
+                .saturating_sub(state.prompt_len as usize),
+            halt_reason,
+        })
     }
 }
 

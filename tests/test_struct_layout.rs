@@ -80,6 +80,7 @@ fn layer_params_rust_layout() -> Vec<(&'static str, u32)> {
         ),
         ("head_dim", offset_of!(LayerParams, head_dim) as u32),
         ("rope_dim", offset_of!(LayerParams, rope_dim) as u32),
+        ("rope_neox", offset_of!(LayerParams, rope_neox) as u32),
         ("rms_eps", offset_of!(LayerParams, rms_eps) as u32),
         ("ffn_dim", offset_of!(LayerParams, ffn_dim) as u32),
         ("temp_stride", offset_of!(LayerParams, temp_stride) as u32),

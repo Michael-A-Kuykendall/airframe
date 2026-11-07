@@ -1,253 +1,150 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/airframe/main/assets/airframe-logo.png" alt="Airframe" width="480" height="auto" />
 
-  ### Pure-Rust WebGPU Inference Engine for GGUF Models
+  ### Airframe 0.4.5 — Rust/WGSL dense inference engine
 
   [![Crates.io](https://img.shields.io/crates/v/airframe.svg)](https://crates.io/crates/airframe)
-  [![CI](https://github.com/Michael-A-Kuykendall/airframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Michael-A-Kuykendall/airframe/actions/workflows/ci.yml)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-  [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://rustup.rs/)
-  [![GitHub Stars](https://img.shields.io/github/stars/Michael-A-Kuykendall/airframe?style=social)](https://github.com/Michael-A-Kuykendall/airframe/stargazers)
-  [![Powered by Shimmy](https://img.shields.io/badge/powers-Shimmy-blueviolet)](https://github.com/Michael-A-Kuykendall/shimmy)
-
-  **No C++ toolchain. No Python. No llama.cpp. Just Rust and your GPU.**
 </div>
 
-Airframe is independently maintained and free forever. [Sponsorship](https://github.com/sponsors/Michael-A-Kuykendall) funds certification, compatibility work, and releases.
+Airframe is the engine behind [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy).
+**Default dependency licensing:** Shimmy → Airframe → libfse. Airframe depends
+on libfse 0.1.4 under the FSE Noncommercial Evaluation License. Commercial use
+or embedding of the default distribution requires separate permission for
+libfse, as do derivative works under its terms. Airframe's MIT license does
+not waive those restrictions; the complete default distribution is not
+unrestricted open source. See [libfse licensing](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE).
 
----
+The runtime uses Rust, wgpu and WGSL. A backend API being portable does not mean
+a model, operating system, driver or GPU has passed numerical certification.
 
-Airframe is the GPU inference core powering [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy). It runs full transformer inference directly on the GPU via WGSL compute shaders — works on NVIDIA, AMD, Intel, integrated GPUs, and Apple Silicon.
+**0.4.5:** shared checked GGUF parsing, validated dense descriptors/execution
+plans, typed model admission, RoPE frequency factors, request state isolation,
+Q/K normalization ownership and complete tensor-span window planning.
+See [CHANGELOG](CHANGELOG.md) and the [workspace roadmap](ROADMAP.md).
 
-**What's new:** Certification pipeline consolidated into a clean 3-box regimen (MATH + INFERENCE + DETERMINISM) with 26 model/quant combos across 12 families, metadata-driven architecture (norm/gating derived from GGUF tensor presence, not arch strings), TurboShimmy `TURBO_KV=int4` opt-in for large models, and window-aware bind groups enabling >8-slot tensor spans. See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+## Release contract
+
+Airframe admits validated dense **Llama and Qwen3** plans. Missing required
+metadata, unsupported operations, graphs and kernel configurations reject
+explicitly. Parsing a quantization or tokenizer does not prove a whole model
+can execute correctly. Gemma2, MoE, MLA, recurrent/hybrid, state-space and
+multimodal executors are not enabled.
+
+The tested path uses **F32 KV and reference kernels**, with independent
+dequantized-FP32 reference logits; maximum absolute error 0.1 and RMS 0.03.
+These bounds and matching greedy decisions apply to exact tested fixtures,
+not every model carrying the same family name.
+
+| Fixture | Executed scope |
+|---|---|
+| Llama 3.2 3B Instruct Q4_K_M | context 512 |
+| Qwen3-0.6B Q4_K_M | selected context 512, 2048, 4096 and 8192 modes |
+| Qwen3-1.7B Q4_K_M | original 2032-token request, context 2048 |
+
+Exact hashes, prompt IDs and mode limitations are in
+[Shimmy's fixture matrix](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/SUPPORTED_MODELS.md).
+Executed GPU evidence used NVIDIA through **WSL Dozen/Vulkan**. The
+device-destruction and active-generation device-loss investigations remain open;
+numerical parity is not WSL stability certification.
+
+**NOT_RUN:** Metal/M4, native Windows/macOS/Linux GPU correctness, extended-context
+Llama, larger unlisted Qwen fixtures, distinct alternate prefill chunks, INT4 KV
+and experimental kernels. Do not infer those results from CI, parsing or
+successful compilation.
+
+## Library use
 
 ```toml
 [dependencies]
-airframe = "0.4"
+airframe = "0.4.5"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-> **Patent Notice**: The Fused Semantic Execution (FSE) subsystem (`crates/libfse`) is covered by a pending US patent. The WebGPU inference runtime (attention, GGUF loader, quantization) is unencumbered MIT. See [license section](#license) for full terms.
-
----
-
-## Why Airframe?
-
-Most Rust LLM inference libraries are thin wrappers around llama.cpp — they require a C++ toolchain, link against native libraries, and make cross-compilation painful. Airframe is different:
-
-| | Airframe | llama.cpp bindings |
-|---|---|---|
-| Build toolchain | `cargo build` | C++ compiler required |
-| GPU backend | WebGPU (wgpu) — NVIDIA, AMD, Intel, integrated | CUDA / Metal / Vulkan |
-| Cross-compilation | Native Rust | Complex |
-| Determinism | Guaranteed per-configuration | Platform-dependent |
-| Dependency count | Minimal | Large C++ dep tree |
-| `cargo publish` friendly | ✅ | ❌ |
-
----
-
-## Quick Start
-
-```rust
+```rust,no_run
+use std::path::Path;
 use airframe::runtime::gpu::{GpuRuntime, SamplingParams};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = GpuRuntime::load("path/to/model.gguf").await?;
-    let output = runtime
-        .generate("The capital of France is", SamplingParams::default(), None)
-        .await?;
-    println!("{}", output);
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let runtime = GpuRuntime::load(Path::new("path/to/model.gguf")).await?;
+    let text = runtime.generate(
+        "The capital of France is", &SamplingParams::default(),
+        None, None, None, None,
+    )?;
+    println!("{text}");
     Ok(())
 }
 ```
 
-See [`examples/`](examples/) for tokenizer and GPU probe examples, and the full inference path in the [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy) server.
+Use an admitted model with its required metadata and sufficient device limits.
+The path above is a placeholder, not a downloaded fixture. Loading does not
+certify arbitrary GGUF files. For a running server, use
+[Shimmy's quickstart](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/quickstart.md).
 
----
+## Components and precision
 
-## Supported Architectures
+- `core` and the shared ShimmyTok manifest parser validate tensor types, shapes,
+  spans and metadata; descriptors and per-layer plans restrict execution.
+- `backend/bindless` provides quantized weight decoding, projections, norms,
+  RoPE, attention, FFN and sampling support through wgpu/WGSL.
+- CPU dequantizers include F32/F16 and Q4_0/Q5_0/Q8_0/Q4_K/Q5_K/Q6_K.
+  Decoder presence is not certification of every tensor layout/model.
+- `runtime` manages generation and request-owned state. Repeated results are
+  checked on declared configurations; there is no cross-machine/backend
+  bit-identical or universal deterministic-output guarantee.
+- libfse scans policy bytes/actions; callers must honor violations. Work includes
+  matched actions, so it is not unconditionally constant in rule count.
+- airframe-observe coordinates inference facts and callbacks using Dzero.
+  Observation alone does not establish GPU arithmetic correctness.
 
-| Architecture | Models | Status |
-|---|---|---|
-| **Llama** | Llama 3.2, Llama 3.1, Llama 3, Llama 2, TinyLlama, DeepSeek | ✅ Certified |
-| **Mistral** | Mistral 7B, Ministral-3-14B, Mixtral (dense layers) | ✅ Certified |
-| **Phi** | Phi-3.5, Phi-3-mini, Phi-2 | ✅ Certified |
-| **Qwen2** | Qwen2 0.5B, 1.5B, 7B | ✅ Certified |
-| **Qwen3** | Qwen3 0.6B–8B + 4B-Thinking | ✅ Certified (QK-norm, head_dim=128) |
-| **Qwen3.5** | Qwen3.5-9B | ✅ Certified |
-| **Gemma2** | Gemma-2 2B, 9B | ✅ Certified |
-| **Gemma4** | Gemma-4 E4B, 12B-coder | ✅ Certified |
-| **StarCoder2** | StarCoder2 3B | ✅ Certified |
-| **Ministral** | Ministral-3-14B-Reasoning | ✅ Certified |
-| **DeepSeek-R1** | DeepSeek-R1-0528-Qwen3-8B | ✅ Certified |
-| **GPT-2** | GPT-2 | ✅ Supported |
+## Profiling and experimental code
 
-See [docs/SUPPORTED_MODELS.md in shimmy](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/SUPPORTED_MODELS.md) for the full certified-model matrix.
+Opt-in scalar timing is described in [PROFILING](docs/PROFILING.md).
+`AIRFRAME_TRACE_TIMING=1` enables reporting; absent GPU timestamps remain
+unmeasured rather than zero cost. Timings are specific to the actual adapter.
 
-> **Note on large models:** We support models up to 8B+ parameters and >4GiB GGUF files. However, not all supported models can be certified locally — very large models may exceed available GPU memory or require the `plan_layer_half_windows` tensor-scatter fix (the `dgd` epic, coming in v0.5.0). Certification coverage is prioritized by model popularity and quant type importance.
+INT4/TurboShimmy and cooperative/vectorized kernels remain experimental,
+uncertified and excluded from the validated 0.4.5 release contract. Validated
+admission rejects these configurations. Historical compression, throughput and
+quality figures are not current support guarantees. Leave those options disabled.
 
-## Supported Quantization
-
-`F32` · `F16` · `Q4_0` · `Q5_0` · `Q8_0` · `Q4_K` · `Q5_K` · `Q6_K`
-
-All quantization types are implemented in both GPU shader and CPU reference paths, validated by `quant_verify` (GPU/CPU dequant consistency) and per-layer certification — the same model produces numerically consistent output on CPU and GPU, within numerical tolerance.
-
----
-
-## Architecture
-
-Airframe is built around three principles:
-
-### 1. Bindless WebGPU Pipeline
-
-The GPU backend uses a bindless resource model — all weight tensors are uploaded once to GPU memory and addressed by index in the shader, eliminating per-layer bind group churn. This gives near-linear throughput scaling with context length.
-
-### 2. Fused Semantic Execution (FSE)
-
-The policy enforcement layer (`crates/libfse`) compiles multiple independent semantic rules into a single fused DFA evaluated during token generation. Rule evaluation cost is **O(1) in rule count** for shared selectors — a property that is not an optimization but an architectural inversion.
-
-```
-Input stream → Compiled DFA → Fused opcode table → Fail-closed decision
-                                (single pass)
-```
-
-See [`crates/libfse/README.md`](crates/libfse/README.md) for the full technical specification, patent notice, and architecture.
-
-### 3. Deterministic Sampling
-
-Given the same model file, seed, sampling parameters, and GPU/configuration, Airframe produces identical output on every run — across restarts and machines. This makes it suitable for reproducible evaluation pipelines.
-
----
-
-## Design Diagrams
-
-```mermaid
-graph TD
-    S["Shimmy<br/>(OpenAI-compatible server)"] --> A["airframe crate"]
-
-    subgraph A["airframe crate"]
-        direction TB
-        core["core/<br/>GGUF loader + tensors"]
-        spec["spec/<br/>metadata-driven arch"]
-        runtime["runtime/<br/>engine · KV cache · sampler"]
-        backend["backend/bindless/<br/>WebGPU WGSL shaders<br/>dequant · matmul · RoPE · attn<br/>window-aware bind groups"]
-        fse["crates/libfse/<br/>FSE policy engine<br/>Patent Pending"]
-
-        core --> backend
-        spec --> backend
-        runtime --> backend
-    end
-```
-
-**Text version:**
-
-```
-Shimmy (server) → airframe (engine)
-                              │
-          ┌────────────────────┬────────────────────┐
-          ▼                   ▼                   ▼
-   core/ (GGUF)        spec/ (metadata)     runtime/ (engine)
-          │                   │                   │
-          └────────────────────┴────────────────────┘
-                              ▼
-              backend/bindless/ (WebGPU shaders)
-                              │
-                              ▼
-                crates/libfse/ (FSE policy)
-```
-
----
-
-## ⚡ TurboShimmy INT4 KV Cache
-
-TurboShimmy is Airframe's on-GPU INT4 KV-cache compression system. It squeezes the KV cache from 32-bit floats down to per-head-vector 4-bit integers — entirely in WGSL compute shaders with no CPU roundtrips — delivering ~7× less KV VRAM with no measurable quality loss at normal context lengths.
-
-**One env var. ~7× less KV VRAM. Same output quality. Pure Rust, pure GPU.**
-
-```bash
-# Enable TurboShimmy (in the Shimmy server)
-SHIMMY_KV_QUANT=int4 SHIMMY_MAX_CTX=8192 /path/to/shimmy serve
-
-# Or with the prefill-chunk flag (prevents Windows TDR resets on long prompts)
-SHIMMY_KV_QUANT=int4 SHIMMY_PREFILL_CHUNK=8 SHIMMY_MAX_CTX=8192 /path/to/shimmy serve
-```
-
-**Why it matters** — TurboShimmy changes what fits on consumer GPUs:
-
-| GPU VRAM | Without TurboShimmy | With TurboShimmy |
-|---|---|---|
-| 3 GB | Llama-3.2-1B only | **Llama-3.2-3B fits ✅** |
-| 4 GB | Llama-3.2-3B, ctx=2048 (tight) | **Llama-3.2-3B at ctx=8192 ✅** |
-| 6 GB | 3B models, short context | **7B models with reasonable context ✅** |
-
-**VRAM savings (ctx=2048):**
-
-| Model | F32 KV | INT4 KV | Savings |
-|---|---|---|---|
-| TinyLlama 1.1B (Q4_0) | 88 MB | ~13 MB | **~7× less** |
-| Llama-3.2-1B (Q4_K_M) | ~128 MB | ~18 MB | **~7× less** |
-| Llama-3.2-3B (Q4_K_M) | ~512 MB | ~72 MB | **~7× less** |
-
-**How it works:** Each K/V head vector is independently quantized to 4-bit integers with a per-vector F32 scale factor (`max_abs / 7.0`), packed into U32s (8 nibbles each) by `sh_kv_pack_int4.wgsl`. Dequantization via `sh_kv_unpack_int4.wgsl` happens on-the-fly before each attention computation. The helical context-shift operates directly on the packed INT4 representation — no decompression needed. Zero CPU roundtrips throughout.
-
-**Quality validation:** Needle-in-a-haystack benchmarks on Llama-3.2-3B show zero retrieval degradation vs F32 at ctx≤2048 across all tested insertion depths (15%, 50%, 85%). See [`docs/turboshimmy.md`](docs/turboshimmy.md) and the [Shimmy wiki TurboShimmy page](https://github.com/Michael-A-Kuykendall/shimmy/wiki/TurboShimmy) for full benchmark data and setup guide.
-
-**Server environment variables**:
-
-| Variable | Default | Description |
-|---|---|---|
-| `SHIMMY_BASE_GGUF` | *(required)* | Path to `.gguf` model file |
-| `SHIMMY_PORT` | `11435` | HTTP listener port |
-| `SHIMMY_MAX_CTX` | `2048` | Maximum context window (tokens) |
-| `SHIMMY_PREFILL_CHUNK` | `64` | Prefill batch size; reduce to `8` if you see TDR crashes on Windows |
-| `SHIMMY_KV_QUANT` | `f32` | KV cache mode: `f32` or `int4` (TurboShimmy) |
-| `SHIMMY_VRAM_LIMIT_MB` | `10500` | VRAM budget warning threshold (MB); tune for your GPU |
-
----
-
-## Benchmarks
-
-Airframe has been validated on standard LLM evaluation benchmarks. Results are tracked in [`artifacts/`](artifacts/).
-
-The FSE policy layer benchmarks 27% faster than raw `aho-corasick` iterator on 7KB payloads (see `crates/libfse/AUDIT_INFO.md` for methodology).
-
-To run performance baselines:
-
-```bash
-cargo bench
-# or with a model (via Shimmy):
-/path/to/shimmy generate --model-path /path/to/model.gguf --prompt "Hello"
-```
-
----
+No startup-latency, context-scaling, benchmark-score, memory-budget or universal
+performance claim is made. Old references to unavailable TurboShimmy reports
+and artifact directories have been removed rather than presented as evidence.
 
 ## Development
 
 ```bash
 git clone https://github.com/Michael-A-Kuykendall/airframe
 cd airframe
-cargo build
-cargo test
+cargo build --locked
+cargo fmt --check
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. See [CHANGELOG.md](CHANGELOG.md) for release history.
+GPU/fixture tests need their exact models and backend. Compilation and generic
+unit tests do not certify a new model or platform. See
+[CONTRIBUTING](CONTRIBUTING.md), [examples](examples/) and the
+[release history](CHANGELOG.md). No hosted release runs or publication occur
+without explicit maintainer approval.
 
----
+## Ecosystem and licensing
 
-## Ecosystem
+Runtime: MIT, see [LICENSE](LICENSE).
+The **separately licensed libfse** uses the
+[FSE Noncommercial Evaluation License](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE); commercial use,
+embedding in products and derivative works require separate permission.
+Its patent and third-party notices remain intact. airframe-observe is MIT with
+its separate pending-patent notice. This README does not waive either notice.
 
-| Project | Description |
-|---|---|
-| [**Shimmy**](https://github.com/Michael-A-Kuykendall/shimmy) | OpenAI-compatible inference server — powered by Airframe |
-| [**libfse**](https://crates.io/crates/libfse) | Fused Semantic Execution policy engine — ships as part of this repo |
-| [**shimmytok**](https://crates.io/crates/shimmytok) | GGUF-native tokenizer used by both Airframe and Shimmy |
-| [**shimmyjinja**](https://github.com/Michael-A-Kuykendall/shimmyjinja) | Pure-Rust Jinja2 engine for HuggingFace `chat_template` strings — **live in v0.1.1**, powers the prompt rendering pipeline |
-
----
+- [libfse policy scanner](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/README.md)
+- [airframe-observe facts and observers](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/airframe_observe/README.md)
+- [ShimmyTok tokenizer and checked manifest](https://github.com/Michael-A-Kuykendall/shimmytok)
+- [ShimmyJinja templates](https://github.com/Michael-A-Kuykendall/shimmyjinja)
 
 ## Support
 
-This project is independently maintained and free forever. Sponsorship helps fund ongoing development, certification, compatibility work, and releases.
+This project is independently maintained. Licensing boundaries above apply to its components. Sponsorship helps fund ongoing development, certification, compatibility work, and releases.
 
 [Sponsor on GitHub](https://github.com/sponsors/Michael-A-Kuykendall) · [Buy Me a Coffee](https://www.buymeacoffee.com/michaelakuykendall)
 
@@ -262,11 +159,11 @@ Any amount is appreciated. Suggested tiers:
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Runtime MIT — see [LICENSE](LICENSE).
 
-**Inference runtime** (attention kernels, GGUF loader, quantization, WebGPU backend): unencumbered MIT.
+**Inference runtime** (attention kernels, GGUF loader, quantization, WebGPU backend): MIT; see LICENSE and the separate component terms above.
 
-**FSE subsystem** (`crates/libfse`): MIT for non-commercial use. The Fail-Closed Policy Fusion and Execution Kernel methods are covered by a pending US patent. Commercial embedding requires a separate license — contact michaelallenkuykendall@gmail.com.
+**FSE subsystem** (`crates/libfse`): separately licensed under [its own terms](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE), not covered by the runtime's MIT grant. Commercial use, embedding in products, or creation of derivative works requires a separate commercial license — contact michaelallenkuykendall@gmail.com. The existing pending-patent notice remains in that crate.
 
 ---
 

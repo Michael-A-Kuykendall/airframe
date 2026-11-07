@@ -37,6 +37,7 @@ pub struct GgufTensorInfo {
 
 /// GGUF file header
 #[derive(Debug)]
+#[cfg(test)]
 struct GgufHeader {
     version: u32,
     tensor_count: u64,
@@ -127,80 +128,67 @@ impl Model {
             LibshimmyError::Io(std::io::Error::other(format!("Failed to mmap file: {}", e)))
         })?;
 
-        let mut cursor = std::io::Cursor::new(&mmap[..]);
-
-        // Parse GGUF header
-        let header = parse_gguf_header(&mut cursor)?;
-        println!(
-            "📋 Header: version={}, tensor_count={}, metadata_kv_count={}",
-            header.version, header.tensor_count, header.metadata_kv_count
-        );
-
-        // Parse GGUF metadata (alignment + ModelSpec derivation)
-        let metadata_start_pos = cursor.position();
-        let metadata = parse_metadata(&mut cursor, header.metadata_kv_count)?;
-        let metadata_end_pos = cursor.position();
-        println!(
-            "📝 Metadata: {} bytes (pos {} -> {}), keys={} ",
-            metadata_end_pos - metadata_start_pos,
-            metadata_start_pos,
-            metadata_end_pos,
-            metadata.len()
-        );
-
-        if std::env::var("SHIMMY_DUMP_GGUF_METADATA").ok().as_deref() == Some("1") {
-            dump_metadata_keys(&metadata);
-        }
-
-        // Parse tensor info section with comprehensive instrumentation
-        let tensor_info_start_pos = cursor.position();
-        println!("\n📊 COMPREHENSIVE GGUF ANALYSIS:");
-        println!(
-            "📁 File length: {} bytes ({:.2} MB)",
+        let manifest = shimmytok::manifest::read_manifest(
+            std::io::Cursor::new(&mmap[..]),
             file_len,
-            file_len as f64 / 1024.0 / 1024.0
-        );
-        println!(
-            "📋 Header: version={}, tensor_count={}, metadata_kv_count={}",
-            header.version, header.tensor_count, header.metadata_kv_count
-        );
-        println!("📝 Metadata section: {} bytes", tensor_info_start_pos - 20);
-        println!(
-            "🔍 Tensor info starts at position: {}",
-            tensor_info_start_pos
-        );
-
-        // Check what's at this position
-        let mut peek_bytes = [0u8; 32];
-        let bytes_read = cursor.read(&mut peek_bytes).map_err(LibshimmyError::Io)?;
-        println!(
-            "👀 Next {} bytes: {:02x?}",
-            bytes_read,
-            &peek_bytes[..bytes_read]
-        );
-
-        // Reset position and try to parse tensor info directly
-
-        // Fix: Parse exactly metadata_kv_count (23) entries to maintain cursor alignment
-        cursor.set_position(tensor_info_start_pos);
-
-        println!("🔍 Parsing tensor infos sequentially after metadata (no scanning needed)");
-
-        // Parse tensor infos directly - they should be right after metadata
-        let tensor_infos =
-            parse_tensor_infos_with_validation(&mut cursor, header.tensor_count, file_len)?;
-
-        // CRITICAL: Get the tensor data base offset WITH ALIGNMENT
-        // GGUF spec: tensor data section starts at next aligned boundary after tensor infos
-        let alignment = get_general_alignment(&metadata, alignment_fallback)?;
-        let raw_offset = cursor.position();
-        let tensor_data_base_offset = align_up(raw_offset, alignment)?;
-        println!("🎯 Raw offset after tensor infos: {}", raw_offset);
-        println!(
-            "🎯 Tensor data starts at file offset: {} (aligned to {})",
-            tensor_data_base_offset, alignment
-        );
-
+            Default::default(),
+        )
+        .map_err(|e| LibshimmyError::FixtureError { msg: e.to_string() })?;
+        if !manifest.header().alignment_declared
+            && alignment_fallback.is_some_and(|a| a != u64::from(manifest.header().alignment))
+        {
+            return Err(LibshimmyError::FixtureError {
+                msg: "alignment fallback conflicts with authoritative GGUF default".into(),
+            });
+        }
+        let metadata: HashMap<_, _> = manifest
+            .header()
+            .values
+            .iter()
+            .map(|(key, value)| {
+                use shimmytok::gguf::GGUFValue as V;
+                let value = match value {
+                    V::U8(x) => GgufMetaValue::U8(*x),
+                    V::I8(x) => GgufMetaValue::I8(*x),
+                    V::U16(x) => GgufMetaValue::U16(*x),
+                    V::I16(x) => GgufMetaValue::I16(*x),
+                    V::U32(x) => GgufMetaValue::U32(*x),
+                    V::I32(x) => GgufMetaValue::I32(*x),
+                    V::U64(x) => GgufMetaValue::U64(*x),
+                    V::I64(x) => GgufMetaValue::I64(*x),
+                    V::F32(x) => GgufMetaValue::F32(*x),
+                    V::F64(x) => GgufMetaValue::F64(*x),
+                    V::Bool(x) => GgufMetaValue::Bool(*x),
+                    V::String(x) => GgufMetaValue::String(x.clone()),
+                    V::Array(x) => GgufMetaValue::Array {
+                        elem_type: manifest.header().array_element_types[key],
+                        len: x.len() as u64,
+                    },
+                };
+                (key.clone(), value)
+            })
+            .collect();
+        let tensor_infos: Vec<GgufTensorInfo> = manifest
+            .tensors()
+            .iter()
+            .map(|t| {
+                Ok(GgufTensorInfo {
+                    name: t.name().to_owned(),
+                    dimensions: t
+                        .dimensions()
+                        .iter()
+                        .map(|d| {
+                            usize::try_from(*d).map_err(|_| LibshimmyError::FixtureError {
+                                msg: "tensor dimension exceeds platform".into(),
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                    ggml_type: t.ggml_type(),
+                    offset: t.relative_offset(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let tensor_data_base_offset = manifest.data_start();
         let spec = model_spec_from_metadata(&metadata)?;
         println!("🧩 ModelSpec from metadata: {:?}", spec);
         let mut model = Model::new(spec);
@@ -246,24 +234,33 @@ pub fn load_mmproj_gguf_raw<P: AsRef<std::path::Path>>(
     let mmap = unsafe { Mmap::map(&file) }
         .map_err(|e| LibshimmyError::Io(std::io::Error::other(format!("mmap failed: {}", e))))?;
 
-    let mut cursor = std::io::Cursor::new(&mmap[..]);
-    let header = parse_gguf_header(&mut cursor)?;
-
-    println!(
-        "📁 mmproj: {} bytes ({:.1} MB), {} tensors",
+    let manifest = shimmytok::manifest::read_manifest(
+        std::io::Cursor::new(&mmap[..]),
         file_len,
-        file_len as f64 / 1_048_576.0,
-        header.tensor_count
-    );
-
-    let metadata = parse_metadata(&mut cursor, header.metadata_kv_count)?;
-    let tensor_infos =
-        parse_tensor_infos_with_validation(&mut cursor, header.tensor_count, file_len)?;
-
-    let alignment = get_general_alignment(&metadata, None).unwrap_or(32);
-    let raw_offset = cursor.position();
-    let tensor_data_base_offset = align_up(raw_offset, alignment)?;
-
+        Default::default(),
+    )
+    .map_err(|e| LibshimmyError::FixtureError { msg: e.to_string() })?;
+    let tensor_infos = manifest
+        .tensors()
+        .iter()
+        .map(|t| {
+            Ok(GgufTensorInfo {
+                name: t.name().to_owned(),
+                dimensions: t
+                    .dimensions()
+                    .iter()
+                    .map(|d| {
+                        usize::try_from(*d).map_err(|_| LibshimmyError::FixtureError {
+                            msg: "tensor dimension exceeds platform".into(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                ggml_type: t.ggml_type(),
+                offset: t.relative_offset(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let tensor_data_base_offset = manifest.data_start();
     Ok((tensor_infos, mmap, tensor_data_base_offset))
 }
 
@@ -279,6 +276,7 @@ pub fn load_vision_tensor(
 }
 
 /// Parse GGUF file header
+#[cfg(test)]
 fn parse_gguf_header<R: Read>(reader: &mut R) -> Result<GgufHeader> {
     // Check magic number "GGUF"
     let mut magic = [0u8; 4];
@@ -640,6 +638,8 @@ enum GgufMetaValue {
     F64(f64),
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn dump_metadata_keys(metadata: &HashMap<String, GgufMetaValue>) {
     let mut keys: Vec<_> = metadata.keys().cloned().collect();
     keys.sort();
@@ -945,28 +945,7 @@ fn optional_array_len(
     }
 }
 
-fn parse_metadata<R: Read + Seek>(
-    reader: &mut R,
-    kv_count: u64,
-) -> Result<HashMap<String, GgufMetaValue>> {
-    let mut out = HashMap::new();
-    for kv_idx in 0..kv_count {
-        let key = read_gguf_string(reader).map_err(|e| LibshimmyError::FixtureError {
-            msg: format!("Failed to read metadata key at KV {kv_idx}: {e}"),
-        })?;
-        let value_type = reader
-            .read_u32::<LittleEndian>()
-            .map_err(LibshimmyError::Io)?;
-
-        let value = read_gguf_value(reader, value_type).map_err(|e| LibshimmyError::FixtureError {
-            msg: format!("Failed to read metadata value for key '{key}' (type {value_type}) at KV {kv_idx}: {e}")
-        })?;
-
-        out.insert(key, value);
-    }
-    Ok(out)
-}
-
+#[cfg(test)]
 fn read_gguf_string<R: Read>(reader: &mut R) -> Result<String> {
     let len = reader
         .read_u64::<LittleEndian>()
@@ -981,6 +960,7 @@ fn read_gguf_string<R: Read>(reader: &mut R) -> Result<String> {
     Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
+#[cfg(test)]
 fn skip_gguf_string<R: Read + Seek>(reader: &mut R) -> Result<()> {
     let len = reader
         .read_u64::<LittleEndian>()
@@ -996,6 +976,7 @@ fn skip_gguf_string<R: Read + Seek>(reader: &mut R) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn read_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Result<GgufMetaValue> {
     // GGUF v3 type codes (gguf.h):
     // 0=u8 1=i8 2=u16 3=i16 4=u32 5=i32 6=f32 7=bool 8=string 9=array 10=u64 11=i64 12=f64
@@ -1120,46 +1101,7 @@ fn read_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Result<Gg
     })
 }
 
-fn get_general_alignment(
-    metadata: &HashMap<String, GgufMetaValue>,
-    alignment_fallback: Option<u64>,
-) -> Result<u64> {
-    let alignment = match metadata.get("general.alignment") {
-        Some(GgufMetaValue::U32(v)) => *v as u64,
-        Some(GgufMetaValue::U64(v)) => *v,
-        Some(other) => {
-            return Err(LibshimmyError::InvariantViolation {
-                msg: format!("general.alignment has unexpected type: {other:?}"),
-            });
-        }
-        None => {
-            if let Some(fallback) = alignment_fallback {
-                println!(
-                    "⚠️  Missing GGUF metadata key general.alignment; using explicit fallback alignment={}.",
-                    fallback
-                );
-                fallback
-            } else {
-                println!("⚠️  Missing GGUF metadata key general.alignment; defaulting to 32.");
-                32
-            }
-        }
-    };
-
-    ensure!(alignment > 0, "general.alignment must be > 0");
-    ensure!(
-        alignment.is_power_of_two(),
-        "general.alignment must be power-of-two, got {}",
-        alignment
-    );
-    ensure!(
-        alignment <= 256,
-        "general.alignment too large (max 256), got {}",
-        alignment
-    );
-    Ok(alignment)
-}
-
+#[cfg(test)]
 fn align_up(offset: u64, alignment: u64) -> Result<u64> {
     ensure!(alignment > 0, "alignment must be > 0");
     ensure!(
@@ -1193,134 +1135,6 @@ mod alignment_tests {
             other => panic!("expected InvariantViolation, got {other:?}"),
         }
     }
-}
-
-/// Parse tensor information with comprehensive validation and instrumentation
-fn parse_tensor_infos_with_validation<R: Read>(
-    reader: &mut R,
-    tensor_count: u64,
-    file_len: u64,
-) -> Result<Vec<GgufTensorInfo>> {
-    println!("\n📊 TENSOR ANALYSIS:");
-    println!(
-        "{:<4} {:<30} {:<15} {:<10} {:<15} {:<15} {:<10}",
-        "#", "Name", "Shape", "Type", "Offset", "Size (bytes)", "End Pos"
-    );
-    println!("{}", "-".repeat(100));
-
-    let mut tensor_infos = Vec::new();
-
-    for i in 0..tensor_count {
-        // Read tensor name
-        let name_len = reader.read_u64::<LittleEndian>().map_err(|e| {
-            println!("❌ Failed to read tensor {} name length: {}", i, e);
-            LibshimmyError::Io(e)
-        })?;
-
-        ensure!(
-            name_len <= 1000,
-            "Unreasonable tensor name length {} for tensor {}",
-            name_len,
-            i
-        );
-
-        let mut name_bytes = vec![0u8; name_len as usize];
-        reader.read_exact(&mut name_bytes).map_err(|e| {
-            println!("❌ Failed to read tensor {} name: {}", i, e);
-            LibshimmyError::Io(e)
-        })?;
-
-        let name = String::from_utf8(name_bytes).map_err(|e| LibshimmyError::FixtureError {
-            msg: format!("Invalid tensor name UTF-8: {}", e),
-        })?;
-
-        // Read dimensions
-        let n_dims = reader.read_u32::<LittleEndian>().map_err(|e| {
-            println!("❌ Failed to read tensor {} dimension count: {}", i, e);
-            LibshimmyError::Io(e)
-        })?;
-
-        let mut dimensions = Vec::new();
-        for _ in 0..n_dims {
-            let dim = reader.read_u64::<LittleEndian>().map_err(|e| {
-                println!("❌ Failed to read tensor {} dimension: {}", i, e);
-                LibshimmyError::Io(e)
-            })?;
-            dimensions.push(dim as usize);
-        }
-
-        // Read GGML type
-        let ggml_type = reader.read_u32::<LittleEndian>().map_err(|e| {
-            println!("❌ Failed to read tensor {} GGML type: {}", i, e);
-            LibshimmyError::Io(e)
-        })?;
-
-        // Read offset
-        let offset = reader.read_u64::<LittleEndian>().map_err(|e| {
-            println!("❌ Failed to read tensor {} offset: {}", i, e);
-            LibshimmyError::Io(e)
-        })?;
-
-        // Calculate tensor size based on type and dimensions with overflow protection
-        let element_count: usize = dimensions.iter().try_fold(1usize, |acc, &dim| {
-            acc.checked_mul(dim)
-                .ok_or_else(|| LibshimmyError::FixtureError {
-                    msg: format!("Dimension overflow for tensor '{}': {:?}", name, dimensions),
-                })
-        })?;
-
-        // Use fail-closed type system - no fallback to FP32 assumptions
-        let tensor_size_bytes =
-            ggml_type_bytes_per_tensor(ggml_type, element_count).map_err(|e| match e {
-                LibshimmyError::QuantUnsupported {
-                    ggml_type,
-                    type_name,
-                    ..
-                } => LibshimmyError::QuantUnsupported {
-                    tensor_name: name.clone(),
-                    ggml_type,
-                    type_name,
-                },
-                other => other,
-            })?;
-
-        let end_pos = offset + tensor_size_bytes as u64;
-
-        // Print tensor info
-        println!(
-            "{:<4} {:<30} {:<15} {:<10} {:<15} {:<15} {:<10}",
-            i,
-            if name.len() > 30 {
-                format!("{}...", &name[..27])
-            } else {
-                name.clone()
-            },
-            format!("{:?}", dimensions),
-            ggml_type,
-            offset,
-            tensor_size_bytes,
-            end_pos
-        );
-
-        // CRITICAL CHECK: Fail immediately if tensor extends beyond file
-        ensure!(
-            end_pos <= file_len,
-            "Tensor '{}' extends beyond file: end_pos={} > file_len={}",
-            name,
-            end_pos,
-            file_len
-        );
-
-        tensor_infos.push(GgufTensorInfo {
-            name,
-            dimensions,
-            ggml_type,
-            offset,
-        });
-    }
-
-    println!("\n✅ All {} tensor layouts are valid", tensor_count);
-    Ok(tensor_infos)
 }
 
 fn load_tensor_by_type(

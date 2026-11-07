@@ -1,10 +1,12 @@
 // Auto-split from pipeline.rs — types, struct, constructor, and helpers only.
 // Inference methods: see inference.rs, layer.rs, dequant.rs, matmul.rs
 
+mod capture_selection;
 pub(super) mod dequant;
 pub mod inference;
 pub(super) mod layer;
 pub(super) mod matmul;
+mod scratch_layout;
 
 //       pipeline/kv_cache.rs, pipeline/dispatch.rs — see C3 architectural debt.
 use super::loader::{BindlessModel, BlobWindow, BLOB_BINDING_SLOTS};
@@ -302,7 +304,46 @@ pub fn plan_layer_window(
     Ok((Some(window), adjusted))
 }
 
-/// Model-bound wrapper around [`plan_layer_window`] for dispatch sites.
+/// Plans the dispatch window from complete validated tensor byte ranges.
+/// Tensor starts alone cannot cover a matrix whose tail crosses a chunk boundary.
+pub fn plan_layer_tensor_window(
+    offsets: &LayerOffsets,
+    blob_base_words: u32,
+    chunk_words: u32,
+    total_resident_chunks: usize,
+    tensor_spans: &[(u64, u64)],
+) -> Result<(Option<BlobWindow>, u32), String> {
+    let Some((mut min_word, mut max_word)) = offsets.word_span(blob_base_words) else {
+        return if tensor_spans.is_empty() {
+            Ok((None, blob_base_words))
+        } else {
+            Err("descriptor tensors present but layer offsets are empty".into())
+        };
+    };
+    if tensor_spans.is_empty() {
+        return Err("active layer offsets have no validated descriptor tensor spans".into());
+    }
+    // Preserve the sentinel word before the first tensor, as admission does.
+    // Otherwise an exactly aligned tensor would need a negative local base.
+    min_word = min_word.min(blob_base_words);
+    for &(start, bytes) in tensor_spans {
+        let last = start
+            .checked_add(bytes.checked_sub(1).ok_or("empty tensor span")?)
+            .ok_or("tensor span overflow")?;
+        let first_word =
+            u32::try_from(start / 4).map_err(|_| "tensor start exceeds word address space")?;
+        let last_word =
+            u32::try_from(last / 4).map_err(|_| "tensor end exceeds word address space")?;
+        min_word = min_word.min(first_word);
+        max_word = max_word.max(last_word);
+    }
+    let window = BlobWindow::for_range(min_word, max_word, chunk_words, total_resident_chunks)?;
+    let adjusted = blob_base_words
+        .checked_sub(window.window_base_words())
+        .ok_or("window starts after layer base")?;
+    Ok((Some(window), adjusted))
+}
+/// Model-bound wrapper around [`plan_layer_tensor_window`] for dispatch sites.
 ///
 /// # Panics
 /// Panics if the layer's tensor span cannot be covered by
@@ -314,13 +355,35 @@ pub fn resolve_layer_window(
     blob_base_words: u32,
     layer_idx: usize,
 ) -> (Option<BlobWindow>, u32) {
-    plan_layer_window(
+    try_resolve_layer_window(model, offsets, blob_base_words, layer_idx)
+        .unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// Checked production planner; rejects inconsistent metadata before dispatch.
+pub fn try_resolve_layer_window(
+    model: &BindlessModel,
+    offsets: &LayerOffsets,
+    blob_base_words: u32,
+    layer_idx: usize,
+) -> Result<(Option<BlobWindow>, u32), String> {
+    let prefix = format!("blk.{layer_idx}.");
+    let spans: Vec<_> = model
+        .validated()
+        .plan()
+        .descriptor()
+        .bindings()
+        .iter()
+        .filter(|tensor| tensor.name.starts_with(&prefix))
+        .map(|tensor| (tensor.offset, tensor.bytes))
+        .collect();
+    plan_layer_tensor_window(
         offsets,
         blob_base_words,
         model.chunk_words(),
         model.total_resident_chunks,
+        &spans,
     )
-    .unwrap_or_else(|e| panic!("layer {} window planning failed: {}", layer_idx, e))
+    .map_err(|e| format!("layer {layer_idx} window planning failed: {e}"))
 }
 
 /// One half-window result: `Some((window, window_local_base_words))` when that
@@ -568,11 +631,16 @@ pub struct BindlessPipeline {
     // Split Layer Pipelines
     pub layer_pipeline_attn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_qkv: wgpu::ComputePipeline,
+    pub(crate) layer_pipeline_qkv_cooperative: Option<wgpu::ComputePipeline>,
     pub layer_pipeline_qk_norm: wgpu::ComputePipeline,
     pub layer_pipeline_attn_out: wgpu::ComputePipeline,
     pub layer_pipeline_attn_proj: wgpu::ComputePipeline,
+    pub(crate) layer_pipeline_attn_proj_cooperative: Option<wgpu::ComputePipeline>,
     pub layer_pipeline_ffn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_ffn_proj: wgpu::ComputePipeline,
+    pub(crate) layer_pipeline_ffn_proj_staged: Option<wgpu::ComputePipeline>,
+    pub(crate) layer_pipeline_ffn_proj_vectorized: Option<wgpu::ComputePipeline>,
+    pub(crate) layer_pipeline_ffn_down_cooperative: Option<wgpu::ComputePipeline>,
     pub layer_pipeline_ffn_down: wgpu::ComputePipeline,
     pub layer_pipeline_post_attn_norm: wgpu::ComputePipeline,
     pub layer_pipeline_post_ffw_norm: wgpu::ComputePipeline,
@@ -588,6 +656,257 @@ pub struct BindlessPipeline {
     pub layer_pipeline_attn_out_int4: wgpu::ComputePipeline,
     pub quantize_kv_layout: wgpu::BindGroupLayout,
     pub quantize_kv_pipeline: wgpu::ComputePipeline,
+}
+
+/// Reject unsupported or block-truncated rows before experimental dispatch.
+fn formula_row_supported(cols: u32, slot: u32) -> bool {
+    let block = match slot {
+        0 | 1 => 1,
+        2..=4 => 32,
+        5..=7 => 256,
+        _ => return false,
+    };
+    cols > 0 && cols.is_multiple_of(block)
+}
+
+/// Mirror the reference gated RMSNorm policy, including infer-from-offsets.
+#[cfg(test)]
+#[test]
+fn vectorized_ffn_guard_preserves_scalar_fallback() {
+    use bytemuck::Zeroable;
+    let mut p = LayerParams {
+        dim: 3072,
+        formula_ffn_gate: 5,
+        formula_ffn_up: 7,
+        ffn_kind_policy: 1,
+        ..LayerParams::zeroed()
+    };
+    let mut o = LayerOffsets {
+        ffn_gate: 64,
+        ..LayerOffsets::zeroed()
+    };
+    assert!(vectorized_ffn_eligible(&p, &o));
+    for slot in 0..=8 {
+        p.formula_ffn_gate = slot;
+        assert_eq!(vectorized_ffn_eligible(&p, &o), matches!(slot, 5 | 7));
+    }
+    p.formula_ffn_gate = 5;
+    for slot in 0..=8 {
+        p.formula_ffn_up = slot;
+        assert_eq!(vectorized_ffn_eligible(&p, &o), matches!(slot, 5 | 7));
+    }
+    p.formula_ffn_up = 7;
+    for dim in [0, 255, 257, 1023] {
+        p.dim = dim;
+        assert!(!vectorized_ffn_eligible(&p, &o));
+    }
+    p.dim = 3072;
+    p.layer_norm_enabled = 1;
+    assert!(!vectorized_ffn_eligible(&p, &o));
+    p.layer_norm_enabled = 0;
+    p.post_norm_enabled = 1;
+    assert!(!vectorized_ffn_eligible(&p, &o));
+    p.post_norm_enabled = 0;
+    o.ffn_norm_bias = 128;
+    assert!(!vectorized_ffn_eligible(&p, &o));
+    o.ffn_norm_bias = 0;
+    p.ffn_kind_policy = 2;
+    assert!(!vectorized_ffn_eligible(&p, &o));
+}
+
+fn vectorized_ffn_eligible(params: &LayerParams, offsets: &LayerOffsets) -> bool {
+    params.dim > 0
+        && params.dim.is_multiple_of(256)
+        && matches!(params.formula_ffn_gate, 5 | 7)
+        && matches!(params.formula_ffn_up, 5 | 7)
+        && staged_ffn_eligible(params, offsets)
+}
+
+fn staged_ffn_eligible(params: &LayerParams, offsets: &LayerOffsets) -> bool {
+    let gated =
+        params.ffn_kind_policy == 1 || (params.ffn_kind_policy == 0 && offsets.ffn_gate != 0);
+    gated
+        && params.layer_norm_enabled == 0
+        && params.post_norm_enabled == 0
+        && offsets.ffn_norm_bias == 0
+        && formula_row_supported(params.dim, params.formula_ffn_gate)
+        && formula_row_supported(params.dim, params.formula_ffn_up)
+}
+
+#[cfg(test)]
+#[test]
+fn cooperative_attn_projection_shape_guard() {
+    use bytemuck::Zeroable;
+    let mut p = LayerParams {
+        dim: 8,
+        head_count: 1,
+        head_dim: 256,
+        temp_stride: 272,
+        formula_attn_out: 5,
+        ..LayerParams::zeroed()
+    };
+    assert!(cooperative_attn_proj_eligible(&p));
+    p.temp_stride = 271;
+    assert!(!cooperative_attn_proj_eligible(&p));
+    p.temp_stride = 2048;
+    p.head_dim = 257;
+    assert!(!cooperative_attn_proj_eligible(&p));
+    p.formula_attn_out = 1;
+    assert!(cooperative_attn_proj_eligible(&p));
+    p.head_count = u32::MAX;
+    assert!(!cooperative_attn_proj_eligible(&p));
+    p.head_count = 1;
+    p.post_norm_enabled = 1;
+    assert!(!cooperative_attn_proj_eligible(&p));
+    p.post_norm_enabled = 0;
+    p.dim = 65536;
+    assert!(!cooperative_attn_proj_eligible(&p));
+}
+fn cooperative_attn_proj_eligible(params: &LayerParams) -> bool {
+    params.dim > 0
+        && params.dim <= 65535
+        && params.layer_norm_enabled == 0
+        && params.post_norm_enabled == 0
+        && params
+            .head_count
+            .checked_mul(params.head_dim)
+            .is_some_and(|cols| {
+                formula_row_supported(cols, params.formula_attn_out)
+                    && params
+                        .dim
+                        .checked_mul(2)
+                        .and_then(|d| d.checked_add(cols))
+                        .is_some_and(|end| end <= params.temp_stride)
+            })
+}
+fn cooperative_qkv_eligible(params: &LayerParams) -> bool {
+    let q = params.head_count.checked_mul(params.head_dim);
+    let kv = params.head_count_kv.checked_mul(params.head_dim);
+    params.layer_norm_enabled == 0
+        && params.post_norm_enabled == 0
+        && params.head_count_kv > 0
+        && params.head_count_kv <= params.head_count
+        && q.zip(kv)
+            .and_then(|(q, k)| k.checked_mul(2).and_then(|k| q.checked_add(k)))
+            .is_some_and(|n| n > 0 && n <= 65535)
+        && formula_row_supported(params.dim, params.formula_qk)
+        && formula_row_supported(params.dim, params.formula_v)
+}
+#[cfg(test)]
+#[test]
+fn cooperative_qkv_shape_guard_preserves_reference_fallback() {
+    use bytemuck::Zeroable;
+    let mut p = LayerParams {
+        dim: 256,
+        head_count: 3,
+        head_count_kv: 1,
+        head_dim: 4,
+        formula_qk: 5,
+        formula_v: 7,
+        ..LayerParams::zeroed()
+    };
+    assert!(cooperative_qkv_eligible(&p));
+    p.dim = 257;
+    assert!(!cooperative_qkv_eligible(&p));
+    p.formula_qk = 0;
+    p.formula_v = 1;
+    assert!(cooperative_qkv_eligible(&p));
+    p.formula_v = 8;
+    assert!(!cooperative_qkv_eligible(&p));
+    p.formula_v = 0;
+    p.head_count_kv = 0;
+    assert!(!cooperative_qkv_eligible(&p));
+    p.head_count_kv = 1;
+    p.post_norm_enabled = 1;
+    assert!(!cooperative_qkv_eligible(&p));
+    p.post_norm_enabled = 0;
+    p.layer_norm_enabled = 1;
+    assert!(!cooperative_qkv_eligible(&p));
+    p.layer_norm_enabled = 0;
+    p.head_count = u32::MAX;
+    p.head_dim = 2;
+    assert!(!cooperative_qkv_eligible(&p));
+    p.head_count = 65535;
+    assert!(!cooperative_qkv_eligible(&p));
+}
+fn cooperative_down_eligible(params: &LayerParams, offsets: &LayerOffsets, batch: u32) -> bool {
+    batch > 0
+        && batch <= 65_535
+        && formula_row_supported(params.ffn_dim, params.formula_ffn_down)
+        && staged_ffn_eligible(params, offsets)
+}
+
+#[cfg(test)]
+mod staged_ffn_policy_tests {
+    use super::*;
+    use bytemuck::Zeroable;
+    #[test]
+    fn cooperative_shape_guard_keeps_quant_tails_and_invalid_batches_on_reference() {
+        let mut p = LayerParams {
+            dim: 256,
+            ffn_dim: 256,
+            formula_ffn_down: 5,
+            ..LayerParams::zeroed()
+        };
+        let o = LayerOffsets {
+            ffn_gate: 64,
+            ..LayerOffsets::zeroed()
+        };
+        assert!(cooperative_down_eligible(&p, &o, 1));
+        assert!(cooperative_down_eligible(&p, &o, 3));
+        assert!(cooperative_down_eligible(&p, &o, 8));
+        assert!(cooperative_down_eligible(&p, &o, 65_535));
+        assert!(!cooperative_down_eligible(&p, &o, 0));
+        assert!(!cooperative_down_eligible(&p, &o, 65_536));
+        p.ffn_dim = 257;
+        assert!(!cooperative_down_eligible(&p, &o, 1));
+        p.formula_ffn_down = 0;
+        assert!(cooperative_down_eligible(&p, &o, 1));
+        p.formula_ffn_down = 8;
+        assert!(!cooperative_down_eligible(&p, &o, 1));
+        p.formula_ffn_down = 0;
+        p.ffn_dim = 0;
+        assert!(!cooperative_down_eligible(&p, &o, 1));
+        p.ffn_dim = 256;
+        p.ffn_kind_policy = 2;
+        assert!(!cooperative_down_eligible(&p, &o, 1));
+    }
+
+    #[test]
+    fn compatibility_and_explicit_policies_preserve_reference_fallback() {
+        let mut p = LayerParams {
+            dim: 256,
+            ..LayerParams::zeroed()
+        };
+        let mut o = LayerOffsets {
+            ffn_gate: 64,
+            ..LayerOffsets::zeroed()
+        };
+        assert!(staged_ffn_eligible(&p, &o));
+        o.ffn_gate = 0;
+        assert!(!staged_ffn_eligible(&p, &o));
+        p.ffn_kind_policy = 1;
+        assert!(staged_ffn_eligible(&p, &o));
+        p.ffn_kind_policy = 2;
+        assert!(!staged_ffn_eligible(&p, &o));
+        p.ffn_kind_policy = 1;
+        p.layer_norm_enabled = 1;
+        assert!(!staged_ffn_eligible(&p, &o));
+        p.layer_norm_enabled = 0;
+        p.post_norm_enabled = 1;
+        assert!(!staged_ffn_eligible(&p, &o));
+        p.post_norm_enabled = 0;
+        o.ffn_norm_bias = 128;
+        assert!(!staged_ffn_eligible(&p, &o));
+        o.ffn_norm_bias = 0;
+        p.dim = 257;
+        p.formula_ffn_gate = 5;
+        assert!(!staged_ffn_eligible(&p, &o));
+        p.formula_ffn_gate = 0;
+        assert!(staged_ffn_eligible(&p, &o));
+        p.formula_ffn_up = 8;
+        assert!(!staged_ffn_eligible(&p, &o));
+    }
 }
 
 impl BindlessPipeline {
@@ -1341,10 +1660,53 @@ impl BindlessPipeline {
             ],
         });
 
-        let layer_src = include_str!("../sh_layer_v1.wgsl");
+        let vectorized_ffn_requested =
+            std::env::var("AIRFRAME_EXPERIMENTAL_VECTORIZED_FFN").is_ok_and(|v| v == "1");
+        let staged_ffn_enabled = std::env::var("AIRFRAME_EXPERIMENTAL_STAGED_FFN")
+            .ok()
+            .as_deref()
+            == Some("1");
+        let cooperative_down_enabled = std::env::var("AIRFRAME_EXPERIMENTAL_COOPERATIVE_FFN_DOWN")
+            .ok()
+            .as_deref()
+            == Some("1");
+        let cooperative_qkv_enabled = std::env::var("AIRFRAME_EXPERIMENTAL_COOPERATIVE_QKV")
+            .ok()
+            .as_deref()
+            == Some("1");
+        let cooperative_attn_proj_enabled =
+            std::env::var("AIRFRAME_EXPERIMENTAL_COOPERATIVE_ATTN_PROJ")
+                .ok()
+                .as_deref()
+                == Some("1");
+        let mut layer_src: std::borrow::Cow<str> = include_str!("../sh_layer_v1.wgsl").into();
+        for (enabled, extra) in [
+            (
+                cooperative_attn_proj_enabled,
+                include_str!("../sh_attn_proj_cooperative.wgsl"),
+            ),
+            (
+                cooperative_qkv_enabled,
+                include_str!("../sh_qkv_cooperative.wgsl"),
+            ),
+            (staged_ffn_enabled, include_str!("../sh_ffn_staged.wgsl")),
+            (
+                staged_ffn_enabled && vectorized_ffn_requested,
+                include_str!("../sh_ffn_vectorized.wgsl"),
+            ),
+            (
+                cooperative_down_enabled,
+                include_str!("../sh_ffn_down_cooperative.wgsl"),
+            ),
+        ] {
+            if enabled {
+                layer_src.to_mut().push('\n');
+                layer_src.to_mut().push_str(extra);
+            }
+        }
         let layer_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Layer V1 Shader"),
-            source: wgpu::ShaderSource::Wgsl(layer_src.into()),
+            source: wgpu::ShaderSource::Wgsl(layer_src),
         });
 
         let layer_pipeline_layout =
@@ -1367,12 +1729,22 @@ impl BindlessPipeline {
 
         let layer_pipeline_attn_norm = mk_pipeline("main_attn_norm");
         let layer_pipeline_qkv = mk_pipeline("main_qkv");
+        let layer_pipeline_qkv_cooperative =
+            cooperative_qkv_enabled.then(|| mk_pipeline("main_qkv_cooperative"));
         let layer_pipeline_qk_norm = mk_pipeline("main_qk_norm");
         let layer_pipeline_attn_out = mk_pipeline("main_attn_out");
         let layer_pipeline_attn_proj = mk_pipeline("main_attn_proj");
+        let layer_pipeline_attn_proj_cooperative =
+            cooperative_attn_proj_enabled.then(|| mk_pipeline("main_attn_proj_cooperative"));
         let layer_pipeline_ffn_norm = mk_pipeline("main_ffn_norm");
         let layer_pipeline_ffn_proj = mk_pipeline("main_ffn_proj");
+        let layer_pipeline_ffn_proj_staged =
+            staged_ffn_enabled.then(|| mk_pipeline("main_ffn_proj_staged"));
+        let layer_pipeline_ffn_proj_vectorized = (staged_ffn_enabled && vectorized_ffn_requested)
+            .then(|| mk_pipeline("main_ffn_proj_vectorized"));
         let layer_pipeline_ffn_down = mk_pipeline("main_ffn_down");
+        let layer_pipeline_ffn_down_cooperative =
+            cooperative_down_enabled.then(|| mk_pipeline("main_ffn_down_cooperative"));
         let layer_pipeline_post_attn_norm = mk_pipeline("main_post_attn_norm");
         let layer_pipeline_post_ffw_norm = mk_pipeline("main_post_ffw_norm");
 
@@ -1859,11 +2231,16 @@ impl BindlessPipeline {
             rmsnorm_layout,
             layer_pipeline_attn_norm,
             layer_pipeline_qkv,
+            layer_pipeline_qkv_cooperative,
             layer_pipeline_qk_norm,
             layer_pipeline_attn_out,
             layer_pipeline_attn_proj,
+            layer_pipeline_attn_proj_cooperative,
             layer_pipeline_ffn_norm,
             layer_pipeline_ffn_proj,
+            layer_pipeline_ffn_proj_staged,
+            layer_pipeline_ffn_proj_vectorized,
+            layer_pipeline_ffn_down_cooperative,
             layer_pipeline_ffn_down,
             layer_pipeline_post_attn_norm,
             layer_pipeline_post_ffw_norm: layer_pipeline_post_ffw_norm.clone(),

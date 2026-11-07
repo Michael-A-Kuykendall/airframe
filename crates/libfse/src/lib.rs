@@ -4,9 +4,10 @@
 // PATENT PENDING. This library implements inventions covered by a pending US patent
 // application for Fail-Closed Semantic Enforcement methods.
 //
-// This source is distributed under the MIT license for non-commercial, evaluation,
-// and internal research purposes ONLY. Commercial use, embedding in products, or
-// creation of derivative works requires a separate commercial license.
+// This source is distributed under the FSE Noncommercial Evaluation License.
+// See LICENSE. Non-commercial, evaluation, and internal research purposes ONLY.
+// Commercial use, embedding in products, or creation of derivative works
+// requires a separate commercial license.
 // Contact: michaelallenkuykendall@gmail.com
 //
 // Portions of the graph compilation logic may utilize algorithms from `aho-corasick`

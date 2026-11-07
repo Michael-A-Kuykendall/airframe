@@ -1,11 +1,32 @@
 # Changelog
 
+## [0.4.5] — 2026-11-06
+
+- Exclude development housekeeping files and internal tracker references from crate archives; preserve runtime behavior and existing license rights.
+
+- Add the current workspace roadmap covering Airframe, libfse and airframe-observe, with delivered contracts, outstanding work and explicit untested/unsupported boundaries.
+
+- Documentation errata: separate validated F32/reference dense fixtures from structural parsing, experimental kernels and INT4; remove unsupported deterministic, throughput and portability guarantees. Correct runtime API and profiling examples, broken report links, dependency prose and maintainer contribution policy. No inference or dependency changes.
+
+- Update the pinned Tokio to Tokio 1.53.3 for the AsyncFd unsoundness correction without unrelated dependency changes.
+- Package the MIT license document and distinguish the separately licensed FSE Noncommercial Evaluation License; its existing commercial and derivative-work restrictions remain.
+
+
+- Coordinate ShimmyTok 0.8.5, Observe 0.1.4 and libfse 0.1.4 so registry packages represent the tested source.
+- Preserve validated dense-model admission, checked GGUF metadata, RoPE factors and request-isolated state. Reject unimplemented model graphs explicitly.
+- Include demonstrated query-scratch, Q/K normalization ownership and complete tensor-window corrections; no new kernel or performance change in this preparation.
+- Retain the exact certified Llama/Qwen fixture limits. Metal/M4, INT4, experimental kernels and untested families are not certified. WSL driver stability investigations remain open.
+- Resolve packages in dependency order, then verify the actual published registry lock and native artifacts after separate human approval. Private package checks do not claim public registry delivery.
+
+
 All notable changes to Airframe will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+Historical entries below preserve earlier release claims and commands; they do not define the 0.4.5 support contract. Use the current [README fixture matrix](README.md#release-contract).
 
 ## [0.4.4] — 2026-10-18
 
@@ -75,7 +96,6 @@ Plus re-certification of all 23 prior models under the new 3-box regimen. **26 t
 
 ### Infrastructure
 
-- **Beads issue tracking initialized** — `.beads/` Dolt-backed board for durable task tracking
 - **Cert regimen relocated to airframe** — Canonical cert tooling (`math_cert_one.sh`, `inference_exam.sh`, `cert/*.py`) now lives in the engine repo per `CERT_REGIMEN.md`; workspace-root copies scrubbed
 - **`ISF` remains default** — No feature flag needed for full functionality
 
@@ -114,7 +134,7 @@ Airframe now ships with a **full mathematical certification pipeline** that prov
 4. **Decode≡Prefill gate** — `decode_gate` proves decode output matches prefill output for the same tokens (catches silent bugs that only show up during token-by-token generation)
 5. **Logits gate** — final output logits compared against a golden-vault CPU reference, element-by-element
 
-**One command** runs the full pipeline: `scripts/certify_math.bat <family-id> <gguf> "multi-token prompt"`. Exit code 0 = certified. Full write-up: [docs/CERTIFICATION.md](docs/CERTIFICATION.md) in the shimmy repo.
+**One command** runs the full pipeline: `scripts/certify_math.bat <family-id> <gguf> "multi-token prompt"`. Exit code 0 = certified. Full write-up: [docs/CERTIFICATION.md](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/CERTIFICATION.md) in the shimmy repo.
 
 ### Highlights
 - **25 model-quant combos certified** across **11 model families** with full 5-gate verification
@@ -165,7 +185,6 @@ Airframe now ships with a **full mathematical certification pipeline** that prov
 - New binaries behind `--features isf`: `decode_gate`, `stack_dump_gpu`, `layer_dump_gpu`, `quant_verify`, `invariant_probe`, `kv_dump_probe`, `kv_head_probe`, `kv_chain_probe`
 - `scripts/cert/` — Python-based cert ledger, plan-vs-peel reds judge, regression tests
 - Workspace-level `cert/packages/` per-model directory with STATUS.md, MATH reports
-- `.beads/` — bead tracking system for certified models
 
 ### Documentation
 - `MATH_REGIMEN.md` — certification regimen with 5-gate definitions and NUM=1/2/0 table

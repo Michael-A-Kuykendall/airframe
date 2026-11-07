@@ -163,7 +163,7 @@ impl ModelSpec {
 
         // Temp buffer layout (must fit ALL intermediates at once):
         //   [0..n_embd]              = attn_norm output / activation copy
-        //   [n_embd..+q_len]         = Q vectors (n_head * head_dim)
+        //   [max(n_embd,q_len)..+q_len] = Q, disjoint from context writes [0..q_len]
         //   [+q_len..+kv_len]        = K vectors (n_head_kv * head_dim)
         //   [+kv_len..+kv_len]       = V vectors (n_head_kv * head_dim)
         //   [after KV..]             = attn scores or FFN gate + FFN up (ff_dim * 2)
@@ -171,7 +171,9 @@ impl ModelSpec {
         let kv_len = self.n_head_kv * self.head_dim; // = kv_dim
         let full_layout = self.n_embd + q_len + kv_len * 2 + self.ff_dim * 2;
         let ffn_scratch = self.ff_dim * 2 + self.n_embd;
-        let min_scratch = std::cmp::max(full_layout, ffn_scratch);
+        // Attention reads Q while writing context: their live ranges must not overlap.
+        let attention_scratch = self.n_embd.max(q_len) + q_len;
+        let min_scratch = std::cmp::max(full_layout, ffn_scratch).max(attention_scratch);
         // Round up to next 1024 boundary for GPU alignment
         self.temp_buffer_size = (min_scratch + 1023) & !1023;
 

@@ -1,0 +1,17 @@
+FSE Noncommercial Evaluation License
+
+Copyright (c) 2026 Michael Kuykendall / DZERO. All rights reserved.
+
+This source is distributed for non-commercial, evaluation, and internal research
+purposes ONLY. Commercial use, embedding in products, or creation of derivative
+works requires a separate commercial license.
+
+Contact: michaelallenkuykendall@gmail.com
+
+PATENT PENDING. This library implements inventions covered by a pending US patent
+application for Fail-Closed Semantic Enforcement methods.
+
+Portions of the graph compilation logic may utilize algorithms from aho-corasick
+(MIT License, Andrew Gallant). The Execution Kernel and Policy Fusion logic are
+original works subject to the patent notice above. Third-party code retains its
+existing license and attribution.

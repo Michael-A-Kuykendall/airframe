@@ -16,6 +16,7 @@ use wgpu;
 /// - Attention values need 6-7 decimal digits
 /// - Cost: 704 MB VRAM (5.9% of RTX 3060)
 pub struct KVCache {
+    state_owner: Option<std::sync::Arc<crate::runtime::state::StateController>>,
     /// K buffers: One per layer [n_head_kv, max_seq, head_dim] in F32
     k_buffers: Vec<wgpu::Buffer>,
 
@@ -217,6 +218,7 @@ impl KVCache {
         );
 
         Self {
+            state_owner: None,
             k_buffers,
             v_buffers,
             k_packed_buffers,
@@ -231,7 +233,56 @@ impl KVCache {
             head_dim,
         }
     }
-
+    pub(crate) fn begin_for_plan(
+        &mut self,
+        plan: &crate::execution::admission::ValidatedDenseModel,
+        prompt_tokens: usize,
+    ) -> Result<
+        std::sync::Arc<std::sync::Mutex<crate::runtime::state::StateLease>>,
+        crate::execution::admission::ExecutionError,
+    > {
+        let s = plan.state_spec();
+        if self.n_layers != s.layers
+            || self.n_head_kv as usize != s.kv_heads
+            || self.head_dim as usize != s.head_dim
+            || self.max_seq_len as usize != s.capacity
+        {
+            return Err(crate::runtime::state::StateError::Identity.into());
+        }
+        if self.k_packed_buffers.is_some() {
+            return Err(crate::runtime::state::StateError::Unsupported(
+                "INT4 is not the F32 state plan".into(),
+            )
+            .into());
+        }
+        if let Some(owner) = &self.state_owner {
+            if owner.identity() != plan.identity() {
+                return Err(crate::runtime::state::StateError::Identity.into());
+            }
+        } else {
+            self.state_owner = Some(crate::runtime::state::StateController::new(
+                plan.identity().clone(),
+                s.clone(),
+            )?);
+        }
+        let mut lease = self
+            .state_owner
+            .as_ref()
+            .expect("owner installed")
+            .begin()?;
+        lease.start_prefill(prompt_tokens)?;
+        self.reset();
+        Ok(std::sync::Arc::new(std::sync::Mutex::new(lease)))
+    }
+    pub(crate) fn require_unbound_diagnostic(
+        &self,
+    ) -> Result<(), crate::runtime::state::StateError> {
+        if self.state_owner.is_some() {
+            Err(crate::runtime::state::StateError::Identity)
+        } else {
+            Ok(())
+        }
+    }
     /// Get current sequence length (number of cached positions)
     pub fn get_seq_len(&self) -> u32 {
         self.seq_len

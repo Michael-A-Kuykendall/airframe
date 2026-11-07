@@ -80,6 +80,7 @@ mod tests_inner {
 
     #[tokio::test]
     async fn test_bindless_probe_magic() {
+        use wgpu::util::DeviceExt;
         // 1. Setup WGPU
         let (device, queue) = get_device().await;
 
@@ -101,7 +102,30 @@ mod tests_inner {
 
         // 3. Load Model (Bindless)
         // This uploads it to GPU
-        let model = BindlessModel::load_from_disk(&device, path, None);
+        // Raw probe fixture exercises byte access without model admission.
+        let _ = path;
+        let raw = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("raw probe fixture"),
+            contents: &content,
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let dummy_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("probe padding"),
+            contents: &[0; 8],
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let model = BindlessModel {
+            validated_plan: None,
+            bound_state: std::sync::Mutex::new(None),
+            compiled_signature: String::new(),
+            gpu_buffers: vec![raw],
+            size: content.len() as u64,
+            effective_chunk: content.len() as u64,
+            total_resident_chunks: 1,
+            dummy_buf,
+            metadata: dummy_metadata(),
+            preflight: None,
+        };
         assert_eq!(model.size, content.len() as u64);
 
         // 4. Create Pipeline
@@ -166,6 +190,9 @@ mod tests_inner {
             usage: wgpu::BufferUsages::STORAGE,
         });
         let model = BindlessModel {
+            validated_plan: None,
+            bound_state: std::sync::Mutex::new(None),
+            compiled_signature: String::new(),
             gpu_buffers: vec![gpu_buffer],
             size: block_bytes.len() as u64,
             effective_chunk: block_bytes.len() as u64,
@@ -270,6 +297,9 @@ mod tests_inner {
             usage: wgpu::BufferUsages::STORAGE,
         });
         let model = BindlessModel {
+            validated_plan: None,
+            bound_state: std::sync::Mutex::new(None),
+            compiled_signature: String::new(),
             gpu_buffers: vec![gpu_buffer],
             size: block_bytes.len() as u64,
             effective_chunk: block_bytes.len() as u64,
@@ -346,6 +376,9 @@ mod tests_inner {
             usage: wgpu::BufferUsages::STORAGE,
         });
         let model = BindlessModel {
+            validated_plan: None,
+            bound_state: std::sync::Mutex::new(None),
+            compiled_signature: String::new(),
             gpu_buffers: vec![gpu_buffer],
             size: block_bytes.len() as u64,
             effective_chunk: block_bytes.len() as u64,
@@ -424,6 +457,9 @@ mod tests_inner {
             usage: wgpu::BufferUsages::STORAGE,
         });
         let model = BindlessModel {
+            validated_plan: None,
+            bound_state: std::sync::Mutex::new(None),
+            compiled_signature: String::new(),
             gpu_buffers: vec![gpu_buffer],
             size: block_bytes.len() as u64,
             effective_chunk: block_bytes.len() as u64,

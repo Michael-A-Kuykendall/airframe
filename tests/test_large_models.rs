@@ -33,25 +33,20 @@ use shimmytok::Tokenizer;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 
-const DEFAULT_MODEL: &str = "/home/michael/models/Phi-4/phi-4-Q4_K_M/phi-4-Q4_K_M.gguf";
 const GIB: u64 = 1024 * 1024 * 1024;
 
 fn large_model_path() -> PathBuf {
     PathBuf::from(
-        std::env::var("AIRFRAME_LARGE_MODEL_GGUF").unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
+        std::env::var("AIRFRAME_LARGE_MODEL_GGUF")
+            .expect("set AIRFRAME_LARGE_MODEL_GGUF for the opt-in large-model fixture"),
     )
 }
 
 #[tokio::test]
+#[ignore = "requires explicitly provisioned >8 GiB model and GPU; NOT_RUN by default"]
 async fn large_model_gt8gib_load_and_forward() {
     let path = large_model_path();
-    if !path.exists() {
-        eprintln!(
-            "[large-model] SKIP: {} not present — >8GiB integration test requires the phi-4 download (airframe-2kk).",
-            path.display()
-        );
-        return;
-    }
+    assert!(path.is_file(), "required large-model fixture is missing");
     let file_size = std::fs::metadata(&path).expect("stat model file").len();
     assert!(
         file_size > 8 * GIB,

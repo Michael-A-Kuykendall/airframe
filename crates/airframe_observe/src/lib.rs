@@ -1,24 +1,15 @@
-//! # airframe-observe
+//! # airframe-observe 0.1.4
 //!
-//! FSE-based inference observation layer, powered by dzero.
+//! Inference facts, observers and host-side coordination using Dzero.
 //!
-//! ## The Core Inversion
+//! ObservationSession registers observers, receives emitted facts and runs
+//! saturation. ISF uses Dzero's fact store and caller-supplied inference
+//! callbacks. Work includes fact processing and registered observer callbacks;
+//! no observer-count-independent performance guarantee is implied.
 //!
-//! Conventional inference capture is observer-first (broken pattern):
-//! ```text
-//! vault_seed:   forward_pass() → capture hidden_states
-//! candle_probe: forward_pass() → capture logits
-//! fse_policy:   forward_pass() → scan output_text
-//! Cost: O(N_observers × M_selectors)
-//! ```
-//!
-//! This crate is selector-first (FSE/dzero architecture):
-//! ```text
-//! ObservationSession::new(plan)  ← compile once
-//! forward_pass emits facts        ← single pass
-//! All observers receive data simultaneously via dzero broadcast
-//! Cost: O(M_selectors), independent of observer count
-//! ```
+//! These contracts neither implement GPU arithmetic nor certify inference
+//! correctness, driver stability or performance. See the crate README for
+//! release scope, dependency and licensing details.
 //!
 //! ## Usage
 //!
@@ -55,6 +46,7 @@ pub mod observer;
 pub mod observers;
 pub mod output;
 pub mod plan;
+pub mod profiling;
 pub mod quant_formula;
 pub mod session;
 

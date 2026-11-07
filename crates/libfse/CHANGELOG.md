@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.4] — 2026-11-06
+
+- Documentation errata: clarify caller enforcement responsibility, action-dependent scanning cost and distinct airframe-observe responsibilities. Remove unsupported performance and whole-system guarantees without changing executable code or license rights.
+
+- Correct license metadata to the FSE Noncommercial Evaluation License in LICENSE, preserving existing commercial, product-embedding and derivative-work permission requirements, patent and third-party notices. This package is source available, not ordinary MIT.
+
+
+- Version the exact library payload used by the certified Airframe workspace instead of substituting the different published 0.1.3 payload.
+- Preserve existing scanner/metrics implementation and formatting; no new behavior is introduced by this release preparation.
+
+
 All notable changes to `libfse` will be documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).

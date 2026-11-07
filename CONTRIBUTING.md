@@ -1,52 +1,36 @@
 # Contributing to Airframe
 
-Thank you for your interest in contributing. Airframe is the GPU inference engine behind [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy) and is designed to be a clean, minimal, dependency-free Rust LLM runtime.
+Airframe is open source, not open contribution. Unsolicited pull requests are
+not accepted. To seek co-maintainer approval, email
+michaelallenkuykendall@gmail.com first and follow the maintainer's instructions.
 
-## Scope
+## Approved development
 
-Contributions are welcome in the following areas:
-
-- **New model architectures** — additional transformer families (e.g., Gemma2, LLaMA 3.3, DeepSeek-V2)
-- **Quantization types** — additional GGUF quant formats (Q5_K_M, IQ4_NL, etc.)
-- **WGSL shader optimizations** — improved GPU throughput, reduced memory bandwidth
-- **Evaluation / benchmark scripts** — additional accuracy benchmarks (HumanEval, MMLU, etc.)
-- **Bug fixes and correctness improvements**
-- **Documentation improvements**
-
-**Not in scope for external contributions**: the `crates/libfse` policy engine is patent-pending. Please do not submit PRs that modify the FSE internals.
-
-## Getting Started
+Agree scope, mathematical contracts and reference fixtures before changing
+operators, parsing or architecture admission. Preserve existing working paths;
+metadata recognition must never silently enable an unsupported executor.
 
 ```bash
 git clone https://github.com/Michael-A-Kuykendall/airframe
 cd airframe
-cargo build
-cargo test
+cargo build --locked
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
-For GPU-dependent tests and examples, set:
+GPU tests require explicitly selected fixtures, token IDs, backend and precision.
+Use test-specific requirements; there is no universal environment variable
+selecting any GGUF as a sufficient correctness test. Unit-test or build success
+does not substitute for full-vector reference comparisons and state checks.
 
-```bash
-export LIBSHIMMY_MODEL_PATH=/path/to/any.gguf
-cargo test
-```
+Approved changes use focused feature branches and regression tests. Maintainer
+approval is required for public integration, tags and publication. Do not use
+release workflows to debug locally reproducible failures.
 
-## Code Style
+## License boundaries
 
-- `cargo fmt` before committing
-- `cargo clippy -- -D warnings` must pass
-- Keep `unsafe` blocks out of non-GPU paths
-- No new runtime dependencies without discussion
-
-## Pull Request Process
-
-1. Open an issue first for significant changes
-2. Branch from `main`
-3. Include a test or benchmark that validates your change
-4. Reference any related issues in the PR description
-
-## Patent Notice
-
-The Fused Semantic Execution (FSE) subsystem in `crates/libfse` is covered by a pending US patent. Any contribution to that crate requires a contributor license agreement (CLA) to be executed separately. Contact michaelallenkuykendall@gmail.com before contributing to libfse.
-
-All other code in this repository is MIT-licensed.
+The inference runtime is MIT; see [LICENSE](LICENSE). libfse has its
+[FSE Noncommercial Evaluation License](https://github.com/Michael-A-Kuykendall/airframe/blob/main/crates/libfse/LICENSE), including separate
+permission for commercial use, product embedding and derivatives. Contact the
+owner before contributing to it. Existing patent and attribution notices must
+be preserved. Observe is MIT with its own pending-patent notice.

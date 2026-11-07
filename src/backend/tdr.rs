@@ -44,6 +44,8 @@ pub const DEFAULT_TDR_BUDGET_MS: u128 = 30_000;
 /// time since the last yield. Callers use `encoder` directly for compute
 /// passes; checkpoints call `yield_if_needed` or `force_yield`.
 pub struct TdrScheduler<'d> {
+    pub(crate) profiling:
+        Option<std::sync::Arc<crate::backend::bindless::profiling::SubmissionTiming>>,
     device: &'d wgpu::Device,
     queue: &'d wgpu::Queue,
     /// Active command encoder — callers append compute passes to this.
@@ -86,6 +88,7 @@ impl<'d> TdrScheduler<'d> {
             budget_ms,
             yield_count: 0,
             timestamp_pool,
+            profiling: None,
         }
     }
 
@@ -126,10 +129,18 @@ impl<'d> TdrScheduler<'d> {
                     label: Some("tdr-placeholder"),
                 }),
         );
-        self.queue.submit(Some(encoder.finish()));
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|_| format!("GPU TDR during {}", label))?;
+        let command = encoder.finish();
+        if let Some(p) = &self.profiling {
+            p.submit(self.queue, command);
+        } else {
+            self.queue.submit(Some(command));
+        }
+        let profile_wait = self.profiling.as_ref().map(|_| std::time::Instant::now());
+        let poll_result = self.device.poll(wgpu::PollType::wait_indefinitely());
+        if let (Some(p), Some(start)) = (&self.profiling, profile_wait) {
+            p.record_wait(start);
+        }
+        poll_result.map_err(|_| format!("GPU TDR during {}", label))?;
 
         let elapsed = t0.elapsed().as_millis();
         self.accumulated_ms += elapsed;
@@ -209,7 +220,12 @@ impl<'d> TdrScheduler<'d> {
                     label: Some(&format!("post-submit-{}", label)),
                 }),
         );
-        self.queue.submit(Some(encoder.finish()));
+        let command = encoder.finish();
+        if let Some(p) = &self.profiling {
+            p.submit(self.queue, command);
+        } else {
+            self.queue.submit(Some(command));
+        }
     }
 
     /// Add elapsed time to the accumulator without yielding.

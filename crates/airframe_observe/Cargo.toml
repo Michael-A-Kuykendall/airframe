@@ -1,13 +1,14 @@
 [package]
 name = "airframe-observe"
-version = "0.1.3"
+version = "0.1.4"
 publish = true
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Michael-A-Kuykendall/airframe"
 homepage = "https://github.com/Michael-A-Kuykendall/airframe"
 documentation = "https://docs.rs/airframe-observe"
-description = "FSE-based inference observation layer for Airframe. Selector-first, single-pass capture of layer outputs, logits, and text during inference."
+description = "Inference facts, observers and host-side coordination contracts powered by Dzero."
+exclude = [".gitignore", ".gitattributes"]
 
 # Patent Notice: This crate implements the Fused Semantic Execution (FSE)
 # Inference Observation architecture — a selector-first, compile-once,

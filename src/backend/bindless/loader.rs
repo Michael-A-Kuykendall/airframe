@@ -2,8 +2,6 @@ use super::metadata::BindlessMetadata;
 use super::preflight::PreflightResources;
 use crate::core::spec::ModelSpec;
 use crate::invariant_ppt::airframe_invariants::*;
-use memmap2::Mmap;
-use std::fs::File;
 use std::path::Path;
 use wgpu::util::DeviceExt;
 
@@ -271,7 +269,54 @@ impl BlobWindow {
 /// (the final buffer may be smaller). Shaders read tensor words through
 /// `blob_binding_*` which maps directly onto `gpu_buffers`, so the WGSL
 /// `read_blob` chunk-splitting logic is unchanged.
+pub(super) struct BoundRequestState {
+    lease: std::sync::Arc<std::sync::Mutex<crate::runtime::state::StateLease>>,
+    k: Vec<wgpu::Buffer>,
+    v: Vec<wgpu::Buffer>,
+}
+pub struct ModelRequest<'a> {
+    model: &'a BindlessModel,
+    lease: std::sync::Arc<std::sync::Mutex<crate::runtime::state::StateLease>>,
+}
+impl ModelRequest<'_> {
+    pub(crate) fn lease(
+        &self,
+    ) -> std::sync::Arc<std::sync::Mutex<crate::runtime::state::StateLease>> {
+        self.lease.clone()
+    }
+    pub fn finish(&mut self) -> Result<(), crate::runtime::state::StateError> {
+        self.lease
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .finish()
+    }
+}
+impl Drop for ModelRequest<'_> {
+    fn drop(&mut self) {
+        let mut bound = self
+            .model
+            .bound_state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if bound
+            .as_ref()
+            .is_some_and(|b| std::sync::Arc::ptr_eq(&b.lease, &self.lease))
+        {
+            *bound = None;
+        }
+        drop(bound);
+        self.lease.lock().unwrap_or_else(|e| e.into_inner()).abort();
+    }
+}
 pub struct BindlessModel {
+    #[cfg(not(test))]
+    validated_plan: std::sync::Arc<crate::execution::admission::ValidatedDenseModel>,
+    // Raw quantization fixtures are test-only and cannot execute a model plan.
+    #[cfg(test)]
+    pub(super) validated_plan:
+        Option<std::sync::Arc<crate::execution::admission::ValidatedDenseModel>>,
+    pub(super) bound_state: std::sync::Mutex<Option<BoundRequestState>>,
+    pub(super) compiled_signature: String,
     /// The model split into N independent storage buffers.
     /// Usage: STORAGE | COPY_DST | COPY_SRC
     pub gpu_buffers: Vec<wgpu::Buffer>,
@@ -531,18 +576,103 @@ impl BindlessModel {
     /// Panics if file IO fails, VRAM allocation fails, or the model needs more
     /// than `MAX_CHUNKS` buffers (rejected at load, not silently split).
     pub fn load_from_disk(device: &wgpu::Device, path: &Path, spec: Option<&ModelSpec>) -> Self {
-        println!("[BindlessLoader] Opening GGUF: {:?}", path);
-
-        let mut file = File::open(path).expect("Failed to open GGUF file");
-        let metadata_fs = file.metadata().expect("Failed to read metadata");
-        let size = metadata_fs.len();
-
-        println!(
-            "[BindlessLoader] File size: {} bytes ({:.2} MB)",
-            size,
-            size as f64 / 1024.0 / 1024.0
-        );
-
+        Self::try_load_from_disk(device, path, spec).expect("model admission failed before upload")
+    }
+    pub fn begin_request(
+        &self,
+        cache: &mut super::kv_cache::KVCache,
+        prompt_tokens: usize,
+    ) -> Result<ModelRequest<'_>, crate::execution::admission::ExecutionError> {
+        let mut bound = self.bound_state.lock().map_err(|_| {
+            crate::execution::admission::ExecutionError::Gpu("request state lock poisoned".into())
+        })?;
+        if bound.is_some() {
+            return Err(crate::runtime::state::StateError::Busy.into());
+        }
+        let lease = cache.begin_for_plan(self.validated(), prompt_tokens)?;
+        *bound = Some(BoundRequestState {
+            lease: lease.clone(),
+            k: cache.get_k_buffers().to_vec(),
+            v: cache.get_v_buffers().to_vec(),
+        });
+        Ok(ModelRequest { model: self, lease })
+    }
+    pub(crate) fn validate_state_access(
+        &self,
+        spec: &ModelSpec,
+        rows: usize,
+        start: usize,
+        end: usize,
+        kv: Option<(&[wgpu::Buffer], &[wgpu::Buffer])>,
+    ) -> Result<Option<std::sync::Arc<std::sync::Mutex<crate::runtime::state::StateLease>>>, String>
+    {
+        crate::execution::admission::validate_kernel_configuration().map_err(|e| e.to_string())?;
+        self.validated()
+            .check_forward(spec, rows, start, end)
+            .map_err(|e| e.to_string())?;
+        if format!("{:?}", self.metadata.compiled_layers) != self.compiled_signature {
+            return Err("model plan layer table mismatch".into());
+        }
+        for binding in self.validated().plan().descriptor().bindings() {
+            if self.metadata.get_tensor_offset(&binding.name) != Some(binding.offset)
+                || self.metadata.get_tensor_type(&binding.name) != Some(binding.ggml_type)
+                || self.metadata.tensor_dims.get(&binding.name) != Some(&binding.dimensions)
+            {
+                return Err("model tensor bindings differ from validated manifest".into());
+            }
+        }
+        if let Some((k, v)) = kv {
+            let bound = self
+                .bound_state
+                .lock()
+                .map_err(|_| "request state lock poisoned")?;
+            let active = bound
+                .as_ref()
+                .ok_or("external KV requires a bound model request lease")?;
+            if active.k.as_slice() != k || active.v.as_slice() != v {
+                return Err("KV buffers do not belong to active request lease".into());
+            }
+            return Ok(Some(active.lease.clone()));
+        }
+        if start != 0 {
+            return Err("stateless model execution must start at position zero".into());
+        }
+        Ok(None)
+    }
+    pub fn validated(&self) -> &std::sync::Arc<crate::execution::admission::ValidatedDenseModel> {
+        #[cfg(not(test))]
+        {
+            &self.validated_plan
+        }
+        #[cfg(test)]
+        {
+            self.validated_plan
+                .as_ref()
+                .expect("raw quantization fixtures cannot execute a model plan")
+        }
+    }
+    pub fn try_load_prepared(
+        device: &wgpu::Device,
+        prepared: crate::execution::admission::PreparedDenseModel,
+    ) -> Result<Self, crate::execution::admission::ModelAdmissionError> {
+        let crate::execution::admission::PreparedDenseModel {
+            tokenizer: _,
+            bytes: mmap,
+            validated,
+            metadata,
+            rope_tables,
+        } = prepared;
+        validated.check_device(&device.limits())?;
+        let size = mmap.len() as u64;
+        if !size.is_multiple_of(4) {
+            return Err(
+                crate::execution::admission::ModelAdmissionError::Configuration {
+                    code: "unsupported_file_alignment",
+                    detail: "dense blob upload requires four-byte file alignment".into(),
+                },
+            );
+        }
+        let spec = Some(validated.spec());
         // Compute the multi-buffer plan from the device's REAL binding limit.
         // compute_chunk_plan embeds the alignment / 2 GB / chunk-count invariants.
         let chunk_plan =
@@ -553,19 +683,6 @@ impl BindlessModel {
             "[BindlessLoader] Multi-buffer plan: {} chunks of {} bytes (256-aligned)",
             num_chunks, effective_chunk
         );
-
-        // Scan Metadata
-        println!("[BindlessLoader] Scanning Metadata...");
-        let metadata = BindlessMetadata::new(&mut file);
-        println!(
-            "[BindlessLoader] Found {} tensors. Data starts at {}.",
-            metadata.tensor_count, metadata.data_start_offset
-        );
-
-        // Memory-map the file for zero-copy GPU upload
-        // OS pages data on-demand as GPU reads, no intermediate RAM copy
-        println!("[BindlessLoader] Memory-mapping GGUF file...");
-        let mmap = unsafe { Mmap::map(&file).expect("Failed to mmap GGUF file") };
 
         // Create N independent blob buffers, each ≤ effective_chunk bytes.
         let mut gpu_buffers: Vec<wgpu::Buffer> = Vec::with_capacity(num_chunks);
@@ -604,11 +721,12 @@ impl BindlessModel {
         // PreflightResources::new_from_ram accepts &[u8] so works with mmap
         let preflight = if let Some(spec) = spec {
             println!("[BindlessLoader] Launching Preflight Fusion (from mmap)...");
-            Some(PreflightResources::new_from_ram(
+            Some(PreflightResources::new_from_ram_with_tables(
                 device,
                 &mmap[..],
                 &metadata,
                 spec,
+                rope_tables,
             ))
         } else {
             println!("[BindlessLoader] No Spec provided, skipping Preflight (Raw Mode).");
@@ -629,7 +747,14 @@ impl BindlessModel {
             gpu_buffers.len()
         );
 
-        Self {
+        let compiled_signature = format!("{:?}", metadata.compiled_layers);
+        Ok(Self {
+            compiled_signature,
+            #[cfg(not(test))]
+            validated_plan: validated,
+            #[cfg(test)]
+            validated_plan: Some(validated),
+            bound_state: std::sync::Mutex::new(None),
             gpu_buffers,
             size,
             effective_chunk,
@@ -637,6 +762,18 @@ impl BindlessModel {
             dummy_buf,
             metadata,
             preflight,
+        })
+    }
+    pub fn try_load_from_disk(
+        device: &wgpu::Device,
+        path: &Path,
+        spec: Option<&ModelSpec>,
+    ) -> Result<Self, crate::execution::admission::ModelAdmissionError> {
+        let prepared =
+            crate::execution::admission::PreparedDenseModel::load(path, spec.map(|s| s.n_ctx))?;
+        if let Some(s) = spec {
+            prepared.validated().check_spec(s)?;
         }
+        Self::try_load_prepared(device, prepared)
     }
 }

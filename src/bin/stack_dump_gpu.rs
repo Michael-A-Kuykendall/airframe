@@ -323,6 +323,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "position": last_pos,
             "rms": emb_rms,
             "first8": emb_first8,
+            "values": emb_last,
             "nan_count": emb_nans
         },
         "layers": layers_json,
@@ -331,6 +332,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "pre_norm_rms": rms(&pre_norm),
             "logits": {
                 "len": logits.len(),
+                "values": logits,
                 "rms": rms(&logits),
                 "max": logits_max,
                 "nan_count": logits_nans,

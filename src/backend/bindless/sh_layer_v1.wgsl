@@ -578,7 +578,7 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     if (target_stage == 0u) {
         // Q goes to temp_state for attention computation
-        temp_state[temp_base + params.dim + row_idx] = dot;
+        temp_state[temp_base + max(params.dim, dim_q) + row_idx] = dot;
     } else if (target_stage == 1u) {
         // K -> K cache
         // row_idx = head * head_dim + dim_in_head
@@ -615,8 +615,8 @@ fn main_qkv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 //   idx 0..dim_q-1           -> Q heads in temp_state[temp_base + dim + idx]
 //   idx dim_q..dim_q+dim_k-1 -> K heads in kv_cache_k[...] at current_pos
 //
-// Each thread owns one output element. To compute RMS it reads all head_dim
-// elements of its head (scalar loop, same approach as main_attn_norm).
+// One invocation owns a complete Q or K head: all reads precede its writes.
+// Heads are disjoint. Preserve scalar F32 reduction order and host dispatch.
 @compute @workgroup_size(256, 1, 1)
 fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx        = global_id.x;
@@ -629,12 +629,12 @@ fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let dim_q     = params.head_count    * params.head_dim;
     let dim_k     = params.head_count_kv * params.head_dim;
 
-    if (idx >= dim_q + dim_k) { return; }
+    if (idx >= params.head_count + params.head_count_kv) { return; }
 
-    let is_k       = idx >= dim_q;
-    let elem_idx   = select(idx, idx - dim_q, is_k);
-    let head_idx   = elem_idx / params.head_dim;
-    let dim_in_head = elem_idx % params.head_dim;
+    let is_k       = idx >= params.head_count;
+    let elem_idx   = select(idx, idx - params.head_count, is_k);
+    let head_idx   = elem_idx;
+    // This owner writes all dimensions only after completing the full sum.
 
     // Norm weight byte offset in GGUF blob (F32, one per head_dim element)
     let norm_off = select(offsets.attn_q_norm, offsets.attn_k_norm, is_k);
@@ -642,7 +642,7 @@ fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Compute RMS across the full head (all head_dim elements)
     var sum_sq = 0.0;
     if (!is_k) {
-        let q_base = temp_base + params.dim + head_idx * params.head_dim;
+        let q_base = temp_base + max(params.dim, dim_q) + head_idx * params.head_dim;
         for (var i = 0u; i < params.head_dim; i++) {
             let v = temp_state[q_base + i];
             sum_sq += v * v;
@@ -659,16 +659,18 @@ fn main_qk_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rms = inverseSqrt(sum_sq / f32(params.head_dim) + params.rms_eps);
 
     // Read norm weight for this dimension from GGUF blob (F32)
+    for (var dim_in_head = 0u; dim_in_head < params.head_dim; dim_in_head++) {
     let w = bitcast<f32>(read_blob(gow(norm_off) + dim_in_head));
 
     // Apply norm and write back
     if (!is_k) {
-        let q_base = temp_base + params.dim + head_idx * params.head_dim;
+        let q_base = temp_base + max(params.dim, dim_q) + head_idx * params.head_dim;
         temp_state[q_base + dim_in_head] = temp_state[q_base + dim_in_head] * rms * w;
     } else {
         let cache_base = (cache_params.current_pos + token_idx) * params.head_count_kv * params.head_dim
                        + head_idx * params.head_dim;
         kv_cache_k[cache_base + dim_in_head] = kv_cache_k[cache_base + dim_in_head] * rms * w;
+    }
     }
 }
 
@@ -698,7 +700,8 @@ fn main_attn_out(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let head_idx   = idx / params.head_dim;
     let head_offset = idx % params.head_dim;
     let kv_head_idx = head_idx / gqa_ratio;
-    let q_base     = temp_base + params.dim + head_idx * params.head_dim;
+    // Query reads must be disjoint from all concurrent context writes [0, attn_dim).
+    let q_base     = temp_base + max(params.dim, attn_dim) + head_idx * params.head_dim;
     let n_pairs    = params.head_dim / 2u;
     let rope_pairs = params.rope_dim / 2u;
     let compact_query_pos = cache_params.current_pos + token_idx;

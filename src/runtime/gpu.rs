@@ -6,7 +6,6 @@
 
 use crate::backend::bindless::kv_cache::KVCache;
 use crate::backend::bindless::loader::BindlessModel;
-use crate::backend::bindless::metadata::BindlessMetadata;
 use crate::backend::bindless::pipeline::BindlessPipeline;
 use crate::backend::bindless::pipeline_shift::RopeShiftPipeline;
 use crate::control::InferenceControl;
@@ -67,6 +66,9 @@ impl Rng {
 
 /// The GPU inference runtime. One per process — owns the device and all GPU resources.
 pub struct GpuRuntime {
+    request_gate: Mutex<()>,
+    #[cfg(feature = "isf")]
+    profile_config: Option<airframe_observe::profiling::ProfileConfig>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     model: BindlessModel,
@@ -107,7 +109,7 @@ impl GpuRuntime {
         eos_token: u32,
         im_end_token: Option<u32>,
     ) -> Self {
-        Self {
+        Self::try_from_parts(
             device,
             queue,
             model,
@@ -122,7 +124,8 @@ impl GpuRuntime {
             embd_quant_type,
             eos_token,
             im_end_token,
-        }
+        )
+        .expect("runtime parts failed validated model admission")
     }
 
     /// Initialize the GPU runtime from a GGUF model path.
@@ -135,7 +138,148 @@ impl GpuRuntime {
     /// - Output head dequantization (Q6_K → F32)
     /// - Tokenizer initialization
     pub async fn load(model_path: &Path) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::load_with_context(
+            model_path,
+            crate::execution::admission::configured_context()?,
+        )
+        .await
+    }
+    pub fn model_identity(&self) -> &crate::runtime::state::StateIdentity {
+        self.model.validated().identity()
+    }
+    pub fn encode_prompt(
+        &self,
+        text: &str,
+    ) -> Result<Vec<u32>, crate::execution::admission::ExecutionError> {
+        let ids = self
+            .tokenizer
+            .encode_with_options(
+                text,
+                &shimmytok::EncodeOptions {
+                    add_special_tokens: true,
+                    parse_special: true,
+                },
+            )
+            .map_err(|e| crate::execution::admission::ExecutionError::Request {
+                code: "tokenization_failed",
+                detail: e.to_string(),
+            })?;
+        if ids.is_empty()
+            || ids.len() > self.spec.n_ctx
+            || ids.iter().any(|id| *id as usize >= self.spec.n_vocab)
+        {
+            return Err(crate::execution::admission::ExecutionError::Request {
+                code: "invalid_prompt_tokens",
+                detail: "prompt must fit model vocabulary and context".into(),
+            });
+        }
+        Ok(ids)
+    }
+    pub fn try_reset(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let _request = self.request_gate.try_lock().map_err(|_| {
+            crate::execution::admission::ExecutionError::State(
+                crate::runtime::state::StateError::Busy,
+            )
+        })?;
+        self.kv_cache
+            .lock()
+            .map_err(|_| {
+                crate::execution::admission::ExecutionError::Gpu("KV state lock poisoned".into())
+            })?
+            .reset();
+        Ok(())
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_from_parts(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        model: BindlessModel,
+        pipeline: BindlessPipeline,
+        shift_pipeline: RopeShiftPipeline,
+        tokenizer: Arc<Tokenizer>,
+        spec: ModelSpec,
+        output_head_f32: Option<wgpu::Buffer>,
+        kv_cache: Arc<Mutex<KVCache>>,
+        embd_weight_offset: u64,
+        row_bytes: u64,
+        embd_quant_type: u32,
+        eos_token: u32,
+        im_end_token: Option<u32>,
+    ) -> Result<Self, crate::execution::admission::ModelAdmissionError> {
+        model.validated().check_spec(&spec)?;
+        model.validated().check_device(&device.limits())?;
+        let embedding = model
+            .validated()
+            .manifest()
+            .tensor("token_embd.weight")
+            .expect("validated embedding");
+        if embedding.absolute_offset() != embd_weight_offset
+            || embedding.row_bytes() != row_bytes
+            || embedding.ggml_type() != embd_quant_type
+            || tokenizer.vocab_size() != spec.n_vocab
+            || tokenizer.eos_token() != eos_token
+            || tokenizer.metadata() != &model.validated().manifest().header().values
+        {
+            return Err(
+                crate::execution::admission::ModelAdmissionError::Configuration {
+                    code: "model_parts_mismatch",
+                    detail: "tokenizer/embedding parts differ from validated model".into(),
+                },
+            );
+        }
+        if let Some(head) = &output_head_f32 {
+            let expected = (spec.n_embd as u64)
+                .checked_mul(spec.n_vocab as u64)
+                .and_then(|x| x.checked_mul(4));
+            if Some(head.size()) != expected
+                || head.size() > u64::from(device.limits().max_storage_buffer_binding_size)
+            {
+                return Err(
+                    crate::execution::admission::ModelAdmissionError::Configuration {
+                        code: "invalid_output_head",
+                        detail: "external head must have exact F32 shape and fit its binding"
+                            .into(),
+                    },
+                );
+            }
+        }
+        Ok(Self {
+            request_gate: Mutex::new(()),
+            #[cfg(feature = "isf")]
+            profile_config: airframe_observe::profiling::ProfileConfig::from_env(),
+            device,
+            queue,
+            model,
+            pipeline,
+            shift_pipeline,
+            tokenizer,
+            spec,
+            output_head_f32,
+            kv_cache,
+            embd_weight_offset,
+            row_bytes,
+            embd_quant_type,
+            eos_token,
+            im_end_token,
+        })
+    }
+    pub async fn load_with_context(
+        model_path: &Path,
+        context: Option<usize>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        #[cfg(feature = "isf")]
+        let profile_config = airframe_observe::profiling::ProfileConfig::from_env();
+        #[cfg(feature = "isf")]
+        let mut load_profile = profile_config.as_ref().map(|p| p.begin_load());
+        #[cfg(not(feature = "isf"))]
+        if std::env::var("AIRFRAME_TRACE_TIMING").ok().as_deref() == Some("1") {
+            eprintln!("[Airframe] profiling requires the isf feature");
+        }
         let model_path_str = model_path.to_string_lossy().to_string();
+
+        let prepared = crate::execution::admission::PreparedDenseModel::load(model_path, context)?;
+        let validated = prepared.validated().clone();
+        let spec = validated.spec().clone();
 
         // GPU init
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -156,7 +300,12 @@ impl GpuRuntime {
                     .find(|a| a.get_info().device_type == wgpu::DeviceType::IntegratedGpu)
             })
             .or_else(|| adapters.first())
-            .ok_or_else(|| "No GPU adapter found".to_string())
+            .ok_or_else(
+                || crate::execution::admission::ModelAdmissionError::Device {
+                    code: "gpu_unavailable",
+                    detail: "No GPU adapter found".into(),
+                },
+            )
             .inspect(|a| {
                 eprintln!(
                     "[GpuRuntime] Selected adapter: {} ({:?}, backend={:?})",
@@ -167,6 +316,7 @@ impl GpuRuntime {
             })?;
 
         let adapter_limits = adapter.limits();
+        validated.check_device(&adapter_limits)?;
 
         // Pre-flight: check that the model fits within GPU memory constraints.
         // The bindless architecture splits the model into up to 3 sub-range bindings
@@ -176,22 +326,19 @@ impl GpuRuntime {
         let max_buffer_size = adapter_limits.max_buffer_size;
         let max_binding = adapter_limits.max_storage_buffer_binding_size as u64;
 
-        if model_file_size > max_buffer_size {
-            return Err(format!(
-                "Model file ({:.0} MB) exceeds this GPU's max buffer size ({:.0} MB). \
-                 This model cannot fit in VRAM.",
-                model_file_size as f64 / 1_048_576.0,
-                max_buffer_size as f64 / 1_048_576.0,
-            )
-            .into());
-        }
-
         // Adapter-aware chunk plan. The bindless loader clamps BLOB_CHUNK_BYTES to the
         // adapter's storage-buffer binding limit itself (compute_chunk_plan), so a small
         // binding limit (e.g. llvmpipe 128 MB) is not fatal — it only raises the number
         // of resident chunks. Do not hard-fail on the raw 2 GB constant here.
         let chunk_plan =
             crate::backend::bindless::loader::compute_chunk_plan(model_file_size, max_binding);
+        if chunk_plan.effective_chunk > max_buffer_size {
+            return Err(crate::execution::admission::ModelAdmissionError::Device {
+                code: "device_limit",
+                detail: "blob chunk exceeds device buffer limit".into(),
+            }
+            .into());
+        }
         if chunk_plan.num_chunks > 1 {
             eprintln!(
                 "[GpuRuntime] Model ({:.0} MB) exceeds chunk size: using {}-chunk bindless split \
@@ -213,13 +360,54 @@ impl GpuRuntime {
             adapter_limits.max_storage_buffers_per_shader_stage.max(14); // INT4 KV layout requires ≥14 storage buffers
         limits.max_compute_invocations_per_workgroup = 256;
 
-        let (device, queue) = adapter
+        #[cfg(feature = "isf")]
+        let profiling_features = if profile_config.as_ref().is_some_and(|p| p.gpu_requested())
+            && adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY)
+        {
+            wgpu::Features::TIMESTAMP_QUERY
+        } else {
+            wgpu::Features::empty()
+        };
+        #[cfg(not(feature = "isf"))]
+        let profiling_features = wgpu::Features::empty();
+        let request = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                required_limits: limits,
+                required_features: profiling_features,
+                required_limits: limits.clone(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 ..Default::default()
             })
-            .await?;
+            .await;
+        let (device, queue) = match request {
+            Ok(value) => value,
+            Err(_) if !profiling_features.is_empty() => {
+                #[cfg(feature = "isf")]
+                if let Some(profile) = &profile_config {
+                    profile.set_gpu_unavailable(
+                        airframe_observe::profiling::MissingGpu::DeviceFeatureRequestFailed,
+                    );
+                }
+                adapter
+                    .request_device(&wgpu::DeviceDescriptor {
+                        required_limits: limits,
+                        memory_hints: wgpu::MemoryHints::Performance,
+                        ..Default::default()
+                    })
+                    .await?
+            }
+            Err(error) => {
+                return Err(crate::execution::admission::ModelAdmissionError::Device {
+                    code: "gpu_device_unavailable",
+                    detail: error.to_string(),
+                }
+                .into())
+            }
+        };
+        #[cfg(feature = "isf")]
+        if let Some(config) = &profile_config {
+            let info = adapter.get_info();
+            config.set_adapter(info.name, format!("{:?}", info.backend));
+        }
 
         // Register an error handler so wgpu validation errors surface as descriptive
         // messages rather than the wgpu 27 default fatal panic.
@@ -228,78 +416,19 @@ impl GpuRuntime {
         }));
 
         // Load model
-        let tokenizer = Arc::new(Tokenizer::from_gguf_file(&model_path_str)?);
-        // Auto-derive model spec from GGUF metadata — works with any GGUF model
-        let mut header_file = std::fs::File::open(model_path)?;
-        let header_meta = BindlessMetadata::new(&mut header_file);
-        drop(header_file);
-        let mut spec = header_meta.to_model_spec();
-
-        // head_dim correction: n_embd != n_head * head_dim for some archs (Gemma, Qwen3).
-        // Q weight shape [n_embd, n_head*head_dim] gives the actual head_dim.
-        // Apply universally for any arch where Q weight shape disagrees with n_embd/n_head.
-        if let Some(dims) = header_meta
-            .tensor_dims
-            .get("blk.0.attn_q.weight")
-            .or_else(|| {
-                header_meta
-                    .tensor_dims
-                    .iter()
-                    .find(|(k, _)| k.contains("attn_q.weight") && k.starts_with("blk.0"))
-                    .map(|(_, v)| v)
-            })
-        {
-            if dims.len() >= 2 {
-                let inferred = dims[1] as usize / spec.n_head;
-                if inferred > 0 && inferred != spec.head_dim {
-                    eprintln!(
-                        "[GpuRuntime] head_dim corrected {} -> {} from Q weight shape {:?}",
-                        spec.head_dim, inferred, dims
-                    );
-                    spec.head_dim = inferred;
-                    spec = spec.compute_derived();
+        let tokenizer = prepared.tokenizer.clone();
+        if tokenizer.metadata() != &validated.manifest().header().values {
+            return Err(
+                crate::execution::admission::ModelAdmissionError::Configuration {
+                    code: "model_tokenizer_mismatch",
+                    detail: "tokenizer metadata changed since model acquisition".into(),
                 }
-            }
-        }
-
-        // Safe context window cap.
-        // Consumer GPUs (4-8 GB VRAM) cannot sustain the full native context of
-        // modern models (e.g. Llama-3.2 = 131072). The KV cache scales linearly:
-        //   n_layers × n_kv_heads × head_dim × ctx × 2 × 4 bytes
-        // Without a cap, a 131K-context model allocates ~28 GB of KV cache alone.
-        //
-        // If SHIMMY_MAX_CTX is explicitly set, honour it (user opted in).
-        // Otherwise, cap at 4096 tokens — enough for practical use on consumer hardware.
-        const DEFAULT_SAFE_CTX: usize = 8192;
-
-        if let Some(max_ctx) = std::env::var("SHIMMY_MAX_CTX")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-        {
-            // Explicit override — apply YaRN RoPE scale if extending beyond native
-            let rope_scale = std::env::var("SHIMMY_ROPE_SCALE")
-                .ok()
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or_else(|| {
-                    if max_ctx > spec.n_ctx {
-                        spec.n_ctx as f32 / max_ctx as f32
-                    } else {
-                        1.0
-                    }
-                });
-            spec.n_ctx = max_ctx;
-            spec.rope_scale = rope_scale;
-        } else if spec.n_ctx > DEFAULT_SAFE_CTX {
-            // Model native context exceeds safe default — cap it silently.
-            // Set SHIMMY_MAX_CTX=<n> to override.
-            eprintln!(
-                "[GpuRuntime] Model native context {} tokens exceeds safe default {}. \
-                 Capping to {} to protect GPU memory. Set SHIMMY_MAX_CTX=<n> to override.",
-                spec.n_ctx, DEFAULT_SAFE_CTX, DEFAULT_SAFE_CTX
+                .into(),
             );
-            spec.n_ctx = DEFAULT_SAFE_CTX;
         }
-        let gpu_model = BindlessModel::load_from_disk(&device, model_path, Some(&spec));
+        device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let gpu_model = BindlessModel::try_load_prepared(&device, prepared)?;
         let pipeline = BindlessPipeline::new(&device);
         let shift_pipeline = RopeShiftPipeline::new(&device);
 
@@ -319,7 +448,22 @@ impl GpuRuntime {
             max_ctx,
         )));
 
-        let dim = spec.n_embd as u32;
+        let validation_error = device.pop_error_scope().await;
+        let allocation_error = device.pop_error_scope().await;
+        if let Some(e) = allocation_error {
+            return Err(crate::execution::admission::ModelAdmissionError::Device {
+                code: "gpu_out_of_memory",
+                detail: e.to_string(),
+            }
+            .into());
+        }
+        if let Some(e) = validation_error {
+            return Err(crate::execution::admission::ModelAdmissionError::Device {
+                code: "gpu_validation",
+                detail: e.to_string(),
+            }
+            .into());
+        }
         let embd_weight_offset = gpu_model
             .metadata
             .get_tensor_offset("token_embd.weight")
@@ -338,16 +482,12 @@ impl GpuRuntime {
         // Q8_0: (dim/32)*34
         // F16:  dim*2
         // F32:  dim*4
-        let row_bytes: u64 = match embd_quant_type {
-            0 => dim as u64 * 4,            // F32
-            1 => dim as u64 * 2,            // F16
-            2 => (dim as u64 / 32) * 18,    // Q4_0
-            8 => (dim as u64 / 32) * 34,    // Q8_0
-            12 => (dim as u64 / 256) * 144, // Q4_K
-            13 => (dim as u64 / 256) * 176, // Q5_K
-            14 => (dim as u64 / 256) * 210, // Q6_K
-            _ => (dim as u64 / 32) * 18,    // fallback Q4_0
-        };
+        let row_bytes = gpu_model
+            .validated()
+            .manifest()
+            .tensor("token_embd.weight")
+            .expect("validated embedding")
+            .row_bytes();
         eprintln!(
             "[GpuRuntime] token_embd.weight: quant_type={} row_bytes={}",
             embd_quant_type, row_bytes
@@ -362,7 +502,14 @@ impl GpuRuntime {
             }
         });
 
+        #[cfg(feature = "isf")]
+        if let Some(p) = &mut load_profile {
+            p.complete();
+        }
         Ok(Self {
+            #[cfg(feature = "isf")]
+            profile_config,
+            request_gate: Mutex::new(()),
             device,
             queue,
             model: gpu_model,
@@ -379,7 +526,6 @@ impl GpuRuntime {
             im_end_token,
         })
     }
-
     /// Generate text using the Inference Saturation Fabric (ISF).
     ///
     /// Replaces the imperative for-loop in generate() with a D0 reactive graph.
@@ -413,6 +559,37 @@ impl GpuRuntime {
         modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
         trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
     ) -> Result<super::generation::GenerationOutput, Box<dyn std::error::Error + Send + Sync>> {
+        self.generate_input_with_metadata(
+            super::generation_input::GenerationInput::Text(prompt),
+            params,
+            on_token,
+            control,
+            modify_logits,
+            trace_cb,
+        )
+    }
+    #[cfg(feature = "isf")]
+    fn generate_input_with_metadata(
+        &self,
+        input: super::generation_input::GenerationInput<'_>,
+        params: &SamplingParams,
+        on_token: Option<Box<dyn FnMut(&str) + Send>>,
+        control: Option<Box<dyn InferenceControl + Send + Sync>>,
+        modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
+        trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
+    ) -> Result<super::generation::GenerationOutput, Box<dyn std::error::Error + Send + Sync>> {
+        let _generation_gate = self.request_gate.lock().map_err(|_| {
+            crate::execution::admission::ExecutionError::Gpu(
+                "runtime generation lock poisoned".into(),
+            )
+        })?;
+        crate::execution::admission::validate_kernel_configuration()?;
+        let mut profiling = self.profile_config.as_ref().map(|p| p.begin_generation());
+        let result=(|| -> Result<super::generation::GenerationOutput,Box<dyn std::error::Error + Send + Sync>> {
+        let profile_handle=profiling.as_ref().map(|p|p.handle());
+        let contexts=profile_handle.as_ref().map(|p|crate::backend::bindless::profiling::generation_contexts(p.clone()));
+        let prefill_profile=contexts.as_ref().map(|c|c.0.clone());
+        let forward_profile=contexts.map(|c|c.1);
         use airframe_observe::facts::InferenceFact;
         use airframe_observe::isf::{ISFState, InferenceSaturationFabric};
 
@@ -434,16 +611,20 @@ impl GpuRuntime {
             }
         };
 
-        append_log(&format!("generate called, prompt_len={}", prompt.len()));
+        append_log("generate called");
         // Chat templates contain tokenizer-owned control markers. Parse them as
         // special tokens rather than feeding their literal spelling to the model.
-        let prompt_tokens = self.tokenizer.encode_with_options(
-            prompt,
-            &shimmytok::EncodeOptions {
-                add_special_tokens: true,
-                parse_special: true,
+        let prompt_tokens = match input {
+            super::generation_input::GenerationInput::Text(prompt) => self.tokenizer.encode_with_options(prompt, &shimmytok::EncodeOptions { add_special_tokens: true, parse_special: true })?,
+            super::generation_input::GenerationInput::TokenIds(ids) => {
+                super::generation_input::validate_prompt_ids(ids, self.spec.n_vocab, self.spec.n_ctx)?;
+                ids.to_vec()
             },
-        )?;
+        };
+        if prompt_tokens.is_empty() || prompt_tokens.len()>self.spec.n_ctx || prompt_tokens.iter().any(|id|*id as usize>=self.spec.n_vocab) {return Err(crate::execution::admission::ExecutionError::Request{code:"invalid_prompt_tokens",detail:"prompt must be nonempty, within vocabulary and context".into()}.into());}
+        if !params.temperature.is_finite() || params.temperature<0.0 || !params.top_p.is_finite() || params.top_p<=0.0 || params.top_p>1.0 || !params.repetition_penalty.is_finite() || params.repetition_penalty<=0.0 || params.max_tokens>u32::MAX as usize {return Err(crate::execution::admission::ExecutionError::Request{code:"invalid_sampling_parameters",detail:"invalid sampling range or nonfinite value".into()}.into());}
+        if prompt_tokens.len().checked_add(params.max_tokens.saturating_sub(1)).is_none_or(|end|end>self.spec.n_ctx){return Err(crate::execution::admission::ExecutionError::Request{code:"context_length_exceeded",detail:"prompt plus requested generation exceeds state capacity".into()}.into());}
+        if let Some(p)=&profile_handle {p.set_prompt_tokens(prompt_tokens.len());}
         append_log(&format!("tokenized: {} tokens", prompt_tokens.len()));
         if params.max_tokens == 0 {
             return Ok(super::generation::GenerationOutput {
@@ -456,11 +637,9 @@ impl GpuRuntime {
         let dim = self.spec.n_embd as u32;
         let prompt_len = prompt_tokens.len() as u32;
 
-        // Reset KV cache
-        {
-            let mut cache = self.kv_cache.lock().unwrap();
-            cache.reset();
-        }
+        let mut request={let mut cache=self.kv_cache.lock().map_err(|_|crate::execution::admission::ExecutionError::Gpu("KV lock poisoned".into()))?; self.model.begin_request(&mut cache,prompt_tokens.len())?};
+        let request_lease=request.lease();
+        let execution_error=std::sync::Arc::new(std::sync::Mutex::new(None::<crate::execution::admission::ExecutionError>));
 
         // Encode extra stop tokens
         let extra_stop_ids: Vec<u32> = params
@@ -495,48 +674,37 @@ impl GpuRuntime {
         // production ISF path. `airframe_observe` stays decoupled — it receives
         // plain `Arc<dyn Fn>` hooks, and we translate InferenceControl here.
         {
-            let mut s = state.lock().unwrap();
-            s.all_token_ids = prompt_tokens.clone();
-            s.mask = modify_logits.map(|b| std::sync::Arc::from(b));
-            s.control = control.map(|c| {
-                let hook: std::sync::Arc<airframe_observe::isf::IsfControlHook> =
-                    std::sync::Arc::new(
-                        move |candidate: usize,
-                              text: &str,
-                              step: usize,
-                              tokens: &[u32],
-                              kv_len: usize| {
-                            let tokens_usize: Vec<usize> =
-                                tokens.iter().map(|t| *t as usize).collect();
-                            let event = InferenceEvent {
-                                tokens: &tokens_usize,
-                                candidate_token: candidate,
-                                step,
-                                kv: KvSnapshot {
-                                    len: kv_len,
-                                    version: kv_len,
-                                },
-                                text,
-                            };
-                            match c.intervene(&event) {
-                                ControlDecision::Allow => {
-                                    airframe_observe::isf::IsfControlDecision::Allow
-                                }
-                                ControlDecision::ForceToken(t) => {
-                                    airframe_observe::isf::IsfControlDecision::ForceToken(t)
-                                }
-                                ControlDecision::EarlyExit => {
-                                    airframe_observe::isf::IsfControlDecision::EarlyExit
-                                }
-                                ControlDecision::BlockAndTerminate(r) => {
-                                    airframe_observe::isf::IsfControlDecision::Block(r)
-                                }
-                            }
-                        },
-                    );
-                hook
+            let mut s=state.lock().unwrap();
+            s.all_token_ids=prompt_tokens.clone();
+            let mask_error=execution_error.clone();
+            s.mask=Some(std::sync::Arc::new(move |logits:&mut[f32]|{
+                if let Some(mask)=&modify_logits {mask(logits);}
+                if logits.iter().any(|v|v.is_nan()||*v==f32::INFINITY)||!logits.iter().any(|v|v.is_finite()){
+                    mask_error.lock().unwrap().get_or_insert(crate::execution::admission::ExecutionError::Request{code:"invalid_logit_mask",detail:"mask produced NaN/+infinity or no permitted token".into()});
+                }
+            }));
+            let hook_error=execution_error.clone();let vocabulary=self.spec.n_vocab;
+            let hook:std::sync::Arc<airframe_observe::isf::IsfControlHook>=std::sync::Arc::new(move |candidate,text,step,tokens,kv_len|{
+                if hook_error.lock().unwrap().is_some(){return airframe_observe::isf::IsfControlDecision::Block("execution failed".into());}
+                let token_ids:Vec<usize>=tokens.iter().map(|id|*id as usize).collect();
+                let event=InferenceEvent{tokens:&token_ids,candidate_token:candidate,step,kv:KvSnapshot{len:kv_len,version:kv_len},text};
+                let decision=control.as_ref().map(|c|c.intervene(&event)).unwrap_or(ControlDecision::Allow);
+                match decision {
+                    ControlDecision::Allow=>airframe_observe::isf::IsfControlDecision::Allow,
+                    ControlDecision::ForceToken(id) if id<vocabulary=>airframe_observe::isf::IsfControlDecision::ForceToken(id),
+                    ControlDecision::ForceToken(id)=>{
+                        hook_error.lock().unwrap().get_or_insert(crate::execution::admission::ExecutionError::Request{code:"invalid_control_token",detail:format!("forced token {id} exceeds vocabulary")});
+                        airframe_observe::isf::IsfControlDecision::Block("invalid forced token".into())
+                    },
+                    ControlDecision::EarlyExit=>airframe_observe::isf::IsfControlDecision::EarlyExit,
+                    ControlDecision::BlockAndTerminate(reason)=>{
+                        *hook_error.lock().unwrap()=Some(crate::execution::admission::ExecutionError::Request{code:"policy_blocked",detail:reason.clone()});
+                        airframe_observe::isf::IsfControlDecision::Block(reason)
+                    },
+                }
             });
-            s.trace = trace_cb.map(|b| std::sync::Arc::new(std::sync::Mutex::new(b)));
+            s.control=Some(hook);
+            s.trace=trace_cb.map(|b|std::sync::Arc::new(std::sync::Mutex::new(b)));
         }
 
         let embd_offset = self.embd_weight_offset;
@@ -546,6 +714,7 @@ impl GpuRuntime {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(512);
+        if let Some(profile) = &profile_handle { profile.set_prefill_chunk(prefill_chunk); }
         let temp = params.temperature;
         let top_p_val = params.top_p;
         let rep_penalty = params.repetition_penalty;
@@ -606,12 +775,14 @@ impl GpuRuntime {
 
         // ── Closure: GPU prefill dispatch ─────────────────────────────────
         let kv_for_prefill = kv_cache_isf.clone();
+        let prefill_lease=request_lease.clone();
+        let prefill_error=execution_error.clone();
         let spec_for_prefill = spec_isf.clone();
         let prefill_fn: std::sync::Arc<
             dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync,
         > = std::sync::Arc::new(move |batched: Vec<f32>, _token_count: u32| {
-            let cache_guard = kv_for_prefill.lock().unwrap();
-            let result = match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
+            let mut cache_guard = kv_for_prefill.lock().unwrap();
+            let result = match pipeline_ref.run_full_model_prefill_chunked_with_cache_state_profiled(
                 device_ref,
                 queue_ref,
                 model_ref,
@@ -621,10 +792,13 @@ impl GpuRuntime {
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 &spec_for_prefill,
                 prefill_chunk,
+                prefill_profile.clone(),
             ) {
-                Ok((hidden, _l21, logits)) => (hidden, logits),
-                Err(_) => (vec![], vec![]),
+                Ok((hidden,_l21,logits)) if !logits.is_empty() && logits.iter().all(|v|v.is_finite())=>(hidden,logits),
+                Ok(_)=>{cache_guard.reset();prefill_error.lock().unwrap().get_or_insert(crate::execution::admission::ExecutionError::Gpu("nonfinite or empty GPU logits".into()));(vec![],vec![])},
+                Err(error) => {cache_guard.reset();prefill_error.lock().unwrap().get_or_insert(crate::execution::admission::ExecutionError::Gpu(error));(vec![],vec![])},
             };
+            cache_guard.set_seq_len(prefill_lease.lock().unwrap().snapshot().processed_positions as u32);
             // ── PPT Invariant Capture: the prefill pass is the golden [BOS,Hello]
             // forward; its last-token activation IS the position=1 layer output
             // the vault oracle rows reference. Emit FinalLogits at position=1. ──
@@ -651,6 +825,8 @@ impl GpuRuntime {
 
         // ── Closure: GPU decode forward pass ─────────────────────────────
         let kv_for_forward = kv_cache_isf.clone();
+        let forward_lease=request_lease.clone();
+        let forward_error=execution_error.clone();
         let spec_for_forward = spec_isf.clone();
         let forward_fn: std::sync::Arc<
             dyn Fn(Vec<f32>, u32) -> (Vec<f32>, Vec<f32>) + Send + Sync,
@@ -672,8 +848,8 @@ impl GpuRuntime {
                 dim,
                 embd_quant_type_val,
             );
-            let cache_guard = kv_for_forward.lock().unwrap();
-            let result = match pipeline_ref.run_full_model_prefill_chunked_with_cache_state(
+            let mut cache_guard = kv_for_forward.lock().unwrap();
+            let result = match pipeline_ref.run_full_model_prefill_chunked_with_cache_state_profiled(
                 device_ref,
                 queue_ref,
                 model_ref,
@@ -683,10 +859,13 @@ impl GpuRuntime {
                 Some((cache_guard.get_k_buffers(), cache_guard.get_v_buffers())),
                 &spec_for_forward,
                 1,
+                forward_profile.clone(),
             ) {
-                Ok((hidden, _l21, logits)) => (hidden, logits),
-                Err(_) => (vec![], vec![]),
+                Ok((hidden,_l21,logits)) if !logits.is_empty() && logits.iter().all(|v|v.is_finite())=>(hidden,logits),
+                Ok(_)=>{cache_guard.reset();forward_error.lock().unwrap().get_or_insert(crate::execution::admission::ExecutionError::Gpu("nonfinite or empty GPU logits".into()));(vec![],vec![])},
+                Err(error) => {cache_guard.reset();forward_error.lock().unwrap().get_or_insert(crate::execution::admission::ExecutionError::Gpu(error));(vec![],vec![])},
             };
+            cache_guard.set_seq_len(forward_lease.lock().unwrap().snapshot().processed_positions as u32);
             // ── PPT Invariant Capture: append FinalLogits to the probe sink ──
             if std::env::var("AIRFRAME_CAPTURE_INVARIANT")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -730,13 +909,8 @@ impl GpuRuntime {
                     .unwrap_or_default()
             });
 
-        // ── Closure: KV cache increment ───────────────────────────────────
-        let kv_for_inc = kv_cache_isf.clone();
-        let kv_increment_fn: std::sync::Arc<dyn Fn() + Send + Sync> =
-            std::sync::Arc::new(move || {
-                let mut cache = kv_for_inc.lock().unwrap();
-                let _ = cache.increment();
-            });
+        // GPU completion commits KV extent; sampling never claims a cache write.
+        let kv_increment_fn:std::sync::Arc<dyn Fn()+Send+Sync>=std::sync::Arc::new(||{});
 
         // ── Build and run the ISF (Phase 3: reactive embedding via PromptToken facts) ─
         // Set prompt_token_ids in state so Rule 2 can check all_embeddings_cached.
@@ -781,8 +955,14 @@ impl GpuRuntime {
 
         let t_fixpoint = std::time::Instant::now();
         append_log("fixpoint start");
-        isf.fabric
-            .run_to_fixpoint(airframe_observe::isf::d0_run_budget());
+        let budget = airframe_observe::isf::request_run_budget(
+            prompt_tokens.len(), params.max_tokens, 0,
+        ).map_err(|error| crate::execution::admission::ExecutionError::Request {
+            code: "isf_budget_overflow", detail: error.to_string(),
+        })?;
+        let run = isf.fabric.run_to_fixpoint(budget);
+        append_log(&format!("ISF processed={} rounds={} saturated={} bound={}",
+            run.total_facts_processed, run.total_rounds, run.saturated, budget.max_rounds));
         append_log(&format!(
             "fixpoint done, {:.2}s",
             t_fixpoint.elapsed().as_secs_f32()
@@ -805,25 +985,58 @@ impl GpuRuntime {
                 let _ = f.write_all(b"---\n");
             }
         }
+        if let Some(error)=execution_error.lock().unwrap().take(){return Err(error.into());}
         // A control hook returning Block aborts generation — surface as an error.
         if let Some(reason) = &s.block_reason {
             return Err(format!("Blocked by control hook: {reason}").into());
+        }
+        if !run.saturated {
+            return Err(crate::execution::admission::ExecutionError::Scheduler {
+                code: "isf_budget_exhausted", detail: format!("processed {} facts under bound {}", run.total_facts_processed, budget.max_facts),
+            }.into());
         }
         let finish_reason = match s.halt {
             Some(airframe_observe::facts::HaltReason::MaxTokensReached) => {
                 super::generation::FinishReason::Length
             }
             Some(_) => super::generation::FinishReason::Stop,
-            None => return Err("Generation ended without a terminal reason".into()),
+            None => return Err(crate::execution::admission::ExecutionError::Scheduler {
+                code: "isf_missing_terminal_reason", detail: "fact graph saturated without a terminal reason".into(),
+            }.into()),
         };
+        request.finish()?;
+        self.kv_cache.lock().unwrap().reset();
         Ok(super::generation::GenerationOutput {
             text: s.generated_text.clone(),
             prompt_tokens: prompt_tokens.len(),
             completion_tokens: s.all_token_ids.len().saturating_sub(prompt_tokens.len()),
             finish_reason,
         })
+        })();
+        if let Some(profile) = &mut profiling {
+            profile.finish(result.is_ok());
+        }
+        result
     }
-
+    #[cfg(feature = "isf")]
+    pub fn generate_token_ids_with_metadata(
+        &self,
+        token_ids: &[u32],
+        params: &SamplingParams,
+        on_token: Option<Box<dyn FnMut(&str) + Send>>,
+        control: Option<Box<dyn InferenceControl + Send + Sync>>,
+        modify_logits: Option<Box<dyn Fn(&mut [f32]) + Send + Sync>>,
+        trace_cb: Option<Box<dyn FnMut(usize, &[f32], f64) + Send>>,
+    ) -> Result<super::generation::GenerationOutput, Box<dyn std::error::Error + Send + Sync>> {
+        self.generate_input_with_metadata(
+            super::generation_input::GenerationInput::TokenIds(token_ids),
+            params,
+            on_token,
+            control,
+            modify_logits,
+            trace_cb,
+        )
+    }
     /// Generate text via the Inference Saturation Fabric (ISF) dispatch path.
     ///
     /// This is the single production entry point. `on_token` is called for each
@@ -832,9 +1045,12 @@ impl GpuRuntime {
     /// runs pre-sample (grammar) and the control runs post-sample (grammar/FSE/
     /// math-bypass). A control returning `Block` aborts generation with an error.
     /// Reset the KV cache (for a new conversation).
+    /// Compatibility wrapper; production callers should propagate try_reset().
+    /// Panics when reset fails, including while a generation request is active.
+    #[deprecated(note = "use try_reset() and propagate its error")]
     pub fn reset(&self) {
-        let mut cache = self.kv_cache.lock().unwrap();
-        cache.reset();
+        self.try_reset()
+            .expect("GPU reset failed; use try_reset() to handle reset errors");
     }
 
     /// Get a reference to the tokenizer.

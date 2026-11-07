@@ -5,10 +5,11 @@ members = ["crates/libfse", "crates/airframe_observe"]
 
 [package]
 name = "airframe"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
-description = "Pure-Rust WebGPU inference engine for GGUF models. No C++ toolchain, no llama.cpp. Runs on NVIDIA, AMD, Intel, and Apple Silicon via wgpu."
+description = "Rust/WGSL GGUF inference with validated dense model admission via wgpu; model and platform certification is fixture-specific."
 license = "MIT"
+exclude = [".gitignore", ".gitattributes", "PRIVATE-INTEGRATION.md", "vault/**", "vault.duckdb", "golden_ref.json", "qwen3_0_6b_cpu_ref.json"]
 repository = "https://github.com/Michael-A-Kuykendall/airframe"
 homepage = "https://github.com/Michael-A-Kuykendall/airframe"
 readme = "README.md"
@@ -25,14 +26,14 @@ serde_json = "1.0"
 byteorder = "1.4"
 memmap2 = "0.9"
 half = "2.4"
-shimmytok = "0.8.4"
+shimmytok = "0.8.5"
 chrono = { version = "0.4.43", features = ["serde"] }
 wgpu = "27.0.1"
 pollster = "0.4.0"
 bytemuck = { version = "1.24.0", features = ["derive"] }
 clap = { version = "4.5.56", features = ["derive"] }
 tokio = { version = "1.49.0", features = ["full"] }
-libfse = { path = "crates/libfse", version = "0.1.3" }
+libfse = { path = "crates/libfse", version = "0.1.4" }
 schoolmarm = "0.1.1"
 sha2 = "0.10"
 aho-corasick = { version = "1.1", features = ["std"] }
@@ -41,8 +42,8 @@ shimmyjinja = { version = "0.5.0" }
 lazy_static = "1.4"
 
 # Optional: ISF (Inference Saturation Fabric) — depends on dzero.
-# Enable with --features isf. Not published to crates.io.
-airframe-observe = { path = "crates/airframe_observe", version = "0.1.3", optional = true }
+# Enabled by the default isf feature; requires the coordinated observation crate.
+airframe-observe = { path = "crates/airframe_observe", version = "0.1.4", optional = true }
 
 [features]
 default = ["isf"]
@@ -63,6 +64,11 @@ required-features = ["isf"]
 [[bin]]
 name = "stack_dump_gpu"
 path = "src/bin/stack_dump_gpu.rs"
+required-features = ["isf"]
+
+[[bin]]
+name = "generation_differential_probe"
+path = "src/bin/generation_differential_probe.rs"
 required-features = ["isf"]
 
 [[bin]]

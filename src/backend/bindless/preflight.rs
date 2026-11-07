@@ -4,13 +4,25 @@ use wgpu::util::DeviceExt;
 /// The "Pre-Flight" deck.
 /// Contains resources that are "Fused" (Pre-computed/Extracted)
 /// from the raw model to prepare for high-speed GPU execution.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum RopeFactorError {
+    #[error("invalid_rope_geometry: {0}")]
+    Geometry(String),
+    #[error("invalid_rope_factor_tensor: {0}")]
+    Tensor(String),
+    #[error("invalid_rope_factor: index {index}, value {value}")]
+    Value { index: usize, value: f32 },
+    #[error("rope_table_budget: checked table size exceeds 256 MiB")]
+    Budget,
+}
+
 pub struct PreflightResources {
     /// Pre-computed RoPE frequencies (Cos/Sin pairs), runtime buffer.
     /// Layout: [distance][pair] each entry = (cos, sin).
     /// Written via write_buffer before each inference to select native or extended table.
     pub rope_cache_buffer: wgpu::Buffer,
 
-    /// Raw RoPE table data at native scale (scale=1.0, no frequency modification).
+    /// RoPE table at scale=1.0 with model-owned per-pair factors applied.
     /// Used for requests whose total sequence length fits within the training context.
     pub rope_data_native: Vec<f32>,
 
@@ -31,25 +43,184 @@ impl PreflightResources {
         metadata: &super::metadata::BindlessMetadata,
         spec: &ModelSpec,
     ) -> Self {
-        println!("[Preflight] Spinning off Math Tables & Tensor Banks (From RAM)...");
-
-        let rope_data_ext = Self::compute_rope_table(spec, spec.rope_scale);
-        let rope_data_native = if spec.rope_scale < 1.0 {
-            Self::compute_rope_table(spec, 1.0)
-        } else {
-            rope_data_ext.clone()
-        };
-        let rope_buffer = Self::upload_rope_table(device, &rope_data_ext, spec.rope_scale, spec);
-        let norm_buffer = Self::build_norm_bank_from_ram(device, raw_data, metadata, spec);
-
+        let tables =
+            Self::prepare_rope_tables(raw_data, metadata, spec).expect("invalid RoPE factors");
+        Self::new_from_ram_with_tables(device, raw_data, metadata, spec, tables)
+    }
+    pub(crate) fn new_from_ram_with_tables(
+        device: &wgpu::Device,
+        raw_data: &[u8],
+        metadata: &super::metadata::BindlessMetadata,
+        spec: &ModelSpec,
+        tables: (Vec<f32>, Vec<f32>),
+    ) -> Self {
+        let (rope_data_native, rope_data_ext) = tables;
+        let rope_cache_buffer =
+            Self::upload_rope_table(device, &rope_data_ext, spec.rope_scale, spec);
+        let norm_bank_buffer = Self::build_norm_bank_from_ram(device, raw_data, metadata, spec);
         Self {
-            rope_cache_buffer: rope_buffer,
+            rope_cache_buffer,
             rope_data_native,
             rope_data_ext,
-            norm_bank_buffer: norm_buffer,
+            norm_bank_buffer,
         }
     }
+    pub fn prepare_rope_tables(
+        raw: &[u8],
+        metadata: &super::metadata::BindlessMetadata,
+        spec: &ModelSpec,
+    ) -> Result<(Vec<f32>, Vec<f32>), RopeFactorError> {
+        let factors = Self::read_rope_factors(raw, metadata, spec)?;
+        let extended = Self::compute_rope_table_with_factors(spec, spec.rope_scale, &factors)?;
+        let native = if spec.rope_scale < 1.0 {
+            Self::compute_rope_table_with_factors(spec, 1.0, &factors)?
+        } else {
+            extended.clone()
+        };
+        Ok((native, extended))
+    }
+    pub fn read_rope_factors(
+        raw: &[u8],
+        metadata: &super::metadata::BindlessMetadata,
+        spec: &ModelSpec,
+    ) -> Result<Vec<f32>, RopeFactorError> {
+        if spec.rope_dim == 0 || !spec.rope_dim.is_multiple_of(2) || spec.rope_dim > spec.head_dim {
+            return Err(RopeFactorError::Geometry(
+                "expected positive even rope_dim <= head_dim".into(),
+            ));
+        }
+        for name in metadata.tensor_offsets.keys() {
+            if name.contains("rope_freqs") && name != "rope_freqs.weight"
+                || name.contains("rope_factors")
+            {
+                return Err(RopeFactorError::Tensor(format!(
+                    "unsupported per-layer/scaled factor tensor {name}"
+                )));
+            }
+        }
+        let name = "rope_freqs.weight";
+        let pairs = spec.rope_dim / 2;
+        let Some(&offset) = metadata.tensor_offsets.get(name) else {
+            if metadata.tensor_types.contains_key(name) || metadata.tensor_dims.contains_key(name) {
+                return Err(RopeFactorError::Tensor("incomplete factor metadata".into()));
+            }
+            return Ok(vec![1.0; pairs]);
+        };
+        if metadata.tensor_types.get(name) != Some(&0)
+            || metadata.tensor_dims.get(name).map(Vec::as_slice) != Some(&[pairs as u64][..])
+        {
+            return Err(RopeFactorError::Tensor("expected F32[rope_dim/2]".into()));
+        }
+        let start = usize::try_from(offset)
+            .map_err(|_| RopeFactorError::Tensor("offset overflow".into()))?;
+        let bytes = pairs.checked_mul(4).ok_or(RopeFactorError::Budget)?;
+        let end = start.checked_add(bytes).ok_or(RopeFactorError::Budget)?;
+        let payload = raw
+            .get(start..end)
+            .ok_or_else(|| RopeFactorError::Tensor("factor data out of bounds".into()))?;
+        payload
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .enumerate()
+            .map(|(index, b)| {
+                let value = f32::from_le_bytes(*b);
+                if value.is_finite() && value > 0.0 {
+                    Ok(value)
+                } else {
+                    Err(RopeFactorError::Value { index, value })
+                }
+            })
+            .collect()
+    }
+    pub fn compute_rope_table_with_factors(
+        spec: &ModelSpec,
+        scale: f32,
+        factors: &[f32],
+    ) -> Result<Vec<f32>, RopeFactorError> {
+        if spec.rope_dim == 0
+            || !spec.rope_dim.is_multiple_of(2)
+            || spec.rope_dim > spec.head_dim
+            || spec.n_ctx == 0
+            || !spec.rope_base.is_finite()
+            || spec.rope_base <= 0.0
+            || !scale.is_finite()
+            || scale <= 0.0
+        {
+            return Err(RopeFactorError::Geometry(
+                "invalid dimension, context, base or scale".into(),
+            ));
+        }
+        if factors.len() != spec.rope_dim / 2 {
+            return Err(RopeFactorError::Tensor(
+                "factor count differs from rope pairs".into(),
+            ));
+        }
+        for (index, &value) in factors.iter().enumerate() {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(RopeFactorError::Value { index, value });
+            }
+        }
+        let dim = spec.rope_dim;
+        let base = spec.rope_base;
+        let n_pairs = dim / 2;
+        let max_dist = spec.n_ctx;
 
+        let l_train = if scale < 1.0 {
+            (max_dist as f32 * scale).round() as usize
+        } else {
+            max_dist
+        };
+        let alpha = spec.yarn_alpha;
+        let beta = spec.yarn_beta;
+        let use_yarn = scale < 1.0 && alpha > 0.0 && beta > alpha;
+
+        // Compute per-dimension effective theta with optional YaRN correction.
+        let effective_thetas: Vec<f32> = (0..n_pairs)
+            .map(|i| {
+                let theta = (1.0_f32 / base.powf((2.0 * i as f32) / dim as f32)) / factors[i];
+                if !use_yarn {
+                    return theta * scale; // plain linear or native
+                }
+                let lambda = std::f32::consts::TAU / theta; // wavelength = 2*pi / theta
+                                                            // ramp: 1.0 at short wavelengths, 0.0 at long wavelengths.
+                                                            // Per YaRN: high-freq dims skip scaling; low-freq dims get full linear scaling.
+                                                            // Lerp: ramp drives theta toward 1.0 for high-freq, toward scale for low-freq.
+                let ramp = ((l_train as f32 / lambda - alpha) / (beta - alpha)).clamp(0.0, 1.0);
+                theta * ((1.0 - ramp) * scale + ramp)
+            })
+            .collect();
+
+        if effective_thetas
+            .iter()
+            .any(|theta| !theta.is_finite() || *theta <= 0.0)
+        {
+            return Err(RopeFactorError::Geometry(
+                "effective frequency not representable in F32".into(),
+            ));
+        }
+        let table_len = max_dist.checked_mul(dim).ok_or(RopeFactorError::Budget)?;
+        if table_len > 256 * 1024 * 1024 / 4 {
+            return Err(RopeFactorError::Budget);
+        }
+        let mut table = Vec::new();
+        table
+            .try_reserve_exact(table_len)
+            .map_err(|_| RopeFactorError::Budget)?;
+        for d in 0..max_dist {
+            for theta in effective_thetas.iter().take(n_pairs) {
+                let angle = d as f32 * theta;
+                if !angle.is_finite() {
+                    return Err(RopeFactorError::Geometry(
+                        "angle not representable in F32".into(),
+                    ));
+                }
+                table.push(angle.cos());
+                table.push(angle.sin());
+            }
+        }
+        Ok(table)
+    }
     /// Compute a RoPE cos/sin lookup table with the given scale override.
     ///
     /// YaRN (Peng et al. 2023) applies a non-uniform frequency correction per
@@ -68,47 +239,10 @@ impl PreflightResources {
     /// Layout: [distance][pair] each entry = (cos, sin).
     ///   table[d * n_pairs * 2 + p * 2 + 0] = cos(d * effective_theta_p)
     ///   table[d * n_pairs * 2 + p * 2 + 1] = sin(d * effective_theta_p)
+    #[cfg(test)]
     fn compute_rope_table(spec: &ModelSpec, scale: f32) -> Vec<f32> {
-        let dim = spec.rope_dim;
-        let base = spec.rope_base;
-        let n_pairs = dim / 2;
-        let max_dist = spec.n_ctx;
-
-        let l_train = if scale < 1.0 {
-            (max_dist as f32 * scale).round() as usize
-        } else {
-            max_dist
-        };
-        let alpha = spec.yarn_alpha;
-        let beta = spec.yarn_beta;
-        let use_yarn = scale < 1.0 && alpha > 0.0 && beta > alpha;
-
-        // Compute per-dimension effective theta with optional YaRN correction.
-        let effective_thetas: Vec<f32> = (0..n_pairs)
-            .map(|i| {
-                let theta = 1.0_f32 / base.powf((2.0 * i as f32) / dim as f32);
-                if !use_yarn {
-                    return theta * scale; // plain linear or native
-                }
-                let lambda = std::f32::consts::TAU / theta; // wavelength = 2*pi / theta
-                                                            // ramp: 1.0 at short wavelengths, 0.0 at long wavelengths.
-                                                            // Per YaRN: high-freq dims skip scaling; low-freq dims get full linear scaling.
-                                                            // Lerp: ramp drives theta toward 1.0 for high-freq, toward scale for low-freq.
-                let ramp = ((l_train as f32 / lambda - alpha) / (beta - alpha)).clamp(0.0, 1.0);
-                theta * ((1.0 - ramp) * scale + ramp)
-            })
-            .collect();
-
-        let table_len = max_dist * n_pairs * 2;
-        let mut table = Vec::with_capacity(table_len);
-        for d in 0..max_dist {
-            for theta in effective_thetas.iter().take(n_pairs) {
-                let angle = d as f32 * theta;
-                table.push(angle.cos());
-                table.push(angle.sin());
-            }
-        }
-        table
+        Self::compute_rope_table_with_factors(spec, scale, &vec![1.0; spec.rope_dim / 2])
+            .expect("invalid RoPE configuration")
     }
 
     fn upload_rope_table(
@@ -288,6 +422,108 @@ mod tests {
             q_weight_k: 0,
             k_weight_k: 0,
         }
+    }
+
+    #[test]
+    fn factor_tables_preserve_identity_and_divide_frequency() {
+        let spec = tiny_spec(1.0, 0.0, 0.0);
+        let ones = vec![1.0; spec.rope_dim / 2];
+        assert_eq!(
+            PreflightResources::compute_rope_table(&spec, 1.0),
+            PreflightResources::compute_rope_table_with_factors(&spec, 1.0, &ones).unwrap()
+        );
+        let factors = vec![32.0; spec.rope_dim / 2];
+        let t = PreflightResources::compute_rope_table_with_factors(&spec, 1.0, &factors).unwrap();
+        assert!((t[spec.rope_dim] - (1.0_f32 / 32.0).cos()).abs() < 1e-7);
+        assert!((t[spec.rope_dim + 1] - (1.0_f32 / 32.0).sin()).abs() < 1e-7);
+    }
+    #[test]
+    fn malformed_factor_payloads_fail_before_upload() {
+        let spec = tiny_spec(1.0, 0.0, 0.0);
+        let mut meta = super::super::metadata::BindlessMetadata {
+            version: 3,
+            tensor_count: 1,
+            tensor_offsets: std::collections::HashMap::new(),
+            tensor_types: std::collections::HashMap::new(),
+            tensor_dims: std::collections::HashMap::new(),
+            data_start_offset: 0,
+            gguf_metadata: std::collections::HashMap::new(),
+            compiled_layers: vec![],
+        };
+        let name = "rope_freqs.weight".to_string();
+        meta.tensor_offsets.insert(name.clone(), 0);
+        meta.tensor_types.insert(name.clone(), 0);
+        meta.tensor_dims
+            .insert(name.clone(), vec![(spec.rope_dim / 2) as u64]);
+        let mut bytes = vec![0u8; spec.rope_dim * 2];
+        for chunk in bytes.as_chunks_mut::<4>().0 {
+            chunk.copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        assert!(PreflightResources::read_rope_factors(&bytes, &meta, &spec).is_ok());
+        for invalid in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            bytes[..4].copy_from_slice(&invalid.to_le_bytes());
+            assert!(PreflightResources::read_rope_factors(&bytes, &meta, &spec).is_err());
+        }
+        bytes[..4].copy_from_slice(&1.0f32.to_le_bytes());
+        assert!(
+            PreflightResources::read_rope_factors(&bytes[..bytes.len() - 1], &meta, &spec).is_err()
+        );
+        meta.tensor_types.insert(name.clone(), 1);
+        assert!(PreflightResources::read_rope_factors(&bytes, &meta, &spec).is_err());
+        meta.tensor_types.insert(name.clone(), 0);
+        meta.tensor_dims.insert(name, vec![1, 1]);
+        assert!(PreflightResources::read_rope_factors(&bytes, &meta, &spec).is_err());
+    }
+    #[test]
+    fn factored_relative_scores_match_independently_rotated_vectors() {
+        let mut spec = tiny_spec(1.0, 0.0, 0.0);
+        spec.n_ctx = 128;
+        let factors: Vec<f32> = (0..spec.rope_dim / 2)
+            .map(|i| if i % 2 == 0 { 1.0 } else { 32.0 })
+            .collect();
+        let table =
+            PreflightResources::compute_rope_table_with_factors(&spec, 1.0, &factors).unwrap();
+        for (qpos, kpos) in [(1usize, 0usize), (57, 9), (127, 33)] {
+            for (pair, &factor) in factors.iter().enumerate() {
+                let theta = 1.0_f64
+                    / f64::from(spec.rope_base).powf(2.0 * pair as f64 / spec.rope_dim as f64)
+                    / f64::from(factor);
+                let (qs, qc) = (qpos as f64 * theta).sin_cos();
+                let (ks, kc) = (kpos as f64 * theta).sin_cos();
+                let (qr, qi, kr, ki) = (0.25f64, -0.75f64, 0.5f64, 0.125f64);
+                let direct = (qr * qc - qi * qs) * (kr * kc - ki * ks)
+                    + (qr * qs + qi * qc) * (kr * ks + ki * kc);
+                let index = (qpos - kpos) * spec.rope_dim + pair * 2;
+                let relative = (qr * kr + qi * ki) * f64::from(table[index])
+                    + (qr * ki - qi * kr) * f64::from(table[index + 1]);
+                assert!(
+                    (direct - relative).abs() < 2e-6,
+                    "positions {qpos}/{kpos}, pair {pair}"
+                );
+            }
+        }
+    }
+    #[test]
+    #[ignore = "requires exact local Llama3.2 fixture"]
+    fn exact_llama_factor_tensor_is_consumed() {
+        let path = std::path::Path::new(&std::env::var("SHIMMY_CERT_MODEL_DIR").expect("fixtures"))
+            .join("llama3.2-3b-instruct-dde5aa3f.gguf");
+        let mut file = std::fs::File::open(path).unwrap();
+        let metadata = super::super::metadata::BindlessMetadata::new(&mut file);
+        let mut spec = metadata.to_model_spec();
+        spec.n_ctx = 512;
+        let map = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let factors = PreflightResources::read_rope_factors(&map, &metadata, &spec).unwrap();
+        assert_eq!(factors.len(), 64);
+        assert_eq!(factors.iter().copied().fold(0.0, f32::max), 32.0);
+        let (_, table) = PreflightResources::prepare_rope_tables(&map, &metadata, &spec).unwrap();
+        let pair = factors.iter().position(|f| *f == 32.0).unwrap();
+        let theta = 1.0_f32
+            / spec
+                .rope_base
+                .powf(2.0 * pair as f32 / spec.rope_dim as f32)
+            / 32.0;
+        assert!((table[511 * spec.rope_dim + pair * 2] - (511.0 * theta).cos()).abs() < 1e-7);
     }
 
     /// At distance 0 every (cos, sin) entry must be (1.0, 0.0) regardless of scaling.

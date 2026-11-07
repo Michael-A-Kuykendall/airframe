@@ -1,13 +1,14 @@
 [package]
 name = "libfse"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
-description = "Fused Semantic Execution: fail-closed policy engine with O(1)-in-rule-count scanning, zero-allocation hot path, and guaranteed enforcement semantics."
+description = "Byte-pattern policy scanning with compiled actions and per-stream cursors; FSE Noncommercial Evaluation License."
 publish = true
-license = "MIT"
+license-file = "LICENSE"
 repository = "https://github.com/Michael-A-Kuykendall/airframe"
 homepage = "https://github.com/Michael-A-Kuykendall/airframe"
 readme = "README.md"
+exclude = [".gitignore", ".gitattributes"]
 keywords = ["policy", "security", "scanner", "dfa", "inference"]
 categories = ["algorithms", "data-structures", "text-processing"]
 

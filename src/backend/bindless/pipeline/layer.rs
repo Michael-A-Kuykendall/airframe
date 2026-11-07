@@ -18,6 +18,9 @@ impl BindlessPipeline {
         offsets: LayerOffsets,
         params: LayerParams,
     ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        crate::execution::admission::require_diagnostic_execution()
+            .expect("unvalidated single-layer execution rejected");
+
         println!(
             "[BindlessPipeline] Running QKV ONLY Test (Dim={})",
             params.dim
@@ -253,6 +256,9 @@ impl BindlessPipeline {
         params: LayerParams,
         read_halfway: bool,
     ) -> (Vec<f32>, Vec<f32>) {
+        crate::execution::admission::require_diagnostic_execution()
+            .expect("unvalidated single-layer execution rejected");
+
         println!(
             "[BindlessPipeline] Running Layer V1 Test Stepwise (Dim={})",
             params.dim
@@ -592,6 +598,12 @@ impl BindlessPipeline {
         offsets: LayerOffsets,
         params: LayerParams,
     ) -> Vec<f32> {
+        crate::execution::admission::require_diagnostic_execution()
+            .expect("unvalidated single-layer execution rejected");
+        kv_cache
+            .require_unbound_diagnostic()
+            .expect("diagnostics cannot mutate plan-owned state");
+
         let dim = params.dim as u64;
 
         let (window, window_base_words) =
@@ -902,6 +914,12 @@ impl BindlessPipeline {
         offsets: LayerOffsets,
         params: LayerParams,
     ) -> Vec<f32> {
+        crate::execution::admission::require_diagnostic_execution()
+            .expect("unvalidated single-layer execution rejected");
+        kv_cache
+            .require_unbound_diagnostic()
+            .expect("diagnostics cannot mutate plan-owned state");
+
         let dim = params.dim as u64;
 
         let (window, window_base_words) =
@@ -1277,6 +1295,12 @@ impl BindlessPipeline {
         seq_len: u32,
         n_layers: usize,
     ) {
+        crate::execution::admission::require_diagnostic_execution()
+            .expect("unvalidated single-layer execution rejected");
+        kv_cache
+            .require_unbound_diagnostic()
+            .expect("diagnostics cannot mutate plan-owned state");
+
         if seq_len == 0 {
             return;
         }
@@ -1359,6 +1383,12 @@ impl BindlessPipeline {
         offsets: LayerOffsets,
         params: LayerParams,
     ) -> LayerDebugOutput {
+        crate::execution::admission::require_diagnostic_execution()
+            .expect("unvalidated single-layer execution rejected");
+        kv_cache
+            .require_unbound_diagnostic()
+            .expect("diagnostics cannot mutate plan-owned state");
+
         let dim = params.dim as u64;
 
         let (window, window_base_words) =

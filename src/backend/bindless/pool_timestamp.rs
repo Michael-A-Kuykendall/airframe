@@ -29,16 +29,18 @@ pub struct TimestampPool {
 }
 
 impl TimestampPool {
-    /// Create a new timestamp pool.
-    ///
-    /// Returns `None` when `TIMESTAMP_QUERY_INSIDE_PASSES` is not supported
-    /// (common on some OpenGL/Vulkan backends).
-    pub fn new(device: &wgpu::Device, pair_count: u32, period_ns: f64) -> Option<Self> {
-        let supported = device
-            .features()
-            .contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES)
-            && device.features().contains(wgpu::Features::TIMESTAMP_QUERY);
-        if !supported {
+    pub fn for_compute_passes(
+        device: &wgpu::Device,
+        pair_count: u32,
+        period_ns: f64,
+    ) -> Option<Self> {
+        let supported = device.features().contains(wgpu::Features::TIMESTAMP_QUERY);
+        if !supported
+            || pair_count == 0
+            || pair_count > wgpu::QUERY_SET_MAX_QUERIES / 2
+            || !period_ns.is_finite()
+            || period_ns <= 0.0
+        {
             return None;
         }
         let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
@@ -68,45 +70,72 @@ impl TimestampPool {
             supported: true,
         })
     }
+    pub fn reserve_pass(&mut self) -> Option<(u32, wgpu::ComputePassTimestampWrites<'_>)> {
+        if self.next_pair >= self.pair_count {
+            return None;
+        }
+        let index = self.next_pair;
+        self.next_pair += 1;
+        Some((
+            index,
+            wgpu::ComputePassTimestampWrites {
+                query_set: &self.query_set,
+                beginning_of_pass_write_index: Some(index * 2),
+                end_of_pass_write_index: Some(index * 2 + 1),
+            },
+        ))
+    }
+    pub fn used_pairs(&self) -> u32 {
+        self.next_pair
+    }
+    pub fn unmap(&self) {
+        self.readback_buf.unmap();
+    }
+
+    /// Create a new timestamp pool.
+    ///
+    /// Returns `None` when `TIMESTAMP_QUERY_INSIDE_PASSES` is not supported
+    /// (common on some OpenGL/Vulkan backends).
+    pub fn new(device: &wgpu::Device, pair_count: u32, period_ns: f64) -> Option<Self> {
+        if !device
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
+        {
+            return None;
+        }
+        Self::for_compute_passes(device, pair_count, period_ns)
+    }
 
     /// Write a start timestamp for the next pair.
     pub fn write_start(&mut self, encoder: &mut CommandEncoder) -> Option<u32> {
-        if !self.supported {
+        if !self.supported || self.next_pair >= self.pair_count {
             return None;
         }
         let idx = self.next_pair;
-        if idx >= self.pair_count {
-            return None;
-        }
+        self.next_pair += 1;
         encoder.write_timestamp(&self.query_set, idx * 2);
         Some(idx)
     }
 
     /// Write an end timestamp for the given pair index (returned by `write_start`).
     pub fn write_end(&self, encoder: &mut CommandEncoder, pair_idx: u32) {
-        if !self.supported {
-            return;
+        if self.supported && pair_idx < self.next_pair {
+            encoder.write_timestamp(&self.query_set, pair_idx * 2 + 1);
         }
-        encoder.write_timestamp(&self.query_set, pair_idx * 2 + 1);
     }
 
     /// Resolve all pending timestamp pairs into the readback buffer.
     pub fn resolve(&self, encoder: &mut CommandEncoder) {
-        if !self.supported {
+        if !self.supported || self.next_pair == 0 {
             return;
         }
-        encoder.resolve_query_set(
-            &self.query_set,
-            0..self.pair_count * 2,
-            &self.resolve_buf,
-            0,
-        );
+        encoder.resolve_query_set(&self.query_set, 0..self.next_pair * 2, &self.resolve_buf, 0);
         encoder.copy_buffer_to_buffer(
             &self.resolve_buf,
             0,
             &self.readback_buf,
             0,
-            self.readback_buf.size(),
+            self.next_pair as u64 * 16,
         );
     }
 
@@ -115,15 +144,16 @@ impl TimestampPool {
     /// Call after the resolve buffer has been mapped and copied.
     /// Returns `None` if timestamps are unsupported or pair is out of range.
     pub fn elapsed_ns(&self, pair_idx: u32, data: &[u64]) -> Option<f64> {
-        if !self.supported || pair_idx >= self.pair_count {
+        if !self.supported || pair_idx >= self.next_pair {
             return None;
         }
-        let start = data[pair_idx as usize * 2];
-        let end = data[pair_idx as usize * 2 + 1];
-        if end <= start {
-            return Some(0.0);
+        let start = *data.get(pair_idx as usize * 2)?;
+        let end = *data.get(pair_idx as usize * 2 + 1)?;
+        if start == 0 || end <= start {
+            return None;
         }
-        Some((end - start) as f64 * self.period_ns)
+        let elapsed = (end - start) as f64 * self.period_ns;
+        (elapsed.is_finite() && elapsed > 0.0).then_some(elapsed)
     }
 
     /// Map the readback buffer for CPU access.
@@ -136,7 +166,7 @@ impl TimestampPool {
     /// let data: &[u64] = bytemuck::cast_slice(slice.get_mapped_range());
     /// ```
     pub fn readback_slice(&self) -> wgpu::BufferSlice<'_> {
-        self.readback_buf.slice(..)
+        self.readback_buf.slice(0..self.next_pair as u64 * 16)
     }
 
     /// Reset the pair index for a new frame.
