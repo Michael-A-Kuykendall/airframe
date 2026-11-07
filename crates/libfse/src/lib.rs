@@ -1,18 +1,19 @@
 // Fused Semantic Execution (FSE)
-// Copyright (c) 2026 Michael Kuykendall / DZERO. All rights reserved.
+// Copyright (c) 2026 Michael Kuykendall / DZERO.
+// SPDX-License-Identifier: Apache-2.0
 //
-// PATENT PENDING. This library implements inventions covered by a pending US patent
-// application for Fail-Closed Semantic Enforcement methods.
+// Historical patent attribution is retained in NOTICE; the patent grant is
+// limited by Apache-2.0 section 3 to covered claims licensable by contributors.
 //
-// This source is distributed under the FSE Noncommercial Evaluation License.
-// See LICENSE. Non-commercial, evaluation, and internal research purposes ONLY.
-// Commercial use, embedding in products, or creation of derivative works
-// requires a separate commercial license.
+// This source is licensed under Apache-2.0. See LICENSE.
+// LICENSE-GRANT-0.1.4.md additionally covers the existing published archive.
+// Commercial use, embedding, modification and redistribution are permitted
+// under Apache-2.0 without separate commercial permission.
 // Contact: michaelallenkuykendall@gmail.com
 //
 // Portions of the graph compilation logic may utilize algorithms from `aho-corasick`
 // (MIT License, Andrew Gallant). The Execution Kernel and Policy Fusion logic
-// are original works subject to the patent notice above.
+// retain the applicable Apache-2.0 copyright and patent grants.
 
 pub mod metrics;
 pub mod scanner;

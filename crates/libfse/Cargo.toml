@@ -2,9 +2,9 @@
 name = "libfse"
 version = "0.1.4"
 edition = "2021"
-description = "Byte-pattern policy scanning with compiled actions and per-stream cursors; FSE Noncommercial Evaluation License."
+description = "Byte-pattern policy scanning with compiled actions and per-stream cursors; Apache-2.0; additional grant covers the existing 0.1.4 archive."
 publish = true
-license-file = "LICENSE"
+license = "Apache-2.0"
 repository = "https://github.com/Michael-A-Kuykendall/airframe"
 homepage = "https://github.com/Michael-A-Kuykendall/airframe"
 readme = "README.md"

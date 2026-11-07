@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4 additional license grant — 2026-11-07
+
+- Michael A. Kuykendall additionally licenses owned libfse code under Apache-2.0, including commercial use, modification, redistribution and incorporation into products. No separate commercial permission is required. See [the exact version/checksum grant](LICENSE-GRANT-0.1.4.md), [complete license](LICENSE) and [NOTICE](NOTICE).
+- The published 0.1.4 archive, original license metadata and original tag remain unchanged. Earlier restrictions described in the original archive history below are superseded by the additional grant to the extent of the licensor's rights. Third-party rights remain applicable. No runtime, dependency or version change.
+
 ## [0.1.4] — 2026-11-06
 
 - Documentation errata: clarify caller enforcement responsibility, action-dependent scanning cost and distinct airframe-observe responsibilities. Remove unsupported performance and whole-system guarantees without changing executable code or license rights.

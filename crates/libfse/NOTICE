@@ -1,0 +1,14 @@
+libfse
+Copyright (c) 2026 Michael Kuykendall / DZERO.
+
+Licensed by Michael A. Kuykendall under Apache License 2.0.
+The libfse 0.1.4 additional grant is in LICENSE-GRANT-0.1.4.md.
+
+Historical patent attribution: the original release stated PATENT PENDING
+for Fail-Closed Semantic Enforcement methods. Apache-2.0 section 3 supplies
+the patent license for covered claims licensable by the contributor; no
+additional restriction or unrelated product/patent license is imposed here.
+
+The separately licensed aho-corasick dependency is authored by Andrew Gallant
+and its contributors and retains its own MIT OR Unlicense terms and notices.
+No third-party ownership is claimed by this notice.

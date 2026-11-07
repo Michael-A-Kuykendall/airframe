@@ -6,9 +6,9 @@
   [![Crates.io](https://img.shields.io/crates/v/libfse.svg)](https://crates.io/crates/libfse)
 </div>
 
-> **License**: Source available under the [FSE Noncommercial Evaluation License](LICENSE). Non-commercial, evaluation, and internal research use only. Commercial use, embedding in products, or creation of derivative works requires a separate commercial license — contact michaelallenkuykendall@gmail.com.
+> **License:** [Apache-2.0](LICENSE), including commercial use, modification, redistribution and embedding. The [additional license grant for libfse 0.1.4](LICENSE-GRANT-0.1.4.md) identifies the exact published archive and supersedes its earlier noncommercial restrictions for the licensor's rights. No separate commercial permission is required. The immutable crates.io archive and historical registry metadata remain unchanged.
 >
-> **Patent Notice**: This crate implements inventions covered by a pending US patent application for Fail-Closed Semantic Enforcement methods.
+> **Patent scope:** Apache-2.0 section 3 applies to covered claims licensable by contributors. See [NOTICE](NOTICE) for original attribution; third-party rights remain applicable.
 
 Copyright © 2026 Michael Kuykendall / DZERO. All rights reserved.
 
@@ -20,7 +20,7 @@ associated with each reached state. It returns a scan summary or a violation.
 The caller must actually invoke the scanner and honor its result before
 emitting or acting on rejected data. This API cannot force a caller to do so.
 
-This release documents the existing scanner and license accurately; it does not
+This source documents the existing scanner and additional permissive grant; it does not
 add an inference engine, a general semantic understanding system, or a new
 security certification. See [CHANGELOG](CHANGELOG.md) and the [workspace roadmap](https://github.com/Michael-A-Kuykendall/airframe/blob/main/ROADMAP.md).
 
