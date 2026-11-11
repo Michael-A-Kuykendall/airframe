@@ -30,10 +30,7 @@ local/global attention groundwork remains isolated and is not an enabled
 executor. Future MoE, MLA, hybrid recurrent/Gated DeltaNet, state-space and
 multimodal execution require independent implementation and certification.
 
-**Boundaries:** GPU evidence comes from NVIDIA through WSL Dozen/Vulkan;
-numerical agreement does not certify driver stability. **NOT_RUN:** Metal/M4,
-native Windows/macOS/Linux GPU correctness, extended-context Llama, larger
-unlisted Qwen fixtures, distinct alternate prefill chunks, INT4 KV and
+**Published 0.4.5 boundaries:** GPU numerical evidence came from NVIDIA through WSL Dozen/Vulkan; numerical agreement does not certify driver stability. Subsequent **unreleased** exact-source Apple M1 (Virtual) / Metal work passed 198/198 full-vector comparisons with state/HTTP regressions, but is not included in 0.4.5. The candidate fixes Metal model-upload ordering and caps macOS prefill chunks at 64 tokens; original 8K intermittent stall cause remains unknown. **NOT_RUN:** physical M4, other unexecuted native GPU correctness, extended-context Llama, larger unlisted Qwen fixtures, distinct alternate prefill chunks, INT4 KV and
 experimental kernels. INT4/TurboShimmy and experimental configurations are
 excluded from the validated release path. Parsing metadata, quantization or
 tokenizers is not proof that a complete model executes correctly. Performance
