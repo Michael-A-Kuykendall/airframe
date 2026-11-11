@@ -45,10 +45,9 @@ Executed GPU evidence used NVIDIA through **WSL Dozen/Vulkan**. The
 device-destruction and active-generation device-loss investigations remain open;
 numerical parity is not WSL stability certification.
 
-**NOT_RUN:** Metal/M4, native Windows/macOS/Linux GPU correctness, extended-context
-Llama, larger unlisted Qwen fixtures, distinct alternate prefill chunks, INT4 KV
-and experimental kernels. Do not infer those results from CI, parsing or
-successful compilation.
+**Published 0.4.5:** Metal numerical correctness was NOT_RUN for the shipped version. An **unreleased**, exact-source Apple M1 (Virtual) / Apple Paravirtual Metal / macOS 15.8.2 candidate has since passed 198/198 full-logit comparisons plus integrated HTTP/state acceptance, preserving 0.1 max absolute / 0.03 RMS thresholds and matching every checked greedy token. The candidate corrects Metal model/output-head upload ordering and bounds macOS outer prefill chunks to 64 tokens. These changes are **not in the published 0.4.5 crate**. See [candidate release provenance](https://github.com/Michael-A-Kuykendall/shimmy/blob/feature/release-reconcile-docs-20261111/docs/releases/apple-metal-m1-2026-11.md).
+
+**NOT_RUN:** physical M4, untested native GPU and model combinations, extended-context Llama, larger unlisted Qwen fixtures, distinct alternate prefill chunks, INT4 KV and experimental kernels. The earlier intermittent 8K Metal stall has no established root cause; watchdog cleanup remains open separately. Do not infer unsupported results from CI, parsing or successful compilation.
 
 ## Library use
 
