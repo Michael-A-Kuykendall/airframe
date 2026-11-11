@@ -1,4 +1,4 @@
-**Languages / 语言 / 語言:** English · [简体中文](crates/libfse/docs/zh-CN/README.md) · [繁體中文](crates/libfse/docs/zh-TW/README.md)
+**Languages / 语言 / 語言:** English · [简体中文](docs/zh-CN/README.md) · [繁體中文](docs/zh-TW/README.md)
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/airframe/main/assets/libfse-logo.png" alt="libfse" width="480" height="auto" />
