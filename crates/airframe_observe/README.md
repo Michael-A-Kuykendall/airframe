@@ -1,5 +1,7 @@
 # airframe-observe 0.1.4
 
+**Languages / 语言 / 語言:** English · [简体中文](docs/zh-CN/README.md) · [繁體中文](docs/zh-TW/README.md)
+
 Inference facts, observers and host-side coordination for Airframe.
 
 ## Release responsibilities
@@ -31,4 +33,4 @@ Contact: michaelallenkuykendall@gmail.com
 
 ## License
 
-[MIT](LICENSE). See [stack licensing](../../LICENSING.md) for the distinct component licenses, third-party obligations and immutable archive/additional-grant boundary.
+[MIT](LICENSE). See [stack licensing](https://github.com/Michael-A-Kuykendall/airframe/blob/366c8aa429116cf305e04c9dde182a842040b4b1/LICENSING.md) for the distinct component licenses, third-party obligations and immutable archive/additional-grant boundary.

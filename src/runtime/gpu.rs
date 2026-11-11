@@ -87,6 +87,16 @@ pub struct GpuRuntime {
     im_end_token: Option<u32>,
 }
 
+// macOS Metal can time out a large dense prefill command before completion.
+// Bound the outer batch only; preserve QKV microbatching and every operator.
+fn prefill_chunk_for_platform(requested: u32, macos: bool) -> u32 {
+    if macos {
+        requested.min(64)
+    } else {
+        requested
+    }
+}
+
 impl GpuRuntime {
     /// Construct a runtime from pre-loaded parts.
     ///
@@ -429,6 +439,24 @@ impl GpuRuntime {
         device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let gpu_model = BindlessModel::try_load_prepared(&device, prepared)?;
+        // Metal mapped initializers enqueue transfers until submission. Complete the
+        // model phase before allocating the independently initialized output head:
+        // Apple Paravirtual Metal returned zero storage when both large uploads
+        // shared one pending batch. This is an ordering workaround, not a kernel fix.
+        if adapter.get_info().backend == wgpu::Backend::Metal {
+            let submission = queue.submit([]);
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(submission),
+                    timeout: Some(std::time::Duration::from_secs(120)),
+                })
+                .map_err(
+                    |error| crate::execution::admission::ModelAdmissionError::Device {
+                        code: "gpu_model_upload_failed",
+                        detail: format!("Metal model initialization did not complete: {error}"),
+                    },
+                )?;
+        }
         let pipeline = BindlessPipeline::new(&device);
         let shift_pipeline = RopeShiftPipeline::new(&device);
 
@@ -714,6 +742,7 @@ impl GpuRuntime {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(512);
+        let prefill_chunk = prefill_chunk_for_platform(prefill_chunk, cfg!(target_os = "macos"));
         if let Some(profile) = &profile_handle { profile.set_prefill_chunk(prefill_chunk); }
         let temp = params.temperature;
         let top_p_val = params.top_p;
@@ -1378,6 +1407,33 @@ fn sample_token(
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
+    #[test]
+    fn metal_prefill_bounds_the_observed_oversized_workload() {
+        assert_eq!(super::prefill_chunk_for_platform(308, true), 64);
+        assert_eq!(super::prefill_chunk_for_platform(512, true), 64);
+        assert_eq!(super::prefill_chunk_for_platform(u32::MAX, true), 64);
+    }
+
+    #[test]
+    fn metal_prefill_preserves_smaller_chunks_and_invalid_zero() {
+        for requested in [0, 1, 16, 32, 64] {
+            assert_eq!(
+                super::prefill_chunk_for_platform(requested, true),
+                requested
+            );
+        }
+    }
+
+    #[test]
+    fn other_platform_prefill_configuration_is_unchanged() {
+        for requested in [0, 1, 32, 64, 128, 308, 512, u32::MAX] {
+            assert_eq!(
+                super::prefill_chunk_for_platform(requested, false),
+                requested
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

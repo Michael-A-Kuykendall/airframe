@@ -5,7 +5,7 @@ members = ["crates/libfse", "crates/airframe_observe"]
 
 [package]
 name = "airframe"
-version = "0.4.5"
+version = "0.4.6"
 edition = "2021"
 description = "Rust/WGSL GGUF inference with validated dense model admission via wgpu; model and platform certification is fixture-specific."
 license = "MIT"

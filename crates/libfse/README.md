@@ -6,6 +6,8 @@
   [![Crates.io](https://img.shields.io/crates/v/libfse.svg)](https://crates.io/crates/libfse)
 </div>
 
+**Languages / 语言 / 語言:** English · [简体中文](docs/zh-CN/README.md) · [繁體中文](docs/zh-TW/README.md)
+
 > **License:** [Apache-2.0](LICENSE), including commercial use, modification, redistribution and embedding. The [additional license grant for libfse 0.1.4](LICENSE-GRANT-0.1.4.md) identifies the exact published archive and supersedes its earlier noncommercial restrictions for the licensor's rights. No separate commercial permission is required. The immutable crates.io archive and historical registry metadata remain unchanged.
 >
 > **Patent scope:** Apache-2.0 section 3 applies to covered claims licensable by contributors. See [NOTICE](NOTICE) for original attribution; third-party rights remain applicable.
