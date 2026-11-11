@@ -8,7 +8,7 @@ Airframe **0.4.5** 是 Shimmy 的纯 Rust GPU 推理引擎，通过 wgpu/WGSL �
 
 已发布的 0.4.5 包含 GGUF/张量边界检查、模型能力准入、Llama RoPE 因子、请求隔离状态及 Q/K 和 scratch 修正。已发布的数值比较主要来自 NVIDIA/WSL Vulkan；不同平台和模型不能据此自动获得认证。
 
-**尚未发布**的 Apple Metal 候选源码 [`68091da`](https://github.com/Michael-A-Kuykendall/airframe-private/commit/68091da8c55a2f96bc4309b46ece92630c996f71) 在 Apple M1（Virtual）/ Apple Paravirtual Metal / macOS 15.8.2 上完成 198/198 次完整 logits 比较，最大绝对误差 0.002768、RMS 0.000688，均在原有 0.1 / 0.03 阈值内，贪心 token 一致。这**不代表 0.4.5 的已发布包包含该更改**。实体 M4：NOT_RUN；间歇性 8K 停顿根因与 watchdog 清理缺陷未解决。
+**尚未发布**的 Apple Metal 候选源码 内部认证候选源码 在 Apple M1（Virtual）/ Apple Paravirtual Metal / macOS 15.8.2 上完成 198/198 次完整 logits 比较，最大绝对误差 0.002768、RMS 0.000688，均在原有 0.1 / 0.03 阈值内，贪心 token 一致。这**不代表 0.4.5 的已发布包包含该更改**。实体 M4：NOT_RUN；间歇性 8K 停顿根因与 watchdog 清理缺陷未解决。
 
 候选修复包括 Metal 大模型上传与输出头初始化之间的提交/等待边界，以及 macOS 外层 prefill 不超过 64 tokens；不修改神经网络数学或数值阈值。明确的覆盖细节见 [Shimmy 认证文档](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/CERTIFICATION.md)。
 
