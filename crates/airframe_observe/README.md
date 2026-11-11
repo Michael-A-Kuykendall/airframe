@@ -1,4 +1,4 @@
-**Languages / 语言 / 語言:** English · [简体中文](crates/airframe_observe/docs/zh-CN/README.md) · [繁體中文](crates/airframe_observe/docs/zh-TW/README.md)
+**Languages / 语言 / 語言:** English · [简体中文](docs/zh-CN/README.md) · [繁體中文](docs/zh-TW/README.md)
 
 # airframe-observe 0.1.4
 
