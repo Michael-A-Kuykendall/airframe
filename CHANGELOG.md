@@ -1,14 +1,14 @@
 # Changelog
 
-## [0.4.6] — Unreleased release candidate
+## [0.4.6] — 2026-11-12 — Apple M1 Metal correctness
 
 ### Apple M1 Metal correctness (2026-11-11)
 
 - Complete pending Metal model uploads before independently initializing the output head; correct all-zero Qwen3-1.7B embedding rows. This is an upload-ordering workaround, not a rewritten kernel.
 - Cap macOS dense outer prefill batches at 64 tokens following an observed native Metal Llama timeout; preserve QKV microbatching and numerical operators. All 12 Llama full-logit comparisons pass.
-- Verify the exact candidate in a normal production-path Apple M1 (Virtual) / Apple Paravirtual Metal run: 198/198 full-logit comparisons PASS across seven shards, unchanged FP32 0.1/0.03 thresholds, all observed greedy decisions match. HTTP and state gates pass in the integrated candidate.
+- Verified the published source in a normal production-path Apple M1 (Virtual) / Apple Paravirtual Metal run: 198/198 full-logit comparisons PASS across seven shards, unchanged FP32 0.1/0.03 thresholds, all observed greedy decisions match. HTTP and state gates pass in the integrated candidate.
 - Do not mistake later 8K completion for diagnosis of the historical intermittent stall. Watchdog cleanup remains independently open; physical M4 and untested combinations remain NOT_RUN.
-- Published Airframe 0.4.5 and its crate archive do not contain these corrections. Source equivalence and exact package verification are required before publication.
+- Earlier Airframe 0.4.5 and its historical crate archive do not contain these corrections. Airframe 0.4.6 was published with source/package equivalence and exact archive hash validation. Shimmy 2.6.7 consumes this release.
 
 ## Postpublication licensing correction — 2026-11-07
 
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
-Historical entries below preserve earlier release claims and commands; they do not define the 0.4.5 support contract. Use the current [README fixture matrix](README.md#release-contract).
+Historical entries below preserve earlier release claims and commands; they do not define the current 0.4.6 support contract. Use the current [README fixture matrix](README.md#release-contract).
 
 ## [0.4.4] — 2026-10-18
 
