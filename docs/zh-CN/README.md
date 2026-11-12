@@ -1,18 +1,18 @@
 # Airframe — Rust/WGSL GGUF 推理引擎
 
-候选版本 **0.4.6 尚未发布**，当前 crates.io 版本为 **0.4.5**。下方依赖示例用于 0.4.6 发布后；审核候选版本时请构建所提供的源码。
+**Airframe 0.4.6 已于 2026-11-12 正式发布**（[crates.io](https://crates.io/crates/airframe/0.4.6) · [GitHub](https://github.com/Michael-A-Kuykendall/airframe/releases/tag/v0.4.6)）。下方依赖示例可直接安装已发布版本。
 
 **语言：** [English](../../README.md) · **简体中文** · [繁體中文](../zh-TW/README.md)
 
-Airframe **0.4.5** 是 Shimmy 的纯 Rust GPU 推理引擎，通过 wgpu/WGSL 在可用 GPU 后端执行限定范围的稠密模型。它不是 OpenAI HTTP 服务器；服务器接口由 [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy) 提供。
+Airframe **0.4.6** 是 Shimmy 的纯 Rust GPU 推理引擎，通过 wgpu/WGSL 在可用 GPU 后端执行限定范围的稠密模型。它不是 OpenAI HTTP 服务器；服务器接口由 [Shimmy](https://github.com/Michael-A-Kuykendall/shimmy) 提供。
 
-## 已发布范围与后续候选
+## 已发布范围与历史版本
 
-已发布的 0.4.5 包含 GGUF/张量边界检查、模型能力准入、Llama RoPE 因子、请求隔离状态及 Q/K 和 scratch 修正。已发布的数值比较主要来自 NVIDIA/WSL Vulkan；不同平台和模型不能据此自动获得认证。
+0.4.6 延续了 0.4.5 已发布版本中的 GGUF/张量边界检查、模型能力准入、Llama RoPE 因子、请求隔离状态及 Q/K 和 scratch 修正。已发布的数值比较主要来自 NVIDIA/WSL Vulkan；不同平台和模型不能据此自动获得认证。
 
-**尚未发布**的 Apple Metal 0.4.6 候选源码 在 Apple M1（Virtual）/ Apple Paravirtual Metal / macOS 15.8.2 上完成 198/198 次完整 logits 比较，最大绝对误差 0.002768、RMS 0.000688，均在原有 0.1 / 0.03 阈值内，贪心 token 一致。这**不代表 0.4.5 的已发布包包含该更改**。实体 M4：NOT_RUN；间歇性 8K 停顿根因与 watchdog 清理缺陷未解决。
+**已发布的 Airframe 0.4.6** 在 Apple M1（Virtual）/ Apple Paravirtual Metal / macOS 15.8.2 上完成 198/198 次完整 logits 比较，最大绝对误差 0.002768、RMS 0.000688，均在原有 0.1 / 0.03 阈值内，贪心 token 一致。历史 **0.4.5 不包含这项 Metal 修复**；0.4.6 已包含。实体 M4：NOT_RUN；间歇性 8K 停顿根因与 watchdog 清理缺陷未解决。
 
-候选修复包括 Metal 大模型上传与输出头初始化之间的提交/等待边界，以及 macOS 外层 prefill 不超过 64 tokens；不修改神经网络数学或数值阈值。明确的覆盖细节见 [Shimmy 认证文档](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/CERTIFICATION.md)。
+0.4.6 已发布的修复包括 Metal 大模型上传与输出头初始化之间的提交/等待边界，以及 macOS 外层 prefill 不超过 64 tokens；不修改神经网络数学或数值阈值。明确的覆盖细节见 [Shimmy 认证文档](https://github.com/Michael-A-Kuykendall/shimmy/blob/main/docs/CERTIFICATION.md)。
 
 ## 依赖与许可
 
@@ -23,7 +23,7 @@ Airframe 使用 MIT。直接依赖 [ShimmyTok 0.8.5](https://github.com/Michael-
 airframe = "0.4.6"
 ```
 
-0.4.5 的已发布存档不包含这些 Metal 修复。
+**Airframe 0.4.6 已包含这些修复**；历史 0.4.5 存档不包含。
 
 ## 执行范围与限制
 
