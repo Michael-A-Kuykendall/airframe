@@ -1,7 +1,7 @@
-# Inference profiling — Airframe 0.4.5
+# Inference profiling — Airframe 0.4.6
 
 The default `isf` feature includes opt-in scalar timing. With an installed
-Shimmy 2.6.6 and an admitted model:
+Shimmy 2.6.7 and an admitted model:
 
 ```sh
 AIRFRAME_TRACE_TIMING=1 \
@@ -46,7 +46,7 @@ Reference kernels and F32 KV define the validated path. Cooperative QKV,
 attention projection, staged/vectorized FFN and cooperative FFN-down flags remain
 experimental. Validated admission rejects them; this guide does not instruct
 users to enable them or claim a performance fallback is certified.
-INT4 and Metal/M4 performance/correctness are **NOT_RUN** for this release.
+INT4 and physical M4 performance/correctness remain **NOT_RUN**. Apple M1 (Virtual) / Paravirtual Metal 198/198 numerical correctness was separately certified for Airframe 0.4.6, but this does not certify platform-wide profiling costs or physical M4.
 NVIDIA WSL measurements cannot certify another platform or resolve WSL driver
 stability. No kernel, scheduling, prefix-reuse or throughput improvement follows
 merely from enabling telemetry.
