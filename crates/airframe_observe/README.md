@@ -8,7 +8,7 @@ Inference facts, observers and host-side coordination for Airframe.
 
 ObservationSession registers observers, accepts layer/logit/text and dispatch-timing facts, and runs saturation. ISF uses Dzero FactStore, ClosureProgram, RunBudget and SaturationFabric with caller-provided embedding, prefill, decode and control callbacks. This includes coordination, not merely passive logging. Observers consume facts that the engine actually emits; enabling observation does not independently validate the producer.
 
-The Cargo requirement is dzero = "0.1"; this coordinated candidate resolves **Dzero 0.1.0**. airframe-observe does not depend on Airframe: the engine consumes these contracts. See [CHANGELOG](CHANGELOG.md) and the [workspace roadmap](https://github.com/Michael-A-Kuykendall/airframe/blob/main/ROADMAP.md).
+The Cargo requirement is `dzero = "0.1"`; the published airframe-observe 0.1.4 dependency resolution used **Dzero 0.1.0**. airframe-observe does not depend on Airframe: the engine consumes these contracts. See [CHANGELOG](CHANGELOG.md) and the [workspace roadmap](https://github.com/Michael-A-Kuykendall/airframe/blob/main/ROADMAP.md).
 
 ## Correctness and performance boundary
 
