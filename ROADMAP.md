@@ -1,11 +1,10 @@
 # Airframe workspace roadmap
 
-Current release scope: **Airframe 0.4.5**, **libfse 0.1.4** and
-**airframe-observe 0.1.4**. Updated 2026-11-11. Airframe 0.4.6 is an unpublished candidate carrying the certified Metal implementation. This roadmap describes delivered
+Current release scope: **Airframe 0.4.6**, **libfse 0.1.4** and **airframe-observe 0.1.4**. Updated 2026-11-12. Airframe 0.4.6 is published and includes the exact qualified Apple M1 Metal correction. This roadmap describes delivered
 contracts and outstanding work; it is not a promise that a backend or model
 family has passed certification.
 
-## airframe 0.4.5
+## airframe 0.4.6 (0.4.5 foundation plus Metal correction)
 
 **Delivered:** checked shared GGUF metadata and tensor validation, validated
 dense descriptors and layer execution plans, explicit capability admission,
@@ -30,7 +29,7 @@ local/global attention groundwork remains isolated and is not an enabled
 executor. Future MoE, MLA, hybrid recurrent/Gated DeltaNet, state-space and
 multimodal execution require independent implementation and certification.
 
-**Published 0.4.5 boundaries:** GPU numerical evidence came from NVIDIA through WSL Dozen/Vulkan; numerical agreement does not certify driver stability. Subsequent **unreleased** exact-source Apple M1 (Virtual) / Metal work passed 198/198 full-vector comparisons with state/HTTP regressions, but is not included in 0.4.5. The candidate fixes Metal model-upload ordering and caps macOS prefill chunks at 64 tokens; original 8K intermittent stall cause remains unknown. **NOT_RUN:** physical M4, other unexecuted native GPU correctness, extended-context Llama, larger unlisted Qwen fixtures, distinct alternate prefill chunks, INT4 KV and
+**Released 0.4.6 boundaries:** earlier NVIDIA/WSL Dozen/Vulkan GPU numerical evidence remains platform-specific and does not establish driver stability. The **published Airframe 0.4.6** includes the exact-source Apple M1 (Virtual) / Paravirtual Metal correction, validated by **198/198** full-vector comparisons plus state/HTTP regressions. It fixes Metal model-upload ordering and caps macOS outer prefill chunks at 64 tokens; original 8K intermittent stall cause remains unknown. **NOT_RUN:** physical M4, other unexecuted native GPU correctness, extended-context Llama, larger unlisted Qwen fixtures, distinct alternate prefill chunks, INT4 KV and
 experimental kernels. INT4/TurboShimmy and experimental configurations are
 excluded from the validated release path. Parsing metadata, quantization or
 tokenizers is not proof that a complete model executes correctly. Performance
